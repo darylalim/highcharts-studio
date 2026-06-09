@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the workflow only needs to read the repo.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+
+      # No setup-python step: `uv sync` reads .python-version (3.12) and
+      # fetches a matching managed interpreter automatically if one isn't present.
+      - name: Install dependencies (locked)
+        run: uv sync --locked
+
+      - name: Run tests
+        run: uv run pytest
+
+  lint:
+    name: Lint & format (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+
+      # Ruff is a standalone binary — no project sync needed. The pin matches
+      # the ruff in pyproject.toml's dev group and the pre-commit rev. Both
+      # gates are non-mutating; --output-format=github annotates PRs inline.
+      - name: Ruff lint
+        run: uvx ruff@0.15.16 check --output-format=github .
+
+      - name: Ruff format check
+        run: uvx ruff@0.15.16 format --check .

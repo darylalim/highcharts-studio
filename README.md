@@ -52,6 +52,34 @@ and a static PNG render.
 uv run pytest
 ```
 
+## Lint & format
+
+This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and
+formatting (config in `pyproject.toml`).
+
+```bash
+# Auto-fix lint issues and format (run before committing):
+uv run ruff check --fix . && uv run ruff format .
+
+# Verify only, exactly as CI does (non-mutating):
+uv run ruff check . && uv run ruff format --check .
+```
+
+Optional: install the [pre-commit](https://pre-commit.com/) hooks so this runs
+automatically on every commit:
+
+```bash
+uv tool install pre-commit && pre-commit install
+```
+
+VS Code users get format-on-save and fix-on-save via the committed
+`.vscode/settings.json` (install the recommended Ruff extension).
+
+## CI
+
+GitHub Actions runs the tests and the Ruff lint/format checks on every push to
+`main` and every pull request (`.github/workflows/ci.yml`).
+
 ## Notes
 
 - There is **no official `streamlit-highcharts` integration** for the
@@ -76,11 +104,14 @@ Runtime:
 Dev (in the `dev` dependency group, installed by `uv sync`):
 
 - `pytest` — tests
+- `ruff` — linter and formatter
 - `watchdog` — faster, more reliable Streamlit hot-reload
 
 ## License
 
-The code in this repo is MIT-licensed (see [`LICENSE`](LICENSE)). Rendering
-relies on Highcharts JS (loaded from the CDN) and the Highcharts export server,
-which are subject to Highcharts' own licensing — free for non-commercial use;
-commercial use requires a Highcharts license.
+No license is granted for this project — all rights reserved. With no license,
+the default of copyright law applies: you may view the code here, but you may
+not use, copy, modify, or distribute it without the author's permission.
+Rendering relies on Highcharts JS (loaded from the CDN) and the Highcharts
+export server, which are subject to Highcharts' own licensing — free for
+non-commercial use; commercial use requires a Highcharts license.

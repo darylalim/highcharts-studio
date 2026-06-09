@@ -70,7 +70,7 @@ def build_options(
         value_col = y_cols[0]
         data = [
             {"name": str(name), "y": float(value)}
-            for name, value in zip(df[x_col], df[value_col])
+            for name, value in zip(df[x_col], df[value_col], strict=True)
             if not pd.isna(value)
         ]
         return {
@@ -78,9 +78,14 @@ def build_options(
             "title": {"text": title},
             "tooltip": {"pointFormat": "{series.name}: <b>{point.percentage:.1f}%</b>"},
             "plotOptions": {
-                "pie": {"allowPointSelect": True, "cursor": "pointer",
-                        "dataLabels": {"enabled": True,
-                                       "format": "{point.name}: {point.y}"}}
+                "pie": {
+                    "allowPointSelect": True,
+                    "cursor": "pointer",
+                    "dataLabels": {
+                        "enabled": True,
+                        "format": "{point.name}: {point.y}",
+                    },
+                }
             },
             "series": [{"name": value_col, "data": data}],
         }
@@ -92,14 +97,12 @@ def build_options(
             if numeric_x:
                 points = [
                     [float(x), float(y)]
-                    for x, y in zip(df[x_col], df[col])
+                    for x, y in zip(df[x_col], df[col], strict=True)
                     if not pd.isna(x) and not pd.isna(y)
                 ]
             else:
                 points = [
-                    [i, float(y)]
-                    for i, y in enumerate(df[col])
-                    if not pd.isna(y)
+                    [i, float(y)] for i, y in enumerate(df[col]) if not pd.isna(y)
                 ]
             series.append({"name": col, "data": points})
         # With a non-numeric x_col the points use the row position as x, so
@@ -118,7 +121,9 @@ def build_options(
 
     # cartesian: line / spline / area / column / bar
     categories = [str(v) for v in df[x_col].tolist()]
-    series = [{"name": col, "data": [_num(v) for v in df[col].tolist()]} for col in y_cols]
+    series = [
+        {"name": col, "data": [_num(v) for v in df[col].tolist()]} for col in y_cols
+    ]
     return {
         "chart": {"type": chart_type},
         "title": {"text": title},
@@ -162,8 +167,9 @@ def build_chart_html(
     emitted by ``to_js_literal``. Pass the result to ``st.iframe(html,
     height=...)`` (or ``components.v1.html``).
     """
-    chart = make_chart(df, chart_type, x_col, y_cols,
-                       container_id=container_id, title=title)
+    chart = make_chart(
+        df, chart_type, x_col, y_cols, container_id=container_id, title=title
+    )
 
     script_tags = chart.get_script_tags(as_str=True)
     chart_js = chart.to_js_literal()
@@ -207,5 +213,8 @@ def build_chart_png(
     if height is not None:
         chart.options.chart.height = height
     return chart.download_chart(
-        format="png", scale=scale, width=width, timeout=timeout,
+        format="png",
+        scale=scale,
+        width=width,
+        timeout=timeout,
     )

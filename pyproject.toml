@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "highcharts-python-pipeline"
 version = "0.1.0"
 description = "Generate data visualizations with the Highcharts for Python Toolkit."
-license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "highcharts-core>=1.10.3",
@@ -17,6 +16,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff==0.15.16",
     "watchdog>=6.0.0",
 ]
 
@@ -25,3 +25,14 @@ dev = [
 # trying to determine which files to ship).
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
+
+[tool.ruff.lint]
+# Balanced set, not "ALL" (which fights this app's deliberate design).
+# E501 is ignored: the formatter owns line length. target-version auto-infers
+# py312 from requires-python.
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+# Defaults are correct (line length 88, double quotes). Table kept as an
+# explicit anchor for any future formatter settings.

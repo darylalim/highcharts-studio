@@ -36,6 +36,7 @@ def embed_html(html: str, height: int) -> None:
         st.iframe(html, height=height)
     else:  # Streamlit < 1.56
         import streamlit.components.v1 as components
+
         components.html(html, height=height, scrolling=False)
 
 
@@ -43,25 +44,31 @@ def embed_html(html: str, height: int) -> None:
 # Sample data (so the app works with no upload). Each returns a fresh DataFrame.
 # --------------------------------------------------------------------------- #
 def _revenue_vs_cost() -> pd.DataFrame:
-    return pd.DataFrame({
-        "month": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-        "revenue": [120, 135, 128, 150, 162, 171],
-        "cost": [80, 88, 90, 95, 101, 108],
-    })
+    return pd.DataFrame(
+        {
+            "month": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+            "revenue": [120, 135, 128, 150, 162, 171],
+            "cost": [80, 88, 90, 95, 101, 108],
+        }
+    )
 
 
 def _fruit_sales() -> pd.DataFrame:
-    return pd.DataFrame({
-        "fruit": ["Apples", "Bananas", "Cherries", "Grapes", "Oranges"],
-        "units_sold": [620, 540, 210, 380, 470],
-    })
+    return pd.DataFrame(
+        {
+            "fruit": ["Apples", "Bananas", "Cherries", "Grapes", "Oranges"],
+            "units_sold": [620, 540, 210, 380, 470],
+        }
+    )
 
 
 def _height_vs_weight() -> pd.DataFrame:
-    return pd.DataFrame({
-        "height_cm": [152, 158, 161, 165, 168, 172, 175, 180, 185, 190],
-        "weight_kg": [50, 55, 58, 61, 65, 70, 74, 80, 86, 94],
-    })
+    return pd.DataFrame(
+        {
+            "height_cm": [152, 158, 161, 165, 168, 172, 175, 180, 185, 190],
+            "weight_kg": [50, 55, 58, 61, 65, 70, 74, 80, 86, 94],
+        }
+    )
 
 
 SAMPLES = {
@@ -79,14 +86,24 @@ def load_csv(file) -> pd.DataFrame:
 @st.cache_data(show_spinner="Rendering Highcharts…")
 def cached_chart_html(df, chart_type, x_col, y_cols, height, title) -> str:
     return build_chart_html(
-        df, chart_type, x_col, list(y_cols), height=height, title=title,
+        df,
+        chart_type,
+        x_col,
+        list(y_cols),
+        height=height,
+        title=title,
     )
 
 
 @st.cache_data(show_spinner="Rendering PNG via the Highcharts export server…")
 def cached_chart_png(df, chart_type, x_col, y_cols, height, title) -> bytes:
     return build_chart_png(
-        df, chart_type, x_col, list(y_cols), height=height, title=title,
+        df,
+        chart_type,
+        x_col,
+        list(y_cols),
+        height=height,
+        title=title,
     )
 
 
@@ -149,7 +166,8 @@ with st.sidebar:
     # to a per-chart-type default (shown as the placeholder, applied in
     # build_options) instead of silently resetting when the chart type changes.
     title = st.text_input(
-        "Chart title", key="chart_title",
+        "Chart title",
+        key="chart_title",
         placeholder=f"{chart_type.title()} chart",
     )
     height = st.slider("Height (px)", min_value=300, max_value=800, value=480, step=20)
@@ -159,8 +177,8 @@ with st.sidebar:
         "Static image (PNG)",
         value=False,
         help="Render the chart server-side via the Highcharts export server and "
-             "show it as a PNG — the browser loads no Highcharts JS. Leave it off "
-             "for the interactive (CDN-loaded) chart.",
+        "show it as a PNG — the browser loads no Highcharts JS. Leave it off "
+        "for the interactive (CDN-loaded) chart.",
     )
 
 
@@ -198,8 +216,10 @@ with left:
             st.stop()
         st.image(png, width="stretch")
         st.download_button(
-            "⬇ Download PNG", png,
-            file_name=f"{chart_type}-chart.png", mime="image/png",
+            "⬇ Download PNG",
+            png,
+            file_name=f"{chart_type}-chart.png",
+            mime="image/png",
         )
         st.caption(
             "Static PNG rendered server-side via the Highcharts export server — "

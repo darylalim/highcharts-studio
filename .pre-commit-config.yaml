@@ -1,0 +1,15 @@
+# Ruff pre-commit hooks. Linter runs first (may rewrite imports/code via the I
+# rule and other autofixes), then the formatter normalizes the result.
+# Keep `rev` in lockstep with the pinned ruff in pyproject.toml's dev group.
+#
+# Setup:
+#   uv tool install pre-commit   # or: pipx install pre-commit
+#   pre-commit install           # register the git hook
+#   pre-commit run --all-files   # one-time sweep
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.16
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format

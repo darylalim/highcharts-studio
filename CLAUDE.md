@@ -50,6 +50,16 @@ uv run pytest
 `tests/test_smoke.py` exercises the pure builder (`build_options`) and runs the
 full app headless via Streamlit's `AppTest`.
 
+## Lint & format
+
+Ruff handles both (config in `pyproject.toml`). CI runs the tests and these
+checks on every push and PR; `pre-commit` runs them on commit when installed.
+
+```bash
+uv run ruff check --fix . && uv run ruff format .   # fix + format
+uv run ruff check . && uv run ruff format --check .  # verify (as CI does)
+```
+
 ## Conventions
 
 - Keep chart-building logic (DataFrame → Highcharts) in `highcharts_builder.py`,
