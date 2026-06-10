@@ -107,7 +107,7 @@ def build_options(
             series.append({"name": col, "data": points})
         # With a non-numeric x_col the points use the row position as x, so
         # label those positions with the actual values instead of a bare 0..N.
-        x_axis = {"title": {"text": x_col}}
+        x_axis: dict[str, object] = {"title": {"text": x_col}}
         if not numeric_x:
             x_axis["categories"] = [str(v) for v in df[x_col].tolist()]
         return {
@@ -211,7 +211,9 @@ def build_chart_png(
     """
     chart = make_chart(df, chart_type, x_col, y_cols, title=title)
     if height is not None:
-        chart.options.chart.height = height
+        # highcharts-core types `options` and `options.chart` as Optional, but
+        # `Chart.from_options` always populates both, so setting height is safe.
+        chart.options.chart.height = height  # ty: ignore[unresolved-attribute, invalid-assignment]
     return chart.download_chart(
         format="png",
         scale=scale,

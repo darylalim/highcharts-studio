@@ -17,6 +17,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "ruff==0.15.16",
+    "ty==0.0.46",
     "watchdog>=6.0.0",
 ]
 
@@ -36,3 +37,8 @@ ignore = ["E501"]
 [tool.ruff.format]
 # Defaults are correct (line length 88, double quotes). Table kept as an
 # explicit anchor for any future formatter settings.
+
+[tool.ty]
+# Defaults are a good baseline: ty infers the py312 target from requires-python
+# (like Ruff), and stray highcharts-core stub mismatches are suppressed inline
+# (`# ty: ignore[rule]`), not downgraded here. Anchor for future ty settings.

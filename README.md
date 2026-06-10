@@ -45,12 +45,18 @@ and a static PNG render.
 | --- | --- |
 | `streamlit_app.py` | The Streamlit UI: data source, chart controls, caching, render-mode toggle, and the chart embed. |
 | `highcharts_builder.py` | Pure (Streamlit-free) functions that turn a DataFrame into a Highcharts options dict, a `Chart`, and embeddable HTML / PNG bytes. Independently importable and unit-testable. |
+| `tests/test_smoke.py` | Builder unit tests (parametrized over chart types, with the missing-data and scatter edge cases and the validation guards) plus headless `AppTest` interaction tests. |
 
 ## Test
 
 ```bash
 uv run pytest
 ```
+
+`tests/test_smoke.py` covers the builder across every chart type (parametrized),
+the missing-data and scatter edge cases, and the validation guards, then drives
+the full app headless with Streamlit's `AppTest` — switching controls and
+asserting on the generated config and the guard warnings.
 
 ## Lint & format
 
@@ -75,10 +81,25 @@ uv tool install pre-commit && pre-commit install
 VS Code users get format-on-save and fix-on-save via the committed
 `.vscode/settings.json` (install the recommended Ruff extension).
 
+## Type check
+
+This project uses [ty](https://docs.astral.sh/ty/), Astral's fast Python type
+checker. Because ty resolves third-party imports from the project venv, run it
+through `uv run`:
+
+```bash
+uv run ty check
+```
+
+It runs in CI and on every commit via pre-commit. A few `highcharts-core` stub
+mismatches are suppressed inline with `# ty: ignore[rule]` (so the rules still
+apply everywhere else); see `CLAUDE.md` for details.
+
 ## CI
 
-GitHub Actions runs the tests and the Ruff lint/format checks on every push to
-`main` and every pull request (`.github/workflows/ci.yml`).
+GitHub Actions runs the tests, the Ruff lint/format checks, and the ty type
+check on every push to `main` and every pull request
+(`.github/workflows/ci.yml`).
 
 ## Notes
 
@@ -105,6 +126,7 @@ Dev (in the `dev` dependency group, installed by `uv sync`):
 
 - `pytest` — tests
 - `ruff` — linter and formatter
+- `ty` — type checker
 - `watchdog` — faster, more reliable Streamlit hot-reload
 
 ## License

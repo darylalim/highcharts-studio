@@ -13,3 +13,18 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
+
+  # ty resolves third-party imports from the project venv, so run it through
+  # `uv run` (a local hook) rather than the isolated ty-pre-commit mirror, which
+  # wouldn't see pandas/streamlit/highcharts-core (and would flag our
+  # `# ty: ignore[...]` comments as unused). Checks the whole project, not just
+  # staged files, so cross-module types resolve; the ty pinned in pyproject's
+  # dev group is the one that runs. Keep that pin and the CI job in lockstep.
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty check
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false

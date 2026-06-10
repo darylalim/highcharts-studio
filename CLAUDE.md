@@ -15,7 +15,9 @@ the app uses no native Streamlit charts.
 - `highcharts_builder.py` — pure, Streamlit-free helpers that turn a DataFrame
   into a Highcharts options `dict`, a `Chart`, and embeddable HTML or PNG bytes.
   Independently importable and unit-testable.
-- `tests/test_smoke.py` — builder unit tests plus a headless `AppTest` run.
+- `tests/test_smoke.py` — builder unit tests (parametrized over every chart
+  type, with the missing-data and scatter edge cases and the validation guards)
+  plus headless `AppTest` interaction tests for the app.
 
 ## How a chart is built
 
@@ -47,8 +49,12 @@ uv run streamlit run streamlit_app.py
 uv run pytest
 ```
 
-`tests/test_smoke.py` exercises the pure builder (`build_options`) and runs the
-full app headless via Streamlit's `AppTest`.
+`tests/test_smoke.py` exercises the pure builder (`build_options`) —
+parametrized across every supported chart type, covering missing data
+(`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
+numeric vs non-numeric scatter paths, and the validation guards — and drives the
+full app headless via Streamlit's `AppTest`, switching controls and asserting on
+the generated Highcharts config and the guard warnings.
 
 ## Lint & format
 
@@ -59,6 +65,21 @@ checks on every push and PR; `pre-commit` runs them on commit when installed.
 uv run ruff check --fix . && uv run ruff format .   # fix + format
 uv run ruff check . && uv run ruff format --check .  # verify (as CI does)
 ```
+
+## Type check
+
+[ty](https://docs.astral.sh/ty/) (Astral's type checker, pinned in
+`pyproject.toml`) runs in CI and on commit via `pre-commit`. It needs the
+project venv to resolve imports, so run it through `uv run`:
+
+```bash
+uv run ty check
+```
+
+A few highcharts-core stub mismatches (Optional `options`/`chart`,
+`to_js_literal` typed `str | None`) are suppressed inline with
+`# ty: ignore[rule]`, not by downgrading rules globally — so the rules still
+catch the same problems in our own code.
 
 ## Conventions
 

@@ -53,3 +53,24 @@ jobs:
 
       - name: Ruff format check
         run: uvx ruff@0.15.16 format --check .
+
+  typecheck:
+    name: Type check (ty)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+
+      # Unlike Ruff, ty resolves third-party imports (pandas, streamlit,
+      # highcharts-core) from the project venv, so sync first. `uv run` then
+      # uses the ty pinned in the dev group (uv.lock) — same version as
+      # pre-commit. --output-format=github annotates PRs inline.
+      - name: Install dependencies (locked)
+        run: uv sync --locked
+
+      - name: ty check
+        run: uv run ty check --output-format=github

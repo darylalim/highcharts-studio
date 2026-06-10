@@ -109,7 +109,9 @@ def cached_chart_png(df, chart_type, x_col, y_cols, height, title) -> bytes:
 
 @st.cache_data(show_spinner=False)
 def cached_chart_js(df, chart_type, x_col, y_cols, title) -> str:
-    return make_chart(df, chart_type, x_col, list(y_cols), title=title).to_js_literal()
+    # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
+    # literal string for a built chart.
+    return make_chart(df, chart_type, x_col, list(y_cols), title=title).to_js_literal()  # ty: ignore[invalid-return-type]
 
 
 # --------------------------------------------------------------------------- #
