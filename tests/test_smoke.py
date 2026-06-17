@@ -2,9 +2,17 @@
 
 Run with: ``uv run pytest``
 
-These cover every supported chart type plus the missing-data and scatter
-edge cases in ``build_options`` (NaN -> ``EnforcedNull`` for cartesian series,
-dropped points/slices elsewhere, and numeric vs non-numeric scatter x).
+Two layers:
+
+- ``build_options`` unit tests covering every supported chart type, the
+  missing-data and scatter edge cases (NaN -> ``EnforcedNull`` for cartesian
+  series, dropped points/slices elsewhere, and numeric vs non-numeric scatter
+  x), and the validation guards (unsupported type, empty ``y_cols``, and the
+  cartesian-only x-in-y rule).
+- Headless ``AppTest`` interaction tests that drive the full Streamlit app's
+  control flow — switching chart type, title, and series, and tripping the
+  x-in-y and no-CSV-uploaded guard warnings — asserting on the generated
+  Highcharts config and the guard messages.
 """
 
 import sys
