@@ -11,7 +11,7 @@ Two layers:
   cartesian-only x-in-y rule).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type, title, and series, and tripping the
-  x-in-y and no-CSV-uploaded guard warnings — asserting on the generated
+  x-in-y warning and the no-CSV-uploaded info guard — asserting on the generated
   Highcharts config and the guard messages.
 """
 
