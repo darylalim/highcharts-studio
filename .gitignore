@@ -2,7 +2,11 @@
 .venv/
 venv/
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
 .ruff_cache/
 .ty_cache/
+build/
+dist/
+*.egg-info/
+.streamlit/secrets.toml

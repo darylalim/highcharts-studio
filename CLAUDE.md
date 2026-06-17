@@ -2,10 +2,9 @@
 
 ## Project Overview
 
-Generate data visualizations with the Highcharts for Python toolkit
-(`highcharts-core`). This repo is an interactive Streamlit app that builds those
-visualizations from pandas DataFrames; every chart is produced by Highcharts —
-the app uses no native Streamlit charts.
+`streamlit-highcharts` is an interactive Streamlit app that builds Highcharts
+visualizations from pandas DataFrames. Every chart is produced by the Highcharts
+for Python toolkit (`highcharts-core`) — the app uses no native Streamlit charts.
 
 ## Structure
 

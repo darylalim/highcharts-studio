@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "streamlit-highcharts"
 version = "0.1.0"
-description = "Generate data visualizations with the Highcharts for Python Toolkit."
+description = "Interactive Streamlit app that builds Highcharts visualizations from pandas DataFrames."
 requires-python = ">=3.12"
 dependencies = [
     "highcharts-core>=1.10.3",
