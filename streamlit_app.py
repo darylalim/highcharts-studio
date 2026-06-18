@@ -2,8 +2,9 @@
 
 Every chart on this page is produced by the Highcharts for Python toolkit
 (``highcharts-core``): a pandas DataFrame is turned into a Highcharts options
-object, serialized to JavaScript, and embedded in the page via ``st.iframe``
-(or rendered server-side to a PNG). No Streamlit-native charts are used.
+object, then shown one of three ways — embedded via ``st.iframe``, mounted as a
+bidirectional Custom Component v2 (click events), or rendered server-side to a
+PNG. No Streamlit-native charts are used.
 
 Run it with:
 
@@ -29,6 +30,7 @@ from highcharts_component import (
     forget_selection_if_config_changed,
     get_selected_point,
     interactive_chart,
+    matching_rows,
     point_label,
 )
 from sample_data import SAMPLES
@@ -102,8 +104,8 @@ def cached_chart_js(df, chart_type, x_col, y_cols, title) -> str:
 st.title(":material/insights: Highcharts visualizations in Streamlit")
 st.caption(
     "Every chart below is rendered by **highcharts-core** (the Highcharts for "
-    "Python toolkit) and embedded via `st.iframe` — no native Streamlit charts "
-    "are used."
+    "Python toolkit) — embedded as an interactive iframe, a Custom Component v2, "
+    "or a static PNG — with no native Streamlit charts."
 )
 
 
@@ -201,11 +203,13 @@ if render_mode == MODE_EVENTS:
 
 with right.container(border=True):
     st.subheader("Source data")
-    # Format numbers, hide the index, and pin the chart's X column so it stays
-    # visible while scrolling wide CSVs.
-    column_config = {col: st.column_config.NumberColumn() for col in numeric_cols}
+    # Localized number formatting, hidden index, and the chart's X column pinned
+    # so it stays visible while scrolling wide CSVs.
+    column_config = {
+        col: st.column_config.NumberColumn(format="localized") for col in numeric_cols
+    }
     column_config[x_col] = (
-        st.column_config.NumberColumn(pinned=True)
+        st.column_config.NumberColumn(format="localized", pinned=True)
         if x_col in numeric_cols
         else st.column_config.Column(pinned=True)
     )
@@ -222,7 +226,7 @@ with right.container(border=True):
         if selected is not None:
             label = point_label(selected)
             st.markdown("**Clicked point → matching row**")
-            match = df[df[x_col].astype(str) == str(label)]
+            match = matching_rows(df, x_col, label)
             if match.empty:
                 st.caption("No row in the current data matches that point.")
             else:

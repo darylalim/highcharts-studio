@@ -21,7 +21,7 @@ for Python toolkit (`highcharts-core`) — the app uses no native Streamlit char
   point clicks back to Python. Powers the "Interactive + click events" mode and
   owns all `hc_*` click-events session state. Public helpers: `interactive_chart`,
   `get_selected_point`, `clear_selected_point`, `forget_selection_if_config_changed`,
-  `point_label`, `json_safe`.
+  `point_label`, `matching_rows`, `json_safe`.
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data

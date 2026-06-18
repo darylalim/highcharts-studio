@@ -18,6 +18,7 @@ CCv2 only: the frontend uses ``export default function(component)`` and the
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 import streamlit.components.v2 as components_v2
 from highcharts_core.constants import EnforcedNull
@@ -46,6 +47,22 @@ def point_label(point: dict):
         if value is not None:
             return value
     return None
+
+
+def matching_rows(df: pd.DataFrame, x_col, label) -> pd.DataFrame:
+    """Rows of ``df`` whose ``x_col`` equals a clicked point's ``label``.
+
+    A numeric x column is matched numerically: a numeric-x scatter sends the raw
+    x value (e.g. ``152.0``), which JS stringifies as ``"152"`` while a float64
+    column's ``astype(str)`` is ``"152.0"`` — a string compare would never match.
+    Categorical/label x columns (cartesian categories, pie names) match by string.
+    """
+    if pd.api.types.is_numeric_dtype(df[x_col]):
+        try:
+            return df[df[x_col] == float(label)]
+        except (TypeError, ValueError):
+            return df.iloc[0:0]  # non-numeric label against a numeric column
+    return df[df[x_col].astype(str) == str(label)]
 
 
 def json_safe(obj):

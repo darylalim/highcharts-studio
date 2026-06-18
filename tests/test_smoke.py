@@ -256,6 +256,24 @@ def test_point_label_prefers_category_then_name_then_x_honoring_zero():
     assert point_label({}) is None
 
 
+def test_matching_rows_numeric_x_matches_whole_number_floats():
+    from highcharts_component import matching_rows
+
+    # Numeric-x scatter: JS sends 152 for a 152.0 point; a float column whose
+    # astype(str) is "152.0" must still match numerically (the bug fix).
+    floats = pd.DataFrame({"h": [152.0, 158.0, 161.0], "w": [50, 55, 58]})
+    found = matching_rows(floats, "h", 152)
+    assert len(found) == 1 and found.iloc[0]["w"] == 50
+
+    # Categorical/label x matches by string; a miss returns an empty frame.
+    labels = pd.DataFrame({"m": ["Jan", "Feb"], "v": [1, 2]})
+    assert len(matching_rows(labels, "m", "Feb")) == 1
+    assert matching_rows(labels, "m", "Mar").empty
+
+    # A non-numeric label against a numeric column is an empty match, not a crash.
+    assert matching_rows(floats, "h", "nope").empty
+
+
 # --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
@@ -292,6 +310,11 @@ def app():
     from streamlit.testing.v1 import AppTest
 
     return AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=60).run()
+
+
+# The selection payload a point click would store (mirrors the JS setTriggerValue
+# shape in highcharts_component.py); "Feb" matches the revenue sample's month col.
+SEEDED_CLICK = {"series": "revenue", "category": "Feb", "name": None, "x": 1, "y": 135}
 
 
 def test_app_default_run_emits_highcharts_config(app):
@@ -359,17 +382,19 @@ def test_app_events_mode_renders_seeded_click_then_clears(app):
     # and the Clear button that drops the selection.
     from highcharts_component import SELECTION_KEY
 
-    app.session_state[SELECTION_KEY] = {
-        "series": "revenue",
-        "category": "Feb",
-        "name": None,
-        "x": 1,
-        "y": 135,
-    }
+    app.session_state[SELECTION_KEY] = dict(SEEDED_CLICK)
     app.segmented_control[1].set_value("Interactive + click events").run()
     assert not app.exception
     assert any("series **revenue**" in s.value for s in app.success)
     assert any("Clicked point" in m.value for m in app.markdown)
+
+    # The matching-row panel actually finds Feb's row (a 2nd dataframe), not the
+    # "no match" caption — this pins the point_label + matching_rows lookup, not
+    # just the unconditional header above it.
+    assert not any("No row in the current data" in c.value for c in app.caption)
+    assert len(app.dataframe) == 2  # source data + the matched row
+    matched = app.dataframe[1].value
+    assert len(matched) == 1 and "Feb" in matched.to_string()
 
     app.button[0].click().run()  # Clear
     assert not app.exception
@@ -384,13 +409,7 @@ def test_app_events_mode_drops_stale_selection_on_config_change(app):
     from highcharts_component import SELECTION_KEY
 
     app.segmented_control[1].set_value("Interactive + click events").run()
-    app.session_state[SELECTION_KEY] = {
-        "series": "revenue",
-        "category": "Feb",
-        "name": None,
-        "x": 1,
-        "y": 135,
-    }
+    app.session_state[SELECTION_KEY] = dict(SEEDED_CLICK)
     app.run()  # config unchanged -> the seeded selection is kept and shown
     assert any("series **revenue**" in s.value for s in app.success)
 

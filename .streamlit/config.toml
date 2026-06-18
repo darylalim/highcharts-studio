@@ -13,7 +13,8 @@ textColor = "#0f172a"
 font = "sans-serif"
 
 [server]
-# Auto-rerun on file save (uses the watchdog dev dependency for fast watching),
-# so editing streamlit_app.py / the builder reloads without a manual rerun.
+# Auto-rerun on file save, so editing streamlit_app.py / the builder reloads
+# without a manual rerun. Streamlit auto-uses the watchdog dev dependency for
+# fast watching when it's installed, and falls back to polling otherwise — so we
+# don't pin fileWatcherType (which would warn in installs without the dev group).
 runOnSave = true
-fileWatcherType = "watchdog"
