@@ -24,10 +24,11 @@ for Python toolkit (`highcharts-core`) — the app uses no native Streamlit char
   `point_label`, `json_safe`.
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
-- `tests/test_smoke.py` — builder unit tests (parametrized over every chart
-  type, with the missing-data and scatter edge cases and the validation guards),
-  CCv2 helper unit tests (`json_safe`, `_read_state_value`), plus headless
-  `AppTest` interaction tests for the app (including the click-events round-trip).
+- `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
+  and scatter edge cases, the brand palette, and the validation guards),
+  component and `sample_data` unit tests (`json_safe`, `_read_state_value`,
+  `point_label`), plus headless `AppTest` interaction tests (including the click
+  round-trip and stale-selection clearing).
 - `.streamlit/config.toml` — project Streamlit theme (brands the app shell). The
   chart colors are themed separately (see Conventions) since charts render in an
   iframe/component the shell theme can't reach.
@@ -46,6 +47,10 @@ html = build_chart_html(df, chart_type, x_col, y_cols, height=height, title=titl
 # static: rendered server-side to PNG bytes via the export server, for st.image
 png = build_chart_png(df, chart_type, x_col, y_cols, title=title)
 ```
+
+The click-events mode instead mounts the chart through
+`highcharts_component.interactive_chart(...)`, which reuses `build_options` and
+renders Highcharts client-side as a bidirectional Custom Component v2.
 
 Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
 `scatter`.
@@ -70,9 +75,11 @@ uv run pytest
 `tests/test_smoke.py` exercises the pure builder (`build_options`) —
 parametrized across every supported chart type, covering missing data
 (`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
-numeric vs non-numeric scatter paths, and the validation guards — and drives the
-full app headless via Streamlit's `AppTest`, switching controls and asserting on
-the generated Highcharts config and the guard warnings.
+numeric vs non-numeric scatter paths, the brand palette, and the validation
+guards — plus the component helpers (`json_safe`, `_read_state_value`,
+`point_label`) and the sample datasets, then drives the full app headless via
+Streamlit's `AppTest` (switching controls, the click round-trip and
+stale-selection clearing, and the guard messages).
 
 ## Lint & format
 

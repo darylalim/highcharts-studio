@@ -9,4 +9,6 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# .streamlit/config.toml is committed (theme + dev settings); ignore only secrets.
 .streamlit/secrets.toml
