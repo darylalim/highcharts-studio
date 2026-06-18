@@ -2,20 +2,25 @@
 
 Run with: ``uv run pytest``
 
-Three layers:
+Layers:
 
 - ``build_options`` unit tests covering every supported chart type, the
   missing-data and scatter edge cases (NaN -> ``EnforcedNull`` for cartesian
   series, dropped points/slices elsewhere, and numeric vs non-numeric scatter
-  x), and the validation guards (unsupported type, empty ``y_cols``, and the
-  cartesian-only x-in-y rule).
-- ``highcharts_component`` tests: ``json_safe`` replaces ``EnforcedNull`` with
-  JSON ``null`` so ``build_options`` output is serializable as CCv2 ``data``.
+  x), the brand-palette (``DEFAULT_COLORS`` / ``colors`` override), and the
+  validation guards (unsupported type, empty ``y_cols``, and the cartesian-only
+  x-in-y rule).
+- ``highcharts_component`` unit tests: ``json_safe`` replaces ``EnforcedNull``
+  with JSON ``null`` so ``build_options`` output is serializable as CCv2
+  ``data``; ``_read_state_value`` dict/attr fallback; and ``point_label``.
+- ``sample_data`` unit tests: every built-in dataset is plottable (fresh,
+  non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type, title, series, and render mode (including
-  mounting the Custom Component v2 click-events chart), and tripping the x-in-y
-  warning and the no-CSV-uploaded info guard — asserting on the generated
-  Highcharts config and the guard messages.
+  mounting the Custom Component v2 click-events chart, the click round-trip, and
+  dropping a stale selection when the chart config changes) — and tripping the
+  x-in-y warning and the no-CSV-uploaded info guard, asserting on the generated
+  Highcharts config (incl. the brand palette) and the guard messages.
 """
 
 import json
@@ -252,6 +257,24 @@ def test_point_label_prefers_category_then_name_then_x_honoring_zero():
 
 
 # --------------------------------------------------------------------------- #
+# Sample datasets
+# --------------------------------------------------------------------------- #
+def test_sample_datasets_are_plottable_and_fresh():
+    from sample_data import SAMPLES
+
+    assert SAMPLES  # the app offers these when no CSV is uploaded
+    for label, factory in SAMPLES.items():
+        df = factory()
+        assert not df.empty, label
+        # The app stops with an error unless a dataset has a numeric column.
+        assert df.select_dtypes("number").shape[1] >= 1, label
+
+    # Each call returns a fresh frame, so per-session mutation can't leak.
+    factory = next(iter(SAMPLES.values()))
+    assert factory() is not factory()
+
+
+# --------------------------------------------------------------------------- #
 # Full app, headless (Streamlit AppTest)
 #
 # These drive the UI control flow, not chart correctness (the builder tests
@@ -352,3 +375,32 @@ def test_app_events_mode_renders_seeded_click_then_clears(app):
     assert not app.exception
     assert SELECTION_KEY not in app.session_state
     assert any("Click any point" in msg.value for msg in app.info)
+
+
+def test_app_events_mode_drops_stale_selection_on_config_change(app):
+    # Entering events mode records the chart's config signature; after seeding a
+    # click, changing the chart type must drop the now-stale selection so a point
+    # from the old chart doesn't linger.
+    from highcharts_component import SELECTION_KEY
+
+    app.segmented_control[1].set_value("Interactive + click events").run()
+    app.session_state[SELECTION_KEY] = {
+        "series": "revenue",
+        "category": "Feb",
+        "name": None,
+        "x": 1,
+        "y": 135,
+    }
+    app.run()  # config unchanged -> the seeded selection is kept and shown
+    assert any("series **revenue**" in s.value for s in app.success)
+
+    app.selectbox[1].set_value("column").run()  # Chart type line -> column
+    assert not app.exception
+    assert SELECTION_KEY not in app.session_state
+    assert not any("Last click" in s.value for s in app.success)
+
+
+def test_app_generated_config_includes_brand_palette(app):
+    # The brand palette reaches the iframe/PNG paths through build_options; the
+    # generated-config expander is the visible proof in the default run.
+    assert DEFAULT_COLORS[0] in app.code[0].value
