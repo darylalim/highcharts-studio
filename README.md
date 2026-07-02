@@ -79,9 +79,6 @@ uv run ruff check --fix . && uv run ruff format .
 uv run ruff check . && uv run ruff format --check .
 ```
 
-VS Code users get format-on-save and fix-on-save via the committed
-`.vscode/settings.json` (install the recommended Ruff extension).
-
 ## Type check
 
 This project uses [ty](https://docs.astral.sh/ty/), Astral's fast Python type
