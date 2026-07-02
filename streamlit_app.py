@@ -169,7 +169,7 @@ with st.sidebar:
             default=MODE_INTERACTIVE,
             help=(
                 "- **Interactive** — Highcharts loads from the CDN in a sandboxed "
-                "iframe (one-way).\n"
+                "iframe.\n"
                 "- **Static PNG** — rendered server-side via the Highcharts export "
                 "server; the browser loads no Highcharts JS."
             ),
@@ -226,7 +226,7 @@ with left.container(border=True):
             st.error(
                 f"Static (PNG) render failed.\n\n`{type(exc).__name__}: {exc}`\n\n"
                 "This usually means the Highcharts export server is unreachable — "
-                "check your network, or pick an interactive mode instead.",
+                "check your network, or switch to the **Interactive** mode instead.",
                 icon=":material/cloud_off:",
             )
             st.stop()
