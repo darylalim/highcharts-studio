@@ -10,5 +10,9 @@ build/
 dist/
 *.egg-info/
 
+# Editor config is per-developer, not committed.
+.vscode/
+.idea/
+
 # .streamlit/config.toml is committed (theme + dev settings); ignore only secrets.
 .streamlit/secrets.toml

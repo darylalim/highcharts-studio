@@ -89,9 +89,9 @@ through `uv run`:
 uv run ty check
 ```
 
-It runs in CI. A few `highcharts-core` stub
-mismatches are suppressed inline with `# ty: ignore[rule]` (so the rules still
-apply everywhere else); see `CLAUDE.md` for details.
+It runs in CI. A few `highcharts-core` stub mismatches are suppressed inline
+with `# ty: ignore[rule]` (so the rules still apply everywhere else); see
+`CLAUDE.md` for details.
 
 ## CI
 
