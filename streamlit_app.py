@@ -51,7 +51,7 @@ MODE_BADGES: dict[str, tuple[str, str, _BadgeColor]] = {
 }
 
 st.set_page_config(
-    page_title="Highcharts × Streamlit",
+    page_title="Highcharts Studio",
     page_icon=":material/show_chart:",
     layout="wide",
 )
@@ -101,7 +101,7 @@ def cached_chart_js(df, chart_type, x_col, y_cols, title) -> str:
 # --------------------------------------------------------------------------- #
 # Header
 # --------------------------------------------------------------------------- #
-st.title(":material/insights: Highcharts visualizations in Streamlit")
+st.title(":material/insights: Highcharts Studio")
 st.caption(
     "Every chart below is rendered by **highcharts-core** (the Highcharts for "
     "Python toolkit) — embedded as an interactive iframe, a Custom Component v2, "
