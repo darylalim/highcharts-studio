@@ -84,7 +84,7 @@ stale-selection clearing, and the guard messages).
 ## Lint & format
 
 Ruff handles both (config in `pyproject.toml`). CI runs the tests and these
-checks on every push and PR.
+checks on every push to `main` and every PR.
 
 ```bash
 uv run ruff check --fix . && uv run ruff format .   # fix + format
