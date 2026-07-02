@@ -13,9 +13,10 @@ Layers:
 - ``sample_data`` unit tests: every built-in dataset is plottable (fresh,
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
-  control flow — switching chart type, title, series, and render mode — and
-  tripping the x-in-y warning and the no-CSV-uploaded info guard, asserting on
-  the generated Highcharts config (incl. the brand palette) and the guard
+  control flow — switching chart type, title, and series, checking the
+  render-mode selector offers its two modes (interactive iframe / static PNG),
+  and tripping the x-in-y warning and the no-CSV-uploaded info guard — asserting
+  on the generated Highcharts config (incl. the brand palette) and the guard
   messages.
 """
 
@@ -282,6 +283,27 @@ def test_app_upload_csv_with_no_file_shows_info_guard(app):
     assert not app.exception
     assert app.info
     assert "Upload a CSV" in app.info[0].value
+
+
+def test_app_render_mode_selector_offers_the_two_modes(app):
+    # After removing the click-events mode, the Render selector offers exactly
+    # two modes and defaults to the interactive one. This pins the two-mode
+    # contract (a re-added or renamed mode fails here) and guards the positional
+    # index [1] the other app tests rely on.
+    mode = app.segmented_control[1]
+    assert mode.label == "Mode"
+    assert list(mode.options) == ["Interactive", "Static PNG"]
+    assert mode.value == "Interactive"
+
+
+def test_app_default_interactive_mode_shows_iframe_caption(app):
+    # The default (Interactive) render shows the iframe caption and none of the
+    # removed click-events UI — a regression guard that the CCv2 mode is gone.
+    assert not app.exception
+    assert any(
+        "Highcharts JS is loaded from the CDN" in cap.value for cap in app.caption
+    )
+    assert not any("Custom Component" in cap.value for cap in app.caption)
 
 
 def test_app_generated_config_includes_brand_palette(app):
