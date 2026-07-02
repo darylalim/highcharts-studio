@@ -108,6 +108,9 @@ catch the same problems in our own code.
 
 ## Conventions
 
+- When working with Python, invoke the relevant Astral skill (`/astral:uv`,
+  `/astral:ty`, `/astral:ruff`) for uv, ty, and ruff to ensure best practices
+  are followed.
 - Keep chart-building logic (DataFrame → Highcharts) in `highcharts_builder.py`,
   free of Streamlit imports, so it stays unit-testable.
 - Render every visualization with Highcharts (`highcharts-core`); do not use
