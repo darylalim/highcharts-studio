@@ -46,8 +46,8 @@ jobs:
           enable-cache: true
 
       # Ruff is a standalone binary — no project sync needed. The pin matches
-      # the ruff in pyproject.toml's dev group and the pre-commit rev. Both
-      # gates are non-mutating; --output-format=github annotates PRs inline.
+      # the ruff in pyproject.toml's dev group. Both gates are non-mutating;
+      # --output-format=github annotates PRs inline.
       - name: Ruff lint
         run: uvx ruff@0.15.17 check --output-format=github .
 
@@ -67,8 +67,8 @@ jobs:
 
       # Unlike Ruff, ty resolves third-party imports (pandas, streamlit,
       # highcharts-core) from the project venv, so sync first. `uv run` then
-      # uses the ty pinned in the dev group (uv.lock) — same version as
-      # pre-commit. --output-format=github annotates PRs inline.
+      # uses the ty pinned in the dev group (uv.lock). --output-format=github
+      # annotates PRs inline.
       - name: Install dependencies (locked)
         run: uv sync --locked
 

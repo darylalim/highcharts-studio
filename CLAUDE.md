@@ -84,7 +84,7 @@ stale-selection clearing, and the guard messages).
 ## Lint & format
 
 Ruff handles both (config in `pyproject.toml`). CI runs the tests and these
-checks on every push and PR; `pre-commit` runs them on commit when installed.
+checks on every push and PR.
 
 ```bash
 uv run ruff check --fix . && uv run ruff format .   # fix + format
@@ -94,8 +94,8 @@ uv run ruff check . && uv run ruff format --check .  # verify (as CI does)
 ## Type check
 
 [ty](https://docs.astral.sh/ty/) (Astral's type checker, pinned in
-`pyproject.toml`) runs in CI and on commit via `pre-commit`. It needs the
-project venv to resolve imports, so run it through `uv run`:
+`pyproject.toml`) runs in CI. It needs the project venv to resolve imports, so
+run it through `uv run`:
 
 ```bash
 uv run ty check

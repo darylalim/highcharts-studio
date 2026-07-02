@@ -79,13 +79,6 @@ uv run ruff check --fix . && uv run ruff format .
 uv run ruff check . && uv run ruff format --check .
 ```
 
-Optional: install the [pre-commit](https://pre-commit.com/) hooks so this runs
-automatically on every commit:
-
-```bash
-uv tool install pre-commit && pre-commit install
-```
-
 VS Code users get format-on-save and fix-on-save via the committed
 `.vscode/settings.json` (install the recommended Ruff extension).
 
@@ -99,7 +92,7 @@ through `uv run`:
 uv run ty check
 ```
 
-It runs in CI and on every commit via pre-commit. A few `highcharts-core` stub
+It runs in CI. A few `highcharts-core` stub
 mismatches are suppressed inline with `# ty: ignore[rule]` (so the rules still
 apply everywhere else); see `CLAUDE.md` for details.
 
