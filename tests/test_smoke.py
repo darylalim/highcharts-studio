@@ -297,8 +297,9 @@ def test_app_render_mode_selector_offers_the_two_modes(app):
 
 
 def test_app_default_interactive_mode_shows_iframe_caption(app):
-    # The default (Interactive) render shows the iframe caption and none of the
-    # removed click-events UI — a regression guard that the CCv2 mode is gone.
+    # The default (Interactive) render shows the iframe (CDN) caption; the
+    # negative check that no click-events caption appears is a light backstop —
+    # the selector-options test above owns the two-mode contract.
     assert not app.exception
     assert any(
         "Highcharts JS is loaded from the CDN" in cap.value for cap in app.caption
