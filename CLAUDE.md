@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`streamlit-highcharts` is an interactive Streamlit app that builds Highcharts
+`highcharts-studio` is an interactive Streamlit app that builds Highcharts
 visualizations from pandas DataFrames. Every chart is produced by the Highcharts
 for Python toolkit (`highcharts-core`) — the app uses no native Streamlit charts.
 

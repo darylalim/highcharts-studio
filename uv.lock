@@ -223,6 +223,39 @@ wheels = [
 ]
 
 [[package]]
+name = "highcharts-studio"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "highcharts-core" },
+    { name = "pandas" },
+    { name = "streamlit" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "ty" },
+    { name = "watchdog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "highcharts-core", specifier = ">=1.10.3" },
+    { name = "pandas", specifier = ">=2.2.0" },
+    { name = "streamlit", specifier = ">=1.57.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "ruff", specifier = "==0.15.17" },
+    { name = "ty", specifier = "==0.0.49" },
+    { name = "watchdog", specifier = ">=6.0.0" },
+]
+
+[[package]]
 name = "httptools"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -941,39 +974,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/91/74/20dac6d6200d6ec0e1c230fb8eeb6a1a423645eacb76e8d802adfc246456/streamlit-1.58.0.tar.gz", hash = "sha256:78a22e7085b053af7ce544442bf4b670771e68c509ba1bdaa056ba0708f49c3d", size = 8721149, upload-time = "2026-05-28T18:02:44.606Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/df/84/14c36a92fb24f8e1cea452f53b0744b5da69d52cdd2fe22e71e6fbf765d5/streamlit-1.58.0-py3-none-any.whl", hash = "sha256:4ca8a7afc5bd16a5f176ccf4be1e34e8121cad0240becd127fb58a103ea3178d", size = 9219185, upload-time = "2026-05-28T18:02:41.993Z" },
-]
-
-[[package]]
-name = "streamlit-highcharts"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "highcharts-core" },
-    { name = "pandas" },
-    { name = "streamlit" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "ty" },
-    { name = "watchdog" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "highcharts-core", specifier = ">=1.10.3" },
-    { name = "pandas", specifier = ">=2.2.0" },
-    { name = "streamlit", specifier = ">=1.57.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "ruff", specifier = "==0.15.17" },
-    { name = "ty", specifier = "==0.0.49" },
-    { name = "watchdog", specifier = ">=6.0.0" },
 ]
 
 [[package]]

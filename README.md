@@ -1,4 +1,4 @@
-# streamlit-highcharts
+# highcharts-studio
 
 An interactive [Streamlit](https://streamlit.io) app that builds visualizations
 from pandas DataFrames with the
