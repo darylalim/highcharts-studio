@@ -23,11 +23,10 @@ SINGLE_VALUE_TYPES = ("pie",)
 XY_TYPES = ("scatter",)
 SUPPORTED_TYPES = CARTESIAN_TYPES + SINGLE_VALUE_TYPES + XY_TYPES
 
-# Default series palette, applied to every chart so all render modes (iframe,
-# static PNG, and the CCv2 component) share one look that matches the Streamlit
-# theme in .streamlit/config.toml (it leads with the config's primaryColor). The
-# interactive CCv2 chart overrides this live from the browser's --st-* theme
-# variables; the iframe and PNG paths, which have no theme CSS, rely on it.
+# Default series palette, applied to every chart so both render modes (iframe
+# and static PNG) share one look that matches the Streamlit theme in
+# .streamlit/config.toml (it leads with the config's primaryColor). The iframe
+# and PNG paths have no theme CSS, so they rely on this palette.
 DEFAULT_COLORS = (
     "#2563eb",  # blue (matches config.toml primaryColor)
     "#16a34a",  # green

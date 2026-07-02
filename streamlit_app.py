@@ -2,9 +2,8 @@
 
 Every chart on this page is produced by the Highcharts for Python toolkit
 (``highcharts-core``): a pandas DataFrame is turned into a Highcharts options
-object, then shown one of three ways — embedded via ``st.iframe``, mounted as a
-bidirectional Custom Component v2 (click events), or rendered server-side to a
-PNG. No Streamlit-native charts are used.
+object, then shown one of two ways — embedded via ``st.iframe`` or rendered
+server-side to a PNG. No Streamlit-native charts are used.
 
 Run it with:
 
@@ -25,28 +24,18 @@ from highcharts_builder import (
     build_chart_png,
     make_chart,
 )
-from highcharts_component import (
-    clear_selected_point,
-    forget_selection_if_config_changed,
-    get_selected_point,
-    interactive_chart,
-    matching_rows,
-    point_label,
-)
 from sample_data import SAMPLES
 
 # Render modes for the "3 · Render" control.
 MODE_INTERACTIVE = "Interactive"
-MODE_EVENTS = "Interactive + click events"
 MODE_STATIC = "Static PNG"
-RENDER_MODES = [MODE_INTERACTIVE, MODE_EVENTS, MODE_STATIC]
+RENDER_MODES = [MODE_INTERACTIVE, MODE_STATIC]
 
 # Short status badge (label, icon, color) shown above the chart per mode; the
 # caption below the chart carries the full description.
-_BadgeColor = Literal["blue", "green", "violet"]
+_BadgeColor = Literal["blue", "violet"]
 MODE_BADGES: dict[str, tuple[str, str, _BadgeColor]] = {
     MODE_INTERACTIVE: ("Interactive (iframe)", ":material/public:", "blue"),
-    MODE_EVENTS: ("Click events", ":material/ads_click:", "green"),
     MODE_STATIC: ("Static PNG", ":material/image:", "violet"),
 }
 
@@ -104,8 +93,8 @@ def cached_chart_js(df, chart_type, x_col, y_cols, title) -> str:
 st.title(":material/insights: Highcharts Studio")
 st.caption(
     "Every chart below is rendered by **highcharts-core** (the Highcharts for "
-    "Python toolkit) — embedded as an interactive iframe, a Custom Component v2, "
-    "or a static PNG — with no native Streamlit charts."
+    "Python toolkit) — embedded as an interactive iframe or a static PNG — with "
+    "no native Streamlit charts."
 )
 
 
@@ -181,8 +170,6 @@ with st.sidebar:
             help=(
                 "- **Interactive** — Highcharts loads from the CDN in a sandboxed "
                 "iframe (one-way).\n"
-                "- **Interactive + click events** — a Custom Component v2 that also "
-                "sends clicked points back to Python.\n"
                 "- **Static PNG** — rendered server-side via the Highcharts export "
                 "server; the browser loads no Highcharts JS."
             ),
@@ -195,11 +182,6 @@ with st.sidebar:
 # Main panel
 # --------------------------------------------------------------------------- #
 left, right = st.columns([3, 2], gap="large")
-
-# Drop a click selection when the chart configuration changes, so a point from a
-# previous chart doesn't linger in the click-events panels.
-if render_mode == MODE_EVENTS:
-    forget_selection_if_config_changed(chart_type, x_col, y_cols)
 
 with right.container(border=True):
     st.subheader("Source data")
@@ -217,20 +199,6 @@ with right.container(border=True):
         df, height=min(height, 360), hide_index=True, column_config=column_config
     )
     st.caption(f"{len(df)} rows × {len(df.columns)} columns")
-
-    # In click-events mode, surface the row behind the most recently clicked
-    # point. The callback stored it before this rerun's body, so it's already
-    # available here even though the chart mounts further down the page.
-    if render_mode == MODE_EVENTS:
-        selected = get_selected_point()
-        if selected is not None:
-            label = point_label(selected)
-            st.markdown("**Clicked point → matching row**")
-            match = matching_rows(df, x_col, label)
-            if match.empty:
-                st.caption("No row in the current data matches that point.")
-            else:
-                st.dataframe(match, hide_index=True)
 
 with left.container(border=True):
     st.subheader("Highcharts output")
@@ -274,30 +242,6 @@ with left.container(border=True):
             "Static PNG rendered server-side via the Highcharts export server — "
             "the browser loads no Highcharts JS."
         )
-    elif render_mode == MODE_EVENTS:
-        # Bidirectional Custom Component v2: Highcharts renders client-side AND
-        # clicked points flow back to Python. No iframe.
-        interactive_chart(df, chart_type, x_col, y_cols, height=height, title=title)
-        st.caption(
-            "Interactive Highcharts as a **Custom Component v2** — Highcharts JS is "
-            "loaded from the CDN in the browser, and clicking any point sends it "
-            "back to Python (bidirectional; no iframe)."
-        )
-        selected = get_selected_point()
-        if selected is not None:
-            label = point_label(selected)
-            with st.container(horizontal=True):
-                st.success(
-                    f"Last click → series **{selected.get('series')}**, "
-                    f"point **{label}**, value **{selected.get('y')}**",
-                    icon=":material/ads_click:",
-                )
-                st.button("Clear", on_click=clear_selected_point)
-        else:
-            st.info(
-                "Click any point, bar, or slice in the chart above.",
-                icon=":material/ads_click:",
-            )
     else:
         html = cached_chart_html(df, chart_type, x_col, tuple(y_cols), height, title)
         # The HTML is embedded in a sandboxed iframe with a FIXED height — it

@@ -10,20 +10,15 @@ Layers:
   x), the brand-palette (``DEFAULT_COLORS`` / ``colors`` override), and the
   validation guards (unsupported type, empty ``y_cols``, and the cartesian-only
   x-in-y rule).
-- ``highcharts_component`` unit tests: ``json_safe`` replaces ``EnforcedNull``
-  with JSON ``null`` so ``build_options`` output is serializable as CCv2
-  ``data``; ``_read_state_value`` dict/attr fallback; and ``point_label``.
 - ``sample_data`` unit tests: every built-in dataset is plottable (fresh,
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
-  control flow — switching chart type, title, series, and render mode (including
-  mounting the Custom Component v2 click-events chart, the click round-trip, and
-  dropping a stale selection when the chart config changes) — and tripping the
-  x-in-y warning and the no-CSV-uploaded info guard, asserting on the generated
-  Highcharts config (incl. the brand palette) and the guard messages.
+  control flow — switching chart type, title, series, and render mode — and
+  tripping the x-in-y warning and the no-CSV-uploaded info guard, asserting on
+  the generated Highcharts config (incl. the brand palette) and the guard
+  messages.
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -40,7 +35,6 @@ from highcharts_builder import (  # noqa: E402
     SUPPORTED_TYPES,
     build_options,
 )
-from highcharts_component import json_safe  # noqa: E402
 
 
 @pytest.fixture
@@ -209,72 +203,6 @@ def test_scatter_multiple_y_cols_make_one_series_each_with_legend():
 
 
 # --------------------------------------------------------------------------- #
-# CCv2 component helper: json_safe
-#
-# The interactive Custom Component v2 passes build_options() output to the
-# browser as JSON `data`. EnforcedNull (used for cartesian gaps) is not
-# JSON-serializable, so json_safe rewrites it to None / JSON null.
-# --------------------------------------------------------------------------- #
-def test_json_safe_replaces_enforced_null_and_serializes():
-    payload = {"series": [{"data": [1.0, EnforcedNull, 3.0]}], "flag": True}
-    safe = json_safe(payload)
-    assert safe["series"][0]["data"] == [1.0, None, 3.0]
-    # Round-trips through JSON now that the sentinel is gone.
-    assert json.loads(json.dumps(safe)) == safe
-
-
-def test_json_safe_makes_build_options_json_serializable():
-    # A cartesian series with a NaN yields EnforcedNull; json_safe makes the
-    # whole options dict safe to hand the component as `data`.
-    df = pd.DataFrame({"x": ["a", "b", "c"], "y": [1.0, float("nan"), 3.0]})
-    safe = json_safe(build_options(df, "line", "x", ["y"]))
-    json.dumps(safe)  # would raise TypeError without the EnforcedNull -> None
-    assert safe["series"][0]["data"] == [1.0, None, 3.0]
-
-
-def test_read_state_value_handles_dict_and_attribute_shapes():
-    # The click callback reads point_click from session_state via this helper; it
-    # must cope whether Streamlit stores the entry as a dict-like or an object.
-    from highcharts_component import _read_state_value
-
-    assert _read_state_value({"point_click": {"y": 1}}, "point_click") == {"y": 1}
-    assert _read_state_value({}, "point_click") is None
-    assert _read_state_value(None, "point_click") is None
-
-    class AttrState:  # no .get → attribute access path
-        point_click = {"y": 2}
-
-    assert _read_state_value(AttrState(), "point_click") == {"y": 2}
-
-
-def test_point_label_prefers_category_then_name_then_x_honoring_zero():
-    from highcharts_component import point_label
-
-    assert point_label({"category": "Feb", "name": "n", "x": 1}) == "Feb"
-    assert point_label({"name": "Apples", "x": 2}) == "Apples"
-    assert point_label({"x": 0}) == 0  # x == 0 honored, not skipped as falsy
-    assert point_label({}) is None
-
-
-def test_matching_rows_numeric_x_matches_whole_number_floats():
-    from highcharts_component import matching_rows
-
-    # Numeric-x scatter: JS sends 152 for a 152.0 point; a float column whose
-    # astype(str) is "152.0" must still match numerically (the bug fix).
-    floats = pd.DataFrame({"h": [152.0, 158.0, 161.0], "w": [50, 55, 58]})
-    found = matching_rows(floats, "h", 152)
-    assert len(found) == 1 and found.iloc[0]["w"] == 50
-
-    # Categorical/label x matches by string; a miss returns an empty frame.
-    labels = pd.DataFrame({"m": ["Jan", "Feb"], "v": [1, 2]})
-    assert len(matching_rows(labels, "m", "Feb")) == 1
-    assert matching_rows(labels, "m", "Mar").empty
-
-    # A non-numeric label against a numeric column is an empty match, not a crash.
-    assert matching_rows(floats, "h", "nope").empty
-
-
-# --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
 def test_sample_datasets_are_plottable_and_fresh():
@@ -310,11 +238,6 @@ def app():
     from streamlit.testing.v1 import AppTest
 
     return AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=60).run()
-
-
-# The selection payload a point click would store (mirrors the JS setTriggerValue
-# shape in highcharts_component.py); "Feb" matches the revenue sample's month col.
-SEEDED_CLICK = {"series": "revenue", "category": "Feb", "name": None, "x": 1, "y": 135}
 
 
 def test_app_default_run_emits_highcharts_config(app):
@@ -359,64 +282,6 @@ def test_app_upload_csv_with_no_file_shows_info_guard(app):
     assert not app.exception
     assert app.info
     assert "Upload a CSV" in app.info[0].value
-
-
-def test_app_events_mode_mounts_custom_component(app):
-    # Switch the render mode (segmented_control[1]) to the CCv2 click-events mode.
-    # The component mounts headlessly — no browser, no network from Python. With
-    # no click seeded, the events branch shows its "click a point" prompt. We
-    # assert on the events-specific caption/info (not the generated-config
-    # expander, which is identical across render modes).
-    assert app.segmented_control[1].label == "Mode"  # guard the positional index
-    app.segmented_control[1].set_value("Interactive + click events").run()
-    assert not app.exception
-    assert any("Custom Component v2" in cap.value for cap in app.caption)
-    assert any("Click any point" in msg.value for msg in app.info)
-
-
-def test_app_events_mode_renders_seeded_click_then_clears(app):
-    # The one genuinely new behavior is the click round-trip. AppTest can't click
-    # the (opaque) chart, but seeding the selection state that a click would
-    # produce exercises every Python branch that reacts to it: the "Last click"
-    # banner, the matching-row table (category "Feb" matches the revenue sample),
-    # and the Clear button that drops the selection.
-    from highcharts_component import SELECTION_KEY
-
-    app.session_state[SELECTION_KEY] = dict(SEEDED_CLICK)
-    app.segmented_control[1].set_value("Interactive + click events").run()
-    assert not app.exception
-    assert any("series **revenue**" in s.value for s in app.success)
-    assert any("Clicked point" in m.value for m in app.markdown)
-
-    # The matching-row panel actually finds Feb's row (a 2nd dataframe), not the
-    # "no match" caption — this pins the point_label + matching_rows lookup, not
-    # just the unconditional header above it.
-    assert not any("No row in the current data" in c.value for c in app.caption)
-    assert len(app.dataframe) == 2  # source data + the matched row
-    matched = app.dataframe[1].value
-    assert len(matched) == 1 and "Feb" in matched.to_string()
-
-    app.button[0].click().run()  # Clear
-    assert not app.exception
-    assert SELECTION_KEY not in app.session_state
-    assert any("Click any point" in msg.value for msg in app.info)
-
-
-def test_app_events_mode_drops_stale_selection_on_config_change(app):
-    # Entering events mode records the chart's config signature; after seeding a
-    # click, changing the chart type must drop the now-stale selection so a point
-    # from the old chart doesn't linger.
-    from highcharts_component import SELECTION_KEY
-
-    app.segmented_control[1].set_value("Interactive + click events").run()
-    app.session_state[SELECTION_KEY] = dict(SEEDED_CLICK)
-    app.run()  # config unchanged -> the seeded selection is kept and shown
-    assert any("series **revenue**" in s.value for s in app.success)
-
-    app.selectbox[1].set_value("column").run()  # Chart type line -> column
-    assert not app.exception
-    assert SELECTION_KEY not in app.session_state
-    assert not any("Last click" in s.value for s in app.success)
 
 
 def test_app_generated_config_includes_brand_palette(app):

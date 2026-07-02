@@ -1,9 +1,8 @@
 # Project-level Streamlit theme. Brands the app shell (sidebar controls, the
 # source-data dataframe, code blocks, buttons). The Highcharts charts render in
-# an iframe / shadow-root component, so these colors do NOT reach them directly:
-# the charts are themed separately via highcharts_builder.DEFAULT_COLORS (which
-# leads with primaryColor below) and, for the interactive CCv2 chart, live from
-# the --st-* theme variables. Keep primaryColor in sync with DEFAULT_COLORS[0].
+# an iframe, so these colors do NOT reach them directly: the charts are themed
+# separately via highcharts_builder.DEFAULT_COLORS (which leads with primaryColor
+# below). Keep primaryColor in sync with DEFAULT_COLORS[0].
 [theme]
 base = "light"
 primaryColor = "#2563eb"

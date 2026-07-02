@@ -20,23 +20,19 @@ uv run streamlit run streamlit_app.py
 ```
 
 Then open <http://localhost:8501>. Pick a sample dataset (or upload a CSV),
-choose a chart type and columns, and switch between three render modes:
-interactive (CDN iframe), interactive with click events, or a static PNG.
+choose a chart type and columns, and switch between two render modes:
+interactive (CDN iframe) or a static PNG.
 
 ## What it does
 
 - Turns a `pandas.DataFrame` into a Highcharts options `dict`, then a `Chart`
   via `Chart.from_options(...)`. Series share a brand palette (`DEFAULT_COLORS`)
   that matches the Streamlit theme in `.streamlit/config.toml`.
-- Three render modes, chosen from the sidebar **Render** selector:
+- Two render modes, chosen from the sidebar **Render** selector:
   - **Interactive** (default): serialize the chart with its own
     `get_script_tags()` (Highcharts CDN `<script>` tags) + `to_js_literal()`,
     wrap it in a small HTML document, and embed it with `st.iframe`. Highcharts
     JS runs in the browser.
-  - **Interactive + click events**: render the chart as a bidirectional
-    [Custom Component v2](https://docs.streamlit.io/develop/api-reference/custom-components/st.components.v2.component) —
-    clicked points flow back to Python (highlighting the matching data row), and
-    the chart re-reads the live Streamlit theme. Requires Streamlit ≥ 1.57.
   - **Static (PNG)**: render server-side with `chart.download_chart(format="png")`
     and show the PNG with `st.image` (plus a download button). No Highcharts JS
     runs in the browser; the process talks to the Highcharts export server.
@@ -47,12 +43,11 @@ interactive (CDN iframe), interactive with click events, or a static PNG.
 
 | File | Purpose |
 | --- | --- |
-| `streamlit_app.py` | The Streamlit UI: data source, chart controls, caching, the render-mode selector (interactive / click events / static PNG), and the chart embed. |
+| `streamlit_app.py` | The Streamlit UI: data source, chart controls, caching, the render-mode selector (interactive / static PNG), and the chart embed. |
 | `highcharts_builder.py` | Pure (Streamlit-free) functions that turn a DataFrame into a Highcharts options dict, a `Chart`, and embeddable HTML / PNG bytes. Independently importable and unit-testable. |
-| `highcharts_component.py` | Streamlit Custom Component v2 wrapper for the click-events mode: reuses `build_options`, renders Highcharts client-side, and sends point clicks back to Python. |
 | `sample_data.py` | Pure (Streamlit-free) built-in sample datasets offered when no CSV is uploaded. |
 | `.streamlit/config.toml` | Streamlit theme (app shell) and dev settings (`runOnSave`). |
-| `tests/test_smoke.py` | Builder, component, and sample-data unit tests plus headless `AppTest` interaction tests (including the click round-trip). |
+| `tests/test_smoke.py` | Builder and sample-data unit tests plus headless `AppTest` interaction tests. |
 
 ## Test
 
@@ -62,9 +57,8 @@ uv run pytest
 
 `tests/test_smoke.py` covers the builder across every chart type (parametrized),
 the missing-data and scatter edge cases, the brand palette, and the validation
-guards; the component helpers (`json_safe`, `_read_state_value`, `point_label`)
-and the sample datasets; then drives the full app headless with Streamlit's
-`AppTest` — switching controls, the click round-trip, and the guard messages.
+guards, plus the sample datasets; then drives the full app headless with
+Streamlit's `AppTest` — switching controls and asserting the guard messages.
 
 ## Lint & format
 
@@ -102,12 +96,11 @@ check on every push to `main` and every pull request
 ## Notes
 
 - There is **no official Streamlit ↔ Highcharts component** (no `st.highcharts`
-  widget) for the `highcharts-core` object model, so the default interactive
-  mode uses a dependency-free `Chart` → HTML → `st.iframe` bridge, and the
-  click-events mode uses a small inline `st.components.v2` component.
-- In the **interactive** modes, charts load Highcharts JS from the CDN
+  widget) for the `highcharts-core` object model, so the interactive mode uses a
+  dependency-free `Chart` → HTML → `st.iframe` bridge.
+- In the **interactive** mode, the chart loads Highcharts JS from the CDN
   (`https://code.highcharts.com/`), so the browser needs network access. The
-  iframe (default mode) has a fixed height (it does not auto-grow).
+  iframe has a fixed height (it does not auto-grow).
 - In **static** mode, the running process must reach the Highcharts export
   server (`export.highcharts.com` by default). To remove that external
   dependency, self-host an export server and pass a `server_instance` to
@@ -119,7 +112,7 @@ Runtime:
 
 - `highcharts-core` — Highcharts for Python charting library
 - `pandas` — DataFrames feeding the charts
-- `streamlit` — app runtime (≥ 1.57 for the click-events Custom Component v2)
+- `streamlit` — app runtime (pinned ≥ 1.57, the version this app is built and CI-tested against)
 
 Dev (in the `dev` dependency group, installed by `uv sync`):
 

@@ -10,8 +10,9 @@ requires-python = ">=3.12"
 dependencies = [
     "highcharts-core>=1.10.3",
     "pandas>=2.2.0",
-    # 1.57 is the first release with Custom Components v2 (st.components.v2),
-    # which highcharts_component.py uses for the interactive click-events mode.
+    # Pinned to the Streamlit version this app is developed and CI-tested
+    # against; it also relies on recent APIs (st.iframe, st.badge, st.pills,
+    # st.segmented_control, width="stretch").
     "streamlit>=1.57.0",
 ]
 
