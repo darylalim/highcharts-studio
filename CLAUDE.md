@@ -63,7 +63,8 @@ parametrized across every supported chart type, covering missing data
 (`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
 numeric vs non-numeric scatter paths, the brand palette, and the validation
 guards — plus the sample datasets, then drives the full app headless via
-Streamlit's `AppTest` (switching controls and asserting the guard messages).
+Streamlit's `AppTest` (switching controls, checking the render-mode selector
+offers its two modes, and asserting the guard messages).
 
 ## Lint & format
 

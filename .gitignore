@@ -16,3 +16,7 @@ dist/
 
 # .streamlit/config.toml is committed (theme + dev settings); ignore only secrets.
 .streamlit/secrets.toml
+
+# .claude/ holds Claude Code project config; commit shared settings but ignore
+# the per-developer local overrides.
+.claude/settings.local.json

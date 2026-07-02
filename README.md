@@ -58,7 +58,8 @@ uv run pytest
 `tests/test_smoke.py` covers the builder across every chart type (parametrized),
 the missing-data and scatter edge cases, the brand palette, and the validation
 guards, plus the sample datasets; then drives the full app headless with
-Streamlit's `AppTest` — switching controls and asserting the guard messages.
+Streamlit's `AppTest` — switching controls, checking the render-mode selector
+offers its two modes, and asserting the guard messages.
 
 ## Lint & format
 
