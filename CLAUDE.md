@@ -10,7 +10,9 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls, caching, the render-mode selector
-  (interactive iframe / static PNG), and the chart embed.
+  (interactive iframe / static PNG), reading the active light/dark theme
+  (`st.context.theme.type`) so the charts render theme-aware, and the chart
+  embed.
 - `highcharts_builder.py` — pure, Streamlit-free helpers that turn a DataFrame
   into a Highcharts options `dict`, a `Chart`, and embeddable HTML or PNG bytes.
   Independently importable and unit-testable.

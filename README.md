@@ -21,7 +21,8 @@ uv run streamlit run streamlit_app.py
 
 Then open <http://localhost:8501>. Pick a sample dataset (or upload a CSV),
 choose a chart type and columns, and switch between two render modes:
-interactive (CDN iframe) or a static PNG.
+interactive (CDN iframe) or a static PNG. The charts follow the app's
+light/dark theme, which you can toggle from the settings menu.
 
 ## What it does
 
@@ -36,6 +37,10 @@ interactive (CDN iframe) or a static PNG.
   - **Static (PNG)**: render server-side with `chart.download_chart(format="png")`
     and show the PNG with `st.image` (plus a download button). No Highcharts JS
     runs in the browser; the process talks to the Highcharts export server.
+- Light and dark themes, toggled from Streamlit's settings menu (it follows your
+  OS by default). The charts are theme-aware in both render modes: their
+  background, text, and axes flip to match the mode, while each series keeps its
+  palette color.
 - Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
   `scatter`.
 
@@ -46,7 +51,7 @@ interactive (CDN iframe) or a static PNG.
 | `streamlit_app.py` | The Streamlit UI: data source, chart controls, caching, the render-mode selector (interactive / static PNG), and the chart embed. |
 | `highcharts_builder.py` | Pure (Streamlit-free) functions that turn a DataFrame into a Highcharts options dict, a `Chart`, and embeddable HTML / PNG bytes. Independently importable and unit-testable. |
 | `sample_data.py` | Pure (Streamlit-free) built-in sample datasets offered when no CSV is uploaded. |
-| `.streamlit/config.toml` | Streamlit theme (app shell) and dev settings (`runOnSave`). |
+| `.streamlit/config.toml` | Streamlit light/dark themes (app shell) and dev settings (`runOnSave`). |
 | `tests/test_smoke.py` | Builder and sample-data unit tests plus headless `AppTest` interaction tests. |
 
 ## Test

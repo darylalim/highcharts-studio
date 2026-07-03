@@ -12,7 +12,11 @@ dependencies = [
     "pandas>=2.2.0",
     # Pinned to the Streamlit version this app is developed and CI-tested
     # against; it also relies on recent APIs (st.iframe, st.badge, st.pills,
-    # st.segmented_control, width="stretch").
+    # st.segmented_control, st.context.theme, width/height="stretch", and the
+    # [theme.light]/[theme.dark] split themes in .streamlit/config.toml). The
+    # 1.57.0 floor already covers them all — the newest is [theme.light]/
+    # [theme.dark] (1.51.0); st.context.theme landed in 1.46.0 and container
+    # height="stretch" in 1.48.0.
     "streamlit>=1.57.0",
 ]
 
