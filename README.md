@@ -39,8 +39,12 @@ light/dark theme, which you can toggle from the settings menu.
     runs in the browser; the process talks to the Highcharts export server.
 - Light and dark themes, toggled from Streamlit's settings menu (it follows your
   OS by default). The charts are theme-aware in both render modes: their
-  background, text, and axes flip to match the mode, while each series keeps its
-  palette color.
+  background, text, axes, and tooltip flip to match the mode, while each series
+  keeps its palette color.
+- An at-a-glance KPI row (rows, numeric columns, series plotted, chart type)
+  above the chart, a side-by-side source-data preview, and a toggle that reveals
+  the generated Highcharts config (the `to_js_literal()` output). The Y-series
+  picker uses compact pills, falling back to `st.multiselect` for wide CSVs.
 - Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
   `scatter`.
 
@@ -48,7 +52,7 @@ light/dark theme, which you can toggle from the settings menu.
 
 | File | Purpose |
 | --- | --- |
-| `streamlit_app.py` | The Streamlit UI: data source, chart controls, caching, the render-mode selector (interactive / static PNG), and the chart embed. |
+| `streamlit_app.py` | The Streamlit UI: data source, chart controls, caching, a KPI metric row, the render-mode selector (interactive / static PNG), the chart embed, and a toggle for the generated config. |
 | `highcharts_builder.py` | Pure (Streamlit-free) functions that turn a DataFrame into a Highcharts options dict, a `Chart`, and embeddable HTML / PNG bytes. Independently importable and unit-testable. |
 | `sample_data.py` | Pure (Streamlit-free) built-in sample datasets offered when no CSV is uploaded. |
 | `.streamlit/config.toml` | Streamlit light/dark themes (app shell) and dev settings (`runOnSave`). |
@@ -62,9 +66,11 @@ uv run pytest
 
 `tests/test_smoke.py` covers the builder across every chart type (parametrized),
 the missing-data and scatter edge cases, the brand palette, the light/dark
-theming, and the validation guards, plus the sample datasets; then drives the
-full app headless with Streamlit's `AppTest` — switching controls, checking the
-render-mode selector offers its two modes, and asserting the guard messages.
+theming (including the dark-mode tooltip), and the validation guards, plus the
+sample datasets; then drives the full app headless with Streamlit's `AppTest` —
+switching controls, revealing the generated config behind its toggle, the KPI
+metric row, the wide-CSV `st.multiselect` fallback, the render-mode selector's
+two modes, and asserting the guard messages.
 
 ## Lint & format
 

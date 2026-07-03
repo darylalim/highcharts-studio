@@ -9,10 +9,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 ## Structure
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
-  upload), chart-type/column controls, caching, the render-mode selector
-  (interactive iframe / static PNG), reading the active light/dark theme
-  (`st.context.theme.type`) so the charts render theme-aware, and the chart
-  embed.
+  upload), chart-type/column controls (pills for the Y series, falling back to
+  `st.multiselect` on wide CSVs), caching, a KPI metric row, the render-mode
+  selector (interactive iframe / static PNG), reading the active light/dark theme
+  (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
+  and a toggle that reveals the generated Highcharts config (JS).
 - `highcharts_builder.py` — pure, Streamlit-free helpers that turn a DataFrame
   into a Highcharts options `dict`, a `Chart`, and embeddable HTML or PNG bytes.
   Independently importable and unit-testable.
@@ -42,8 +43,9 @@ png = build_chart_png(df, chart_type, x_col, y_cols, title=title)
 ```
 
 All three helpers take an optional `dark=` flag (default `False`) that themes the
-chart chrome (background/text/axes/gridlines) for dark mode; the app derives it
-from `st.context.theme.type` and threads it through the cached renderers.
+chart chrome (background/text/axes/gridlines/tooltip) for dark mode; the app
+derives it from `st.context.theme.type` and threads it through the cached
+renderers.
 
 Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
 `scatter`.
@@ -69,10 +71,11 @@ uv run pytest
 parametrized across every supported chart type, covering missing data
 (`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
 numeric vs non-numeric scatter paths, the brand palette, the light/dark theming
-(dark-mode chrome vs. the shared palette), and the validation guards — plus the
-sample datasets, then drives the full app headless via Streamlit's `AppTest`
-(switching controls, checking the render-mode selector offers its two modes, and
-asserting the guard messages).
+(dark-mode chrome — including the tooltip — vs. the shared palette), and the
+validation guards — plus the sample datasets, then drives the full app headless
+via Streamlit's `AppTest` (switching controls, revealing the generated config
+behind its toggle, the KPI metric row, the wide-CSV `st.multiselect` fallback,
+the render-mode selector's two modes, and asserting the guard messages).
 
 ## Lint & format
 
@@ -115,7 +118,7 @@ catch the same problems in our own code.
   `build_options` to every chart, so the iframe and PNG paths are themed too),
   keeping its first color in sync with the light-mode `primaryColor` in
   `.streamlit/config.toml`. The palette is shared across light/dark; only the
-  chart chrome (background/text/axes/gridlines) flips, via `build_options(...,
-  dark=...)` / `_DARK_CHROME`. `streamlit_app.py` reads `dark` from
+  chart chrome (background/text/axes/gridlines/tooltip) flips, via
+  `build_options(..., dark=...)` / `_DARK_CHROME`. `streamlit_app.py` reads `dark` from
   `st.context.theme.type` and threads it through the cached renderers (so it's
   part of their cache key).
