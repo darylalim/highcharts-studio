@@ -40,7 +40,7 @@ DEFAULT_COLORS = (
     "#65a30d",  # lime
 )
 
-# Chart "chrome" (backgrounds, text, axes, gridlines) for dark mode. The series
+# Chart "chrome" (backgrounds, text, axes, gridlines, tooltip) for dark mode. The series
 # palette (DEFAULT_COLORS) is shared across modes — only this chrome flips — so a
 # series keeps its color when the viewer toggles the theme. Keep "bg"/"text" in
 # sync with backgroundColor/textColor in .streamlit/config.toml [theme.dark]; the
@@ -59,8 +59,8 @@ def _themed(options: dict, *, dark: bool) -> dict:
 
     A no-op for light mode, so the light-mode output is byte-for-byte what it was
     before dark mode existed. In dark mode it sets the chart background and the
-    title/legend/axis/gridline colors to match the dark app shell, leaving the
-    series ``colors`` (``DEFAULT_COLORS``) untouched.
+    title/legend/tooltip/axis/gridline colors to match the dark app shell, leaving
+    the series ``colors`` (``DEFAULT_COLORS``) untouched.
     """
     if not dark:
         return options
@@ -125,8 +125,8 @@ def build_options(
       column's values via the x-axis categories.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
-    ``dark=True`` themes the chart chrome (background, text, axes, gridlines) for
-    dark mode; the series palette itself is shared across modes.
+    ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
+    tooltip) for dark mode; the series palette itself is shared across modes.
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
     or (for cartesian types) an ``x_col`` that is also one of the ``y_cols``.

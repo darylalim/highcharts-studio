@@ -143,6 +143,7 @@ def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
     # dark mode must theme it explicitly or it floats light-on-dark on hover.
     opts = build_options(labeled_frame, chart_type, "label", ["value"], dark=True)
     assert opts["tooltip"]["backgroundColor"] == "#0f172a"
+    assert opts["tooltip"]["borderColor"] == "#475569"
     assert opts["tooltip"]["style"]["color"] == "#e2e8f0"
 
 
@@ -360,22 +361,35 @@ def app():
     return AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=60).run()
 
 
-def test_app_default_run_emits_highcharts_config(app):
-    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
+def _reveal_config(app):
+    """Flip the generated-config toggle on (revealing the st.code panel)."""
+    app.toggle[0].set_value(True).run()
+
+
+def _metrics(app) -> dict[str, str]:
+    """The KPI metric row as a ``{label: value}`` dict."""
+    return {m.label: m.value for m in app.metric}
+
+
+def test_app_config_hidden_by_default_then_revealed_by_toggle(app):
+    # The point of the toggle (vs an always-rendering expander): on a default run
+    # the config JS is NOT built or shown; it appears only once the toggle is on.
+    assert not app.code  # nothing rendered while the toggle is off
+    _reveal_config(app)
     assert not app.exception
-    assert "Highcharts" in app.code[0].value  # the generated config rendered
+    assert app.code and "Highcharts" in app.code[0].value  # config now rendered
 
 
 def test_app_switch_to_pie_regenerates_config(app):
     app.selectbox[1].set_value("pie")  # Chart type -> pie
-    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
+    _reveal_config(app)
     assert not app.exception
     assert "type: 'pie'" in app.code[0].value
 
 
 def test_app_custom_title_flows_into_config(app):
     app.text_input(key="chart_title").set_value("My Title")
-    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
+    _reveal_config(app)
     assert not app.exception
     assert "My Title" in app.code[0].value
 
@@ -383,7 +397,7 @@ def test_app_custom_title_flows_into_config(app):
 def test_app_multiple_series_selected(app):
     # The revenue-vs-cost sample has two numeric columns; select both via pills.
     app.pills[0].set_value(["revenue", "cost"])
-    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
+    _reveal_config(app)
     assert not app.exception
     js = app.code[0].value
     assert "revenue" in js and "cost" in js
@@ -433,7 +447,7 @@ def test_app_default_interactive_mode_shows_iframe_caption(app):
 def test_app_generated_config_includes_brand_palette(app):
     # The brand palette reaches the iframe/PNG paths through build_options; the
     # generated-config toggle is the visible proof once switched on.
-    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
+    _reveal_config(app)
     assert not app.exception
     assert DEFAULT_COLORS[0] in app.code[0].value
 
@@ -469,6 +483,22 @@ def test_app_narrow_csv_upload_keeps_pills(app):
     assert not app.multiselect
 
 
+@pytest.mark.parametrize(("num_numeric", "widget"), [(5, "pills"), (6, "multiselect")])
+def test_app_pills_multiselect_boundary(app, num_numeric, widget):
+    # Pin the MAX_PILL_OPTIONS (5) threshold at its edge: exactly 5 numeric columns
+    # keeps pills, 6 switches to multiselect. The wide/narrow tests use 7 and 2,
+    # far from the decision point, so an off-by-one would slip past them.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        (f"n{num_numeric}.csv", _csv_bytes(num_numeric), "text/csv")
+    ).run()
+    assert not app.exception
+    if widget == "pills":
+        assert len(app.pills) == 1 and not app.multiselect
+    else:
+        assert len(app.multiselect) == 1 and not app.pills
+
+
 def test_app_chart_type_selector_has_help(app):
     # The chart-type selector silently reshapes the X/Y controls, so it carries a
     # markdown help tooltip naming each type's data shape (mirrors the Mode help).
@@ -478,13 +508,16 @@ def test_app_chart_type_selector_has_help(app):
 
 
 def test_app_kpi_row_summarizes_active_data(app):
-    # The KPI row above the cards surfaces the active data + config at a glance.
-    # Defaults: revenue-vs-cost sample (6 rows, 2 numeric cols), one series, line.
-    assert {m.label: m.value for m in app.metric} == {
-        "Rows": "6",
-        "Numeric columns": "2",
-        "Series plotted": "1",
-        "Chart type": "Line",
+    # The KPI row surfaces the active data at a glance. Derive the expected values
+    # from the same sources the app uses, rather than hardcoding sample internals.
+    from sample_data import SAMPLES
+
+    default_df = next(iter(SAMPLES.values()))()  # the first dataset is the default
+    numeric = default_df.select_dtypes("number").columns
+    assert _metrics(app) == {
+        "Rows": f"{len(default_df):,}",
+        "Numeric columns": str(len(numeric)),
+        "Series plotted": "1",  # the default selects numeric_cols[:1]
     }
 
 
@@ -493,7 +526,19 @@ def test_app_kpi_series_count_tracks_selection_and_empty_state(app):
     # not a blank — once cleared, since the KPI row sits above the empty-y guard.
     app.pills[0].set_value(["revenue", "cost"]).run()
     assert not app.exception
-    assert {m.label: m.value for m in app.metric}["Series plotted"] == "2"
+    assert _metrics(app)["Series plotted"] == "2"
     app.pills[0].set_value([]).run()
     assert not app.exception
-    assert {m.label: m.value for m in app.metric}["Series plotted"] == "0"
+    assert _metrics(app)["Series plotted"] == "0"
+
+
+def test_app_chart_type_badge_reflects_selection(app):
+    # Chart type is a categorical badge by the chart (not a metric), and updates
+    # when the selection changes. AppTest renders st.badge as markdown.
+    def badge_texts(a):
+        return [m.value for m in a.markdown if "-badge[" in m.value]
+
+    assert any("Line chart" in b for b in badge_texts(app))
+    app.selectbox[1].set_value("pie").run()  # Chart type -> pie
+    assert not app.exception
+    assert any("Pie chart" in b for b in badge_texts(app))

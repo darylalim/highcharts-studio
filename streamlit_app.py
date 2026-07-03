@@ -31,6 +31,11 @@ MODE_INTERACTIVE = "Interactive"
 MODE_STATIC = "Static PNG"
 RENDER_MODES = [MODE_INTERACTIVE, MODE_STATIC]
 
+# Above this many numeric columns the Y-series pills would wrap the narrow
+# sidebar, so fall back to st.multiselect (selection-widgets.md bounds pills at
+# ~5 options).
+MAX_PILL_OPTIONS = 5
+
 # Short status badge (label, icon, color) shown above the chart per mode; the
 # caption below the chart carries the full description.
 _BadgeColor = Literal["blue", "violet"]
@@ -159,19 +164,18 @@ with st.sidebar:
     x_col = st.selectbox(x_label, df.columns)
 
     if multi:
-        # Pills keep every series choice inline and compact, but the reference
-        # bounds them at ~5 options: a wide uploaded CSV can have many numeric
-        # columns, which would wrap the pills into several rows in the narrow
-        # sidebar. Past that threshold fall back to st.multiselect (a dropdown).
-        # Either way the empty-set guard in the main panel handles a cleared
-        # selection. (st.multiselect is inherently multi, so it takes no
-        # selection_mode — hence the two separate calls.)
-        if len(numeric_cols) <= 5:
+        # Pills keep every series choice inline and compact, but past
+        # MAX_PILL_OPTIONS a wide uploaded CSV would wrap them into several rows in
+        # the narrow sidebar, so fall back to st.multiselect (a dropdown, and
+        # inherently multi — hence no selection_mode and the two separate calls).
+        # The empty-set guard in the main panel handles a cleared selection.
+        default = numeric_cols[:1]
+        if len(numeric_cols) <= MAX_PILL_OPTIONS:
             y_cols = st.pills(
-                y_label, numeric_cols, selection_mode="multi", default=numeric_cols[:1]
+                y_label, numeric_cols, selection_mode="multi", default=default
             )
         else:
-            y_cols = st.multiselect(y_label, numeric_cols, default=numeric_cols[:1])
+            y_cols = st.multiselect(y_label, numeric_cols, default=default)
     else:
         y_cols = [st.selectbox(y_label, numeric_cols)]
 
@@ -205,15 +209,15 @@ with st.sidebar:
 # --------------------------------------------------------------------------- #
 # Main panel
 # --------------------------------------------------------------------------- #
-# At-a-glance summary of the active data + config, above the two cards.
+# At-a-glance numeric summary of the active data, above the two cards.
 # st.container(horizontal=True) is the reference's KPI-row pattern (wraps on small
 # screens; preferred over st.columns for metric rows). "Series plotted" reads 0
 # before the empty-selection guard fires below — a useful empty state, not a blank.
+# The chart type is categorical, so it's a badge by the chart, not a metric here.
 with st.container(horizontal=True):
     st.metric("Rows", f"{len(df):,}", border=True)
     st.metric("Numeric columns", len(numeric_cols), border=True)
     st.metric("Series plotted", len(y_cols), border=True)
-    st.metric("Chart type", chart_type.title(), border=True)
 
 left, right = st.columns([3, 2], gap="large")
 
@@ -232,7 +236,9 @@ with right.container(border=True, height="stretch"):
     st.dataframe(
         df, height=min(height, 360), hide_index=True, column_config=column_config
     )
-    st.caption(f"{len(df)} rows × {len(df.columns)} columns")
+    # Row count lives in the KPI row; the total-column count is what that row
+    # (Rows + numeric-column count) doesn't already surface.
+    st.caption(f"{len(df.columns)} columns total")
 
 with left.container(border=True, height="stretch"):
     st.subheader("Highcharts output")
@@ -250,7 +256,11 @@ with left.container(border=True, height="stretch"):
         st.stop()
 
     badge_label, badge_icon, badge_color = MODE_BADGES[render_mode]
-    st.badge(badge_label, icon=badge_icon, color=badge_color)
+    with st.container(horizontal=True):
+        st.badge(
+            f"{chart_type.title()} chart", icon=":material/bar_chart:", color="grey"
+        )
+        st.badge(badge_label, icon=badge_icon, color=badge_color)
 
     # The chart renders in an iframe / server PNG that the shell theme can't
     # reach, so read the active light/dark mode and let the builder flip the
@@ -301,12 +311,13 @@ with left.container(border=True, height="stretch"):
 
     # Gate the generated-config panel behind a toggle so cached_chart_js only
     # builds (and re-hashes df) when the user actually asks for it. A plain
-    # st.expander renders its body on every rerun even while collapsed (Streamlit
-    # only hides it client-side), so the JS would be rebuilt on every slider or
-    # title change for a panel that's closed by default. An expander with
-    # on_change="rerun" + `.open` would also skip that work, but AppTest can't
-    # open it — so the toggle (the performance reference's alternative) keeps the
-    # config both cheap and observable to the headless tests.
+    # st.expander re-runs its body on every rerun even while collapsed (Streamlit
+    # only hides it client-side): it would re-hash df for the cache lookup and
+    # re-render st.code each rerun, rebuilding the JS whenever the cache key (chart
+    # type / columns / title / theme — note height is not a key) changes. An
+    # expander with on_change="rerun" + `.open` would also skip that, but AppTest
+    # can't open it — so the toggle (the performance reference's alternative) keeps
+    # the config both cheap and observable to the headless tests.
     if st.toggle(":material/code: Show the generated Highcharts config (JavaScript)"):
         chart_js = cached_chart_js(df, chart_type, x_col, tuple(y_cols), title, dark)
         st.code(chart_js, language="javascript")
