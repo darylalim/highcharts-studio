@@ -70,6 +70,16 @@ def _themed(options: dict, *, dark: bool) -> dict:
     legend = options.setdefault("legend", {})
     legend["itemStyle"] = {"color": t["text"]}
     legend["itemHoverStyle"] = {"color": t["muted"]}
+    # The tooltip is lazily rendered by Highcharts and defaults to a light box, so
+    # in dark mode it floats light-on-dark on hover unless themed here (config.toml
+    # can't reach it inside the iframe/PNG). Merge so the pie path's pointFormat
+    # survives.
+    options["tooltip"] = {
+        **options.get("tooltip", {}),
+        "backgroundColor": t["bg"],
+        "borderColor": t["axis"],
+        "style": {"color": t["text"]},
+    }
     for key in ("xAxis", "yAxis"):
         axis = options.get(key)
         if not isinstance(axis, dict):

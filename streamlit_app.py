@@ -41,14 +41,16 @@ MODE_BADGES: dict[str, tuple[str, str, _BadgeColor]] = {
 
 st.set_page_config(
     page_title="Highcharts Studio",
-    page_icon=":material/show_chart:",
+    page_icon=":material/insights:",
     layout="wide",
 )
 
 
 # max_entries bounds each cache so entries are evicted LRU instead of piling up
-# as users sweep chart types, columns, heights, and titles (PNG bytes and full
-# HTML docs are the largest, so those get the tighter caps).
+# as users sweep chart types, columns, heights, and titles. The memory-heavy
+# layers get the tighter caps: an uploaded CSV DataFrame can be multi-MB
+# (load_csv=8) and the PNG bytes are large (=64); the HTML and JS are small
+# strings that share the looser 128 cap.
 @st.cache_data(show_spinner=False, max_entries=8)
 def load_csv(file) -> pd.DataFrame:
     return pd.read_csv(file)
@@ -135,7 +137,17 @@ with st.sidebar:
         st.stop()
 
     st.header(":material/bar_chart: 2 · Chart")
-    chart_type = st.selectbox("Chart type", SUPPORTED_TYPES)
+    chart_type = st.selectbox(
+        "Chart type",
+        SUPPORTED_TYPES,
+        help=(
+            "How the type reshapes the controls below:\n"
+            "- **pie** — one label column + one value column\n"
+            "- **scatter** — an X column paired with one or more numeric Y series\n"
+            "- **line / spline / area / column / bar** — a category X axis with "
+            "one or more numeric Y series"
+        ),
+    )
 
     if chart_type == "pie":
         x_label, y_label, multi = "Slice labels", "Slice values", False
@@ -185,6 +197,16 @@ with st.sidebar:
 # --------------------------------------------------------------------------- #
 # Main panel
 # --------------------------------------------------------------------------- #
+# At-a-glance summary of the active data + config, above the two cards.
+# st.container(horizontal=True) is the reference's KPI-row pattern (wraps on small
+# screens; preferred over st.columns for metric rows). "Series plotted" reads 0
+# before the empty-selection guard fires below — a useful empty state, not a blank.
+with st.container(horizontal=True):
+    st.metric("Rows", f"{len(df):,}", border=True)
+    st.metric("Numeric columns", len(numeric_cols), border=True)
+    st.metric("Series plotted", len(y_cols), border=True)
+    st.metric("Chart type", chart_type.title(), border=True)
+
 left, right = st.columns([3, 2], gap="large")
 
 with right.container(border=True, height="stretch"):
@@ -269,8 +291,14 @@ with left.container(border=True, height="stretch"):
             "Interactive chart — Highcharts JS is loaded from the CDN in the browser."
         )
 
-    with st.expander(
-        "View the generated Highcharts config (JavaScript)", icon=":material/code:"
-    ):
+    # Gate the generated-config panel behind a toggle so cached_chart_js only
+    # builds (and re-hashes df) when the user actually asks for it. A plain
+    # st.expander renders its body on every rerun even while collapsed (Streamlit
+    # only hides it client-side), so the JS would be rebuilt on every slider or
+    # title change for a panel that's closed by default. An expander with
+    # on_change="rerun" + `.open` would also skip that work, but AppTest can't
+    # open it — so the toggle (the performance reference's alternative) keeps the
+    # config both cheap and observable to the headless tests.
+    if st.toggle(":material/code: Show the generated Highcharts config (JavaScript)"):
         chart_js = cached_chart_js(df, chart_type, x_col, tuple(y_cols), title, dark)
         st.code(chart_js, language="javascript")

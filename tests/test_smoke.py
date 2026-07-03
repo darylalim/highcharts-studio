@@ -136,6 +136,41 @@ def test_dark_mode_themes_pie_labels_and_skips_axes():
     assert "xAxis" not in opts
 
 
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
+    # The tooltip is lazily rendered by Highcharts and defaults to a light box, so
+    # dark mode must theme it explicitly or it floats light-on-dark on hover.
+    opts = build_options(labeled_frame, chart_type, "label", ["value"], dark=True)
+    assert opts["tooltip"]["backgroundColor"] == "#0f172a"
+    assert opts["tooltip"]["style"]["color"] == "#e2e8f0"
+
+
+def test_dark_mode_tooltip_merge_preserves_pie_point_format():
+    # Theming MERGES rather than clobbers: the pie path's custom pointFormat lives.
+    opts = build_options(
+        pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]}),
+        "pie",
+        "name",
+        ["v"],
+        dark=True,
+    )
+    assert opts["tooltip"]["backgroundColor"] == "#0f172a"
+    assert "point.percentage" in opts["tooltip"]["pointFormat"]
+
+
+def test_light_mode_leaves_tooltip_chrome_unset():
+    # Light mode stays a no-op: cartesian output has no tooltip key at all, and the
+    # pie tooltip keeps only its pointFormat with no injected dark chrome.
+    line = build_options(
+        pd.DataFrame({"x": ["a", "b"], "y": [1, 2]}), "line", "x", ["y"]
+    )
+    assert "tooltip" not in line
+    pie = build_options(
+        pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]}), "pie", "name", ["v"]
+    )
+    assert "backgroundColor" not in pie["tooltip"]
+
+
 def test_build_chart_html_body_background_tracks_mode():
     # The iframe body background is painted to match the chart so there's no
     # light flash at the edges in dark mode; light stays white.
@@ -305,12 +340,16 @@ def test_sample_datasets_are_plottable_and_fresh():
 #
 # These drive the UI control flow, not chart correctness (the builder tests
 # above own that). The rendered chart lives in an opaque st.iframe that AppTest
-# can't see into, but the "generated config" expander exposes the Highcharts JS
-# literal via st.code — so we assert the controls actually reach the builder.
+# can't see into, but the "generated config" toggle reveals the Highcharts JS
+# literal via st.code — so, after switching that toggle on, we assert the
+# controls actually reach the builder. (It's a toggle rather than an expander
+# because a collapsed expander body still runs on every rerun; the toggle skips
+# building the JS until asked, and unlike an expander AppTest can switch it on.)
 # Sidebar widgets are addressed by position: selectbox [0] Dataset, [1] Chart
 # type, [2] X axis; segmented_control [0] Source, [1] Render mode; pills [0] the
-# Y series. Everything here stays on the network-free interactive path (the
-# Static PNG render mode would call the live export server).
+# Y series; toggle [0] the generated-config reveal. Everything here stays on the
+# network-free interactive path (the Static PNG mode would call the export
+# server).
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def app():
@@ -321,25 +360,29 @@ def app():
 
 
 def test_app_default_run_emits_highcharts_config(app):
+    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
     assert not app.exception
     assert "Highcharts" in app.code[0].value  # the generated config rendered
 
 
 def test_app_switch_to_pie_regenerates_config(app):
-    app.selectbox[1].set_value("pie").run()  # Chart type -> pie
+    app.selectbox[1].set_value("pie")  # Chart type -> pie
+    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
     assert not app.exception
     assert "type: 'pie'" in app.code[0].value
 
 
 def test_app_custom_title_flows_into_config(app):
-    app.text_input(key="chart_title").set_value("My Title").run()
+    app.text_input(key="chart_title").set_value("My Title")
+    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
     assert not app.exception
     assert "My Title" in app.code[0].value
 
 
 def test_app_multiple_series_selected(app):
     # The revenue-vs-cost sample has two numeric columns; select both via pills.
-    app.pills[0].set_value(["revenue", "cost"]).run()
+    app.pills[0].set_value(["revenue", "cost"])
+    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
     assert not app.exception
     js = app.code[0].value
     assert "revenue" in js and "cost" in js
@@ -388,5 +431,7 @@ def test_app_default_interactive_mode_shows_iframe_caption(app):
 
 def test_app_generated_config_includes_brand_palette(app):
     # The brand palette reaches the iframe/PNG paths through build_options; the
-    # generated-config expander is the visible proof in the default run.
+    # generated-config toggle is the visible proof once switched on.
+    app.toggle[0].set_value(True).run()  # reveal the generated-config panel
+    assert not app.exception
     assert DEFAULT_COLORS[0] in app.code[0].value
