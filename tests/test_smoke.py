@@ -11,17 +11,18 @@ Layers:
   validation guards (unsupported type, empty ``y_cols``, and the cartesian-only
   x-in-y rule).
 - light/dark theming: dark mode paints the chart background (light leaves it
-  unset), the chart chrome (axes/text/gridlines, pie labels) flips while the
-  ``DEFAULT_COLORS`` palette stays shared across modes, and ``build_chart_html``
-  gives the iframe body a background that tracks the mode.
+  unset), the chart chrome (axes/text/gridlines, pie labels, and the tooltip)
+  flips while the ``DEFAULT_COLORS`` palette stays shared across modes, and
+  ``build_chart_html`` gives the iframe body a background that tracks the mode.
 - ``sample_data`` unit tests: every built-in dataset is plottable (fresh,
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
-  control flow — switching chart type, title, and series, checking the
-  render-mode selector offers its two modes (interactive iframe / static PNG),
-  and tripping the x-in-y warning and the no-CSV-uploaded info guard — asserting
-  on the generated Highcharts config (incl. the brand palette) and the guard
-  messages.
+  control flow — switching chart type, title, and series, revealing the
+  generated Highcharts config behind its toggle, the KPI metric row, the
+  wide-CSV multiselect fallback, and the render-mode selector's two modes
+  (interactive iframe / static PNG), plus tripping the x-in-y warning and the
+  no-CSV-uploaded info guard — asserting on the generated config (incl. the
+  brand palette) and the guard messages.
 """
 
 import sys
@@ -466,3 +467,33 @@ def test_app_narrow_csv_upload_keeps_pills(app):
     assert not app.exception
     assert len(app.pills) == 1
     assert not app.multiselect
+
+
+def test_app_chart_type_selector_has_help(app):
+    # The chart-type selector silently reshapes the X/Y controls, so it carries a
+    # markdown help tooltip naming each type's data shape (mirrors the Mode help).
+    help_text = app.selectbox[1].help  # selectbox [1] is Chart type
+    assert help_text
+    assert "pie" in help_text and "scatter" in help_text
+
+
+def test_app_kpi_row_summarizes_active_data(app):
+    # The KPI row above the cards surfaces the active data + config at a glance.
+    # Defaults: revenue-vs-cost sample (6 rows, 2 numeric cols), one series, line.
+    assert {m.label: m.value for m in app.metric} == {
+        "Rows": "6",
+        "Numeric columns": "2",
+        "Series plotted": "1",
+        "Chart type": "Line",
+    }
+
+
+def test_app_kpi_series_count_tracks_selection_and_empty_state(app):
+    # "Series plotted" follows the Y selection and reads 0 — a useful empty state,
+    # not a blank — once cleared, since the KPI row sits above the empty-y guard.
+    app.pills[0].set_value(["revenue", "cost"]).run()
+    assert not app.exception
+    assert {m.label: m.value for m in app.metric}["Series plotted"] == "2"
+    app.pills[0].set_value([]).run()
+    assert not app.exception
+    assert {m.label: m.value for m in app.metric}["Series plotted"] == "0"
