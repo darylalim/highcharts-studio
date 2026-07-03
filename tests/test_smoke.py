@@ -111,12 +111,20 @@ def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
     assert opts["colors"] == list(DEFAULT_COLORS)
 
 
-def test_dark_mode_themes_cartesian_axes_and_text():
-    df = pd.DataFrame({"x": ["a", "b"], "y": [1, 2]})
-    opts = build_options(df, "line", "x", ["y"], dark=True)
+def test_dark_mode_themes_cartesian_axes_text_and_legend():
+    # Two series so the legend is enabled and its recoloring is meaningful.
+    df = pd.DataFrame({"x": ["a", "b"], "y": [1, 2], "z": [3, 4]})
+    opts = build_options(df, "line", "x", ["y", "z"], dark=True)
     assert opts["title"]["style"]["color"] == "#e2e8f0"
+    # Axis labels + title, and the line/tick/gridline colors, all flip.
     assert opts["xAxis"]["labels"]["style"]["color"] == "#94a3b8"
+    assert opts["xAxis"]["title"]["style"]["color"] == "#94a3b8"
+    assert opts["xAxis"]["lineColor"] == "#475569"
+    assert opts["xAxis"]["tickColor"] == "#475569"
     assert opts["yAxis"]["gridLineColor"] == "#334155"
+    # Legend text recolors too (dark-on-dark would be unreadable otherwise).
+    assert opts["legend"]["itemStyle"]["color"] == "#e2e8f0"
+    assert opts["legend"]["itemHoverStyle"]["color"] == "#94a3b8"
 
 
 def test_dark_mode_themes_pie_labels_and_skips_axes():
@@ -134,6 +142,20 @@ def test_build_chart_html_body_background_tracks_mode():
     df = pd.DataFrame({"x": ["a", "b"], "y": [1, 2]})
     assert "background:#0f172a" in build_chart_html(df, "line", "x", ["y"], dark=True)
     assert "background:#ffffff" in build_chart_html(df, "line", "x", ["y"])
+
+
+def test_theme_colors_stay_in_sync_with_config():
+    # A few chart-chrome colors duplicate config.toml theme values (the builder
+    # is Streamlit-free, so it can't read the resolved theme at runtime). Guard
+    # the sync mechanically here instead of relying on cross-referencing comments.
+    import tomllib
+
+    from highcharts_builder import _DARK_CHROME
+
+    theme = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text())["theme"]
+    assert _DARK_CHROME["bg"] == theme["dark"]["backgroundColor"]
+    assert _DARK_CHROME["text"] == theme["dark"]["textColor"]
+    assert DEFAULT_COLORS[0] == theme["light"]["primaryColor"]
 
 
 # --------------------------------------------------------------------------- #
