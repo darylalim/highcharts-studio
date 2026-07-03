@@ -22,30 +22,40 @@ PROTECTED_RELPATHS = {".streamlit/secrets.toml"}  # matched repo-relative
 PROTECTED_DIRS = {".git"}  # matched if any path segment is one of these
 
 
-def main() -> int:
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
-    file_path = (data.get("tool_input") or {}).get("file_path", "") or ""
-    if not file_path:
-        return 0
+def protected_reason(file_path: str, root: str | None) -> str | None:
+    """Return the repo-relative path if it must not be hand-edited, else None.
 
-    root = os.environ.get("CLAUDE_PROJECT_DIR")
+    Pure and importable so the guard logic can be unit-tested without a
+    subprocess. ``root`` is the project root (``$CLAUDE_PROJECT_DIR``); the path
+    is matched repo-relative where possible, else by the raw path.
+    """
+    if not file_path:
+        return None
     p = Path(file_path)
     try:
         rel = p.resolve().relative_to(Path(root).resolve()) if root else p
     except ValueError:
         rel = p  # outside the project tree — fall back to the raw path
     rel_str = rel.as_posix()
-
     if (
         p.name in PROTECTED_NAMES
         or rel_str in PROTECTED_RELPATHS
         or (set(rel.parts) & PROTECTED_DIRS)
     ):
+        return rel_str
+    return None
+
+
+def main() -> int:
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        return 0
+    file_path = (data.get("tool_input") or {}).get("file_path", "") or ""
+    reason = protected_reason(file_path, os.environ.get("CLAUDE_PROJECT_DIR"))
+    if reason is not None:
         sys.stderr.write(
-            f"Blocked edit to protected path '{rel_str}'.\n"
+            f"Blocked edit to protected path '{reason}'.\n"
             "- uv.lock: change it with `uv add` / `uv sync` / `uv lock`, not by hand.\n"
             "- .streamlit/secrets.toml: never write secrets through an edit.\n"
             "- .git/: git internals must not be hand-edited.\n"

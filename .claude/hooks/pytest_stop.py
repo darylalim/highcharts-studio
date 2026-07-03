@@ -22,6 +22,26 @@ import subprocess
 import sys
 
 
+def has_dirty_python(porcelain: str) -> bool:
+    """True if ``git status --porcelain`` output names a changed .py outside .claude/.
+
+    Pure and importable so the change-detection can be unit-tested without a git
+    repo. Either side of a rename ("old -> new") counts, so renaming a .py to
+    another name still registers as a Python change. ``.claude/`` paths are
+    ignored since Claude config/hooks aren't app code.
+    """
+    for line in porcelain.splitlines():
+        entry = line[3:].strip()  # drop the "XY " porcelain status prefix
+        parts = entry.split(" -> ") if " -> " in entry else [entry]  # rename?
+        for path in parts:
+            path = path.strip().strip('"')
+            if path.startswith(".claude/"):
+                continue
+            if path.endswith(".py"):
+                return True
+    return False
+
+
 def _dirty_python(root: str | None) -> bool:
     """True if the working tree has modified/added .py files outside .claude/."""
     try:
@@ -35,15 +55,7 @@ def _dirty_python(root: str | None) -> bool:
         return True  # no git available — don't gate, just run
     if out.returncode != 0:
         return True
-    for line in out.stdout.splitlines():
-        path = line[3:].strip().strip('"')  # porcelain: "XY <path>"
-        if " -> " in path:  # rename: "old -> new"
-            path = path.split(" -> ", 1)[1]
-        if path.startswith(".claude/"):
-            continue  # Claude config/hooks aren't app code
-        if path.endswith(".py"):
-            return True
-    return False
+    return has_dirty_python(out.stdout)
 
 
 def main() -> int:

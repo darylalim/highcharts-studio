@@ -32,9 +32,21 @@ def _read_file_path() -> str:
     return (data.get("tool_input") or {}).get("file_path", "") or ""
 
 
+def is_python_target(file_path: str) -> bool:
+    """True if ``file_path`` is an existing ``.py`` file worth linting.
+
+    Pure and importable so the routing (which edits trigger ruff/ty) can be
+    unit-tested without spawning the toolchain.
+    """
+    if not file_path:
+        return False
+    p = Path(file_path)
+    return p.suffix == ".py" and p.exists()
+
+
 def main() -> int:
     file_path = _read_file_path()
-    if not file_path or Path(file_path).suffix != ".py" or not Path(file_path).exists():
+    if not is_python_target(file_path):
         return 0
 
     root = os.environ.get("CLAUDE_PROJECT_DIR") or None

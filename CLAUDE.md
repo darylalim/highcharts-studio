@@ -22,10 +22,16 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter edge cases, the brand palette, and the validation guards) and
   `sample_data` unit tests, plus headless `AppTest` interaction tests.
+- `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
+  decision functions (path guard, `.py` routing, git-dirty detection) plus a
+  black-box check of each hook's exit-code contract.
 - `.streamlit/config.toml` — project Streamlit theme (brands the app shell in
   both light and dark via `[theme.light]`/`[theme.dark]`, which unlocks the
   in-app light/dark toggle). The chart colors are themed separately (see
   Conventions) since charts render in an iframe the shell theme can't reach.
+- `.claude/settings.json` + `.claude/hooks/*.py` — committed Claude Code hooks
+  that mirror the CI gates (see Hooks). `.claude/settings.local.json` holds
+  per-developer overrides and is gitignored.
 
 ## How a chart is built
 
@@ -77,6 +83,12 @@ via Streamlit's `AppTest` (switching controls, revealing the generated config
 behind its toggle, the KPI metric row, the wide-CSV `st.multiselect` fallback,
 the render-mode selector's two modes, and asserting the guard messages).
 
+`tests/test_hooks.py` covers the `.claude/hooks/` scripts: the extracted pure
+functions (`protected_reason`, `is_python_target`, `has_dirty_python`) directly,
+plus a black-box pass that drives `guard_paths.py` / `post_edit_py.py` over stdin
+to pin their exit-code contract (2 blocks, 0 allows) without spawning the
+toolchain.
+
 ## Lint & format
 
 Ruff handles both (config in `pyproject.toml`). CI runs the tests and these
@@ -102,6 +114,29 @@ A few highcharts-core stub mismatches (Optional `options`/`chart`,
 `# ty: ignore[rule]`, not by downgrading rules globally — so the rules still
 catch the same problems in our own code.
 
+## Hooks
+
+`.claude/settings.json` wires three project hooks (committed; the per-developer
+`.claude/settings.local.json` stays gitignored) that mirror the CI gates so edits
+stay green before a push. Each is a stdlib-only Python script under
+`.claude/hooks/`, run via `python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/<name>.py"`,
+and keeps its decision logic in a pure, importable function that
+`tests/test_hooks.py` covers.
+
+- `post_edit_py.py` (PostToolUse on `Edit`/`Write`/`MultiEdit`) — on a `.py`
+  edit, runs `ruff check --fix` + `ruff format` in place, then `ty check`; exits
+  2 on type errors so the diagnostics feed back to fix. Mirrors the Ruff and ty
+  gates.
+- `pytest_stop.py` (Stop) — runs `uv run pytest` only when the working tree has
+  uncommitted `.py` changes outside `.claude/`; exits 2 on failure to feed the
+  output back, with a `stop_hook_active` guard so it can't loop. Mirrors the test
+  gate.
+- `guard_paths.py` (PreToolUse) — blocks direct edits to `uv.lock`,
+  `.streamlit/secrets.toml`, and `.git/` internals.
+
+Adding or changing a hook triggers Claude Code's one-time hook-review prompt
+before it runs.
+
 ## Conventions
 
 - When working with Python, invoke the relevant Astral skill (`/astral:uv`,
@@ -109,6 +144,9 @@ catch the same problems in our own code.
   are followed.
 - Keep chart-building logic (DataFrame → Highcharts) in `highcharts_builder.py`,
   free of Streamlit imports, so it stays unit-testable.
+- Keep each hook's decision logic in a pure, importable function in
+  `.claude/hooks/` (as the builder is), so `tests/test_hooks.py` can cover it
+  without subprocesses; the `main()` wrapper only does stdin/exit-code plumbing.
 - Render every visualization with Highcharts (`highcharts-core`); do not use
   native Streamlit charts.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
