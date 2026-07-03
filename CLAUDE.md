@@ -121,7 +121,9 @@ catch the same problems in our own code.
 stay green before a push. Each is a stdlib-only Python script under
 `.claude/hooks/`, run via `python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/<name>.py"`,
 and keeps its decision logic in a pure, importable function that
-`tests/test_hooks.py` covers.
+`tests/test_hooks.py` covers. The scripts are themselves held to those gates:
+`ruff check .` and `uv run ty check` include `.claude/hooks/` (dot-dirs aren't
+excluded), so the tooling that enforces the app enforces the hooks too.
 
 - `post_edit_py.py` (PostToolUse on `Edit`/`Write`/`MultiEdit`) — on a `.py`
   edit, runs `ruff check --fix` + `ruff format` in place, then `ty check`; exits

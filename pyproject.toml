@@ -23,6 +23,8 @@ dependencies = [
 ]
 
 [dependency-groups]
+# These also power the local Claude Code hooks in .claude/hooks/ (ruff + ty on
+# edit, pytest on stop), not just CI — see CLAUDE.md > Hooks.
 dev = [
     "pytest>=8.0",
     "ruff==0.15.17",
@@ -39,7 +41,8 @@ bypass-selection = true
 [tool.ruff.lint]
 # Balanced set, not "ALL" (which fights this app's deliberate design).
 # E501 is ignored: the formatter owns line length. target-version auto-infers
-# py312 from requires-python.
+# py312 from requires-python. `.claude/hooks/*.py` isn't excluded (dot-dirs
+# aren't in Ruff's default excludes), so the hook scripts are linted too.
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
@@ -50,4 +53,6 @@ ignore = ["E501"]
 [tool.ty]
 # Defaults are a good baseline: ty infers the py312 target from requires-python
 # (like Ruff), and stray highcharts-core stub mismatches are suppressed inline
-# (`# ty: ignore[rule]`), not downgraded here. Anchor for future ty settings.
+# (`# ty: ignore[rule]`), not downgraded here. `ty check` also type-checks the
+# `.claude/hooks/` scripts (they're part of the project tree). Anchor for future
+# ty settings.

@@ -57,6 +57,8 @@ light/dark theme, which you can toggle from the settings menu.
 | `sample_data.py` | Pure (Streamlit-free) built-in sample datasets offered when no CSV is uploaded. |
 | `.streamlit/config.toml` | Streamlit light/dark themes (app shell) and dev settings (`runOnSave`). |
 | `tests/test_smoke.py` | Builder and sample-data unit tests plus headless `AppTest` interaction tests. |
+| `tests/test_hooks.py` | Unit tests for the Claude Code hook scripts (pure decision functions + exit-code contract). |
+| `.claude/settings.json`, `.claude/hooks/` | Committed Claude Code hooks that mirror the CI gates (see Claude Code hooks below). |
 
 ## Test
 
@@ -70,7 +72,8 @@ theming (including the dark-mode tooltip), and the validation guards, plus the
 sample datasets; then drives the full app headless with Streamlit's `AppTest` —
 switching controls, revealing the generated config behind its toggle, the KPI
 metric row, the wide-CSV `st.multiselect` fallback, the render-mode selector's
-two modes, and asserting the guard messages.
+two modes, and asserting the guard messages. `tests/test_hooks.py` adds unit
+coverage for the `.claude/hooks/` scripts (see Claude Code hooks below).
 
 ## Lint & format
 
@@ -104,6 +107,23 @@ with `# ty: ignore[rule]` (so the rules still apply everywhere else); see
 GitHub Actions runs the tests, the Ruff lint/format checks, and the ty type
 check on every push to `main` and every pull request
 (`.github/workflows/ci.yml`).
+
+## Claude Code hooks
+
+`.claude/settings.json` and `.claude/hooks/` ship
+[Claude Code](https://claude.com/claude-code) hooks (committed; the per-developer
+`.claude/settings.local.json` is gitignored) that mirror the CI gates locally, so
+edits stay green before a push:
+
+- **`post_edit_py.py`** (PostToolUse) — on a `.py` edit, runs `ruff check --fix`
+  + `ruff format`, then `ty check`.
+- **`pytest_stop.py`** (Stop) — runs `pytest` when the tree has uncommitted `.py`
+  changes, with a loop guard so it can't run forever.
+- **`guard_paths.py`** (PreToolUse) — blocks direct edits to `uv.lock`,
+  `.streamlit/secrets.toml`, and `.git/` internals.
+
+They only affect contributors using Claude Code; the app and CI don't depend on
+them. See `CLAUDE.md` for details.
 
 ## Notes
 
