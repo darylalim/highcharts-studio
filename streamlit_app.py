@@ -159,11 +159,19 @@ with st.sidebar:
     x_col = st.selectbox(x_label, df.columns)
 
     if multi:
-        # Pills show every series choice inline (vs a dropdown); the empty-set
-        # guard in the main panel handles a fully-cleared selection.
-        y_cols = st.pills(
-            y_label, numeric_cols, selection_mode="multi", default=numeric_cols[:1]
-        )
+        # Pills keep every series choice inline and compact, but the reference
+        # bounds them at ~5 options: a wide uploaded CSV can have many numeric
+        # columns, which would wrap the pills into several rows in the narrow
+        # sidebar. Past that threshold fall back to st.multiselect (a dropdown).
+        # Either way the empty-set guard in the main panel handles a cleared
+        # selection. (st.multiselect is inherently multi, so it takes no
+        # selection_mode — hence the two separate calls.)
+        if len(numeric_cols) <= 5:
+            y_cols = st.pills(
+                y_label, numeric_cols, selection_mode="multi", default=numeric_cols[:1]
+            )
+        else:
+            y_cols = st.multiselect(y_label, numeric_cols, default=numeric_cols[:1])
     else:
         y_cols = [st.selectbox(y_label, numeric_cols)]
 

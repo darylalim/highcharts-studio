@@ -347,9 +347,9 @@ def test_sample_datasets_are_plottable_and_fresh():
 # building the JS until asked, and unlike an expander AppTest can switch it on.)
 # Sidebar widgets are addressed by position: selectbox [0] Dataset, [1] Chart
 # type, [2] X axis; segmented_control [0] Source, [1] Render mode; pills [0] the
-# Y series; toggle [0] the generated-config reveal. Everything here stays on the
-# network-free interactive path (the Static PNG mode would call the export
-# server).
+# Y series (a wide CSV upload swaps these pills for a multiselect); toggle [0] the
+# generated-config reveal. Everything here stays on the network-free interactive
+# path (the Static PNG mode would call the export server).
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def app():
@@ -435,3 +435,34 @@ def test_app_generated_config_includes_brand_palette(app):
     app.toggle[0].set_value(True).run()  # reveal the generated-config panel
     assert not app.exception
     assert DEFAULT_COLORS[0] in app.code[0].value
+
+
+def _csv_bytes(num_numeric: int) -> bytes:
+    """A CSV: one label column + ``num_numeric`` numeric columns, three rows."""
+    header = ",".join(["label"] + [f"m{i}" for i in range(num_numeric)])
+    rows = "\n".join(
+        f"r{r}," + ",".join(str(r + i) for i in range(num_numeric)) for r in range(3)
+    )
+    return (header + "\n" + rows).encode()
+
+
+def test_app_wide_csv_upload_swaps_pills_for_multiselect(app):
+    # The Y-series picker uses compact pills for narrow data (<=5 numeric columns,
+    # like every sample) but falls back to st.multiselect for a wide uploaded CSV
+    # so it doesn't wrap the narrow sidebar. Seven numeric columns trips it.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("wide.csv", _csv_bytes(7), "text/csv")).run()
+    assert not app.exception
+    assert not app.pills  # the pills widget is gone
+    assert len(app.multiselect) == 1
+    assert list(app.multiselect[0].options) == [f"m{i}" for i in range(7)]
+
+
+def test_app_narrow_csv_upload_keeps_pills(app):
+    # A narrow upload (<=5 numeric columns) stays on pills, like the samples — so
+    # the pills-based tests above keep exercising the common path.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("narrow.csv", _csv_bytes(2), "text/csv")).run()
+    assert not app.exception
+    assert len(app.pills) == 1
+    assert not app.multiselect
