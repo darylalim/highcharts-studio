@@ -55,7 +55,7 @@ def load_csv(file) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Rendering Highcharts…", max_entries=128)
-def cached_chart_html(df, chart_type, x_col, y_cols, height, title) -> str:
+def cached_chart_html(df, chart_type, x_col, y_cols, height, title, dark) -> str:
     return build_chart_html(
         df,
         chart_type,
@@ -63,13 +63,14 @@ def cached_chart_html(df, chart_type, x_col, y_cols, height, title) -> str:
         list(y_cols),
         height=height,
         title=title,
+        dark=dark,
     )
 
 
 @st.cache_data(
     show_spinner="Rendering PNG via the Highcharts export server…", max_entries=64
 )
-def cached_chart_png(df, chart_type, x_col, y_cols, height, title) -> bytes:
+def cached_chart_png(df, chart_type, x_col, y_cols, height, title, dark) -> bytes:
     return build_chart_png(
         df,
         chart_type,
@@ -77,14 +78,17 @@ def cached_chart_png(df, chart_type, x_col, y_cols, height, title) -> bytes:
         list(y_cols),
         height=height,
         title=title,
+        dark=dark,
     )
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
-def cached_chart_js(df, chart_type, x_col, y_cols, title) -> str:
+def cached_chart_js(df, chart_type, x_col, y_cols, title, dark) -> str:
     # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
     # literal string for a built chart.
-    return make_chart(df, chart_type, x_col, list(y_cols), title=title).to_js_literal()  # ty: ignore[invalid-return-type]
+    return make_chart(  # ty: ignore[invalid-return-type]
+        df, chart_type, x_col, list(y_cols), title=title, dark=dark
+    ).to_js_literal()
 
 
 # --------------------------------------------------------------------------- #
@@ -183,7 +187,7 @@ with st.sidebar:
 # --------------------------------------------------------------------------- #
 left, right = st.columns([3, 2], gap="large")
 
-with right.container(border=True):
+with right.container(border=True, height="stretch"):
     st.subheader("Source data")
     # Localized number formatting, hidden index, and the chart's X column pinned
     # so it stays visible while scrolling wide CSVs.
@@ -200,7 +204,7 @@ with right.container(border=True):
     )
     st.caption(f"{len(df)} rows × {len(df.columns)} columns")
 
-with left.container(border=True):
+with left.container(border=True, height="stretch"):
     st.subheader("Highcharts output")
 
     if not y_cols:
@@ -218,10 +222,22 @@ with left.container(border=True):
     badge_label, badge_icon, badge_color = MODE_BADGES[render_mode]
     st.badge(badge_label, icon=badge_icon, color=badge_color)
 
+    # The chart renders in an iframe / server PNG that the shell theme can't
+    # reach, so read the active light/dark mode and let the builder flip the
+    # chart's chrome to match. `dark` is part of every renderer's cache key, so
+    # each mode caches independently. Initial load matches the chart to the shell;
+    # a *manual* mid-session theme switch is applied frontend-side without a Python
+    # rerun, so the chart catches up on the next interaction. The defensive getattr
+    # keeps this working under AppTest, where st.context has no theme.
+    _theme = getattr(st.context, "theme", None)
+    dark = getattr(_theme, "type", "light") == "dark"
+
     if render_mode == MODE_STATIC:
         # Server-side render: no Highcharts JS runs in the browser.
         try:
-            png = cached_chart_png(df, chart_type, x_col, tuple(y_cols), height, title)
+            png = cached_chart_png(
+                df, chart_type, x_col, tuple(y_cols), height, title, dark
+            )
         except Exception as exc:  # build error or export-server failure
             st.error(
                 f"Static (PNG) render failed.\n\n`{type(exc).__name__}: {exc}`\n\n"
@@ -243,7 +259,9 @@ with left.container(border=True):
             "the browser loads no Highcharts JS."
         )
     else:
-        html = cached_chart_html(df, chart_type, x_col, tuple(y_cols), height, title)
+        html = cached_chart_html(
+            df, chart_type, x_col, tuple(y_cols), height, title, dark
+        )
         # The HTML is embedded in a sandboxed iframe with a FIXED height — it
         # does not auto-grow to its content, so size it to the chart.
         st.iframe(html, height=height + 24)
@@ -254,5 +272,5 @@ with left.container(border=True):
     with st.expander(
         "View the generated Highcharts config (JavaScript)", icon=":material/code:"
     ):
-        chart_js = cached_chart_js(df, chart_type, x_col, tuple(y_cols), title)
+        chart_js = cached_chart_js(df, chart_type, x_col, tuple(y_cols), title, dark)
         st.code(chart_js, language="javascript")

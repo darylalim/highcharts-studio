@@ -10,6 +10,10 @@ Layers:
   x), the brand-palette (``DEFAULT_COLORS`` / ``colors`` override), and the
   validation guards (unsupported type, empty ``y_cols``, and the cartesian-only
   x-in-y rule).
+- light/dark theming: dark mode paints the chart background (light leaves it
+  unset), the chart chrome (axes/text/gridlines, pie labels) flips while the
+  ``DEFAULT_COLORS`` palette stays shared across modes, and ``build_chart_html``
+  gives the iframe body a background that tracks the mode.
 - ``sample_data`` unit tests: every built-in dataset is plottable (fresh,
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
@@ -34,6 +38,7 @@ from highcharts_builder import (  # noqa: E402
     CARTESIAN_TYPES,
     DEFAULT_COLORS,
     SUPPORTED_TYPES,
+    build_chart_html,
     build_options,
 )
 
@@ -77,6 +82,58 @@ def test_colors_override(labeled_frame):
         labeled_frame, "line", "label", ["value"], colors=["#000000", "#ffffff"]
     )
     assert opts["colors"] == ["#000000", "#ffffff"]
+
+
+# --------------------------------------------------------------------------- #
+# Dark theme: only the chart "chrome" flips; the series palette is shared across
+# modes (so a series keeps its color when the viewer toggles), and light mode is
+# a byte-for-byte no-op.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
+    # Dark mode paints the chart background so it matches the dark app shell
+    # (kept in sync with .streamlit/config.toml [theme.dark] backgroundColor).
+    opts = build_options(labeled_frame, chart_type, "label", ["value"], dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_light_mode_leaves_chart_background_unset(labeled_frame, chart_type):
+    # Light mode is a no-op: no backgroundColor is injected, so the output is
+    # exactly what it was before dark mode existed.
+    opts = build_options(labeled_frame, chart_type, "label", ["value"])
+    assert "backgroundColor" not in opts["chart"]
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
+    opts = build_options(labeled_frame, chart_type, "label", ["value"], dark=True)
+    assert opts["colors"] == list(DEFAULT_COLORS)
+
+
+def test_dark_mode_themes_cartesian_axes_and_text():
+    df = pd.DataFrame({"x": ["a", "b"], "y": [1, 2]})
+    opts = build_options(df, "line", "x", ["y"], dark=True)
+    assert opts["title"]["style"]["color"] == "#e2e8f0"
+    assert opts["xAxis"]["labels"]["style"]["color"] == "#94a3b8"
+    assert opts["yAxis"]["gridLineColor"] == "#334155"
+
+
+def test_dark_mode_themes_pie_labels_and_skips_axes():
+    df = pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]})
+    opts = build_options(df, "pie", "name", ["v"], dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["plotOptions"]["pie"]["dataLabels"]["color"] == "#e2e8f0"
+    # Pie has no axes, so the axis-theming loop must simply skip it (not crash).
+    assert "xAxis" not in opts
+
+
+def test_build_chart_html_body_background_tracks_mode():
+    # The iframe body background is painted to match the chart so there's no
+    # light flash at the edges in dark mode; light stays white.
+    df = pd.DataFrame({"x": ["a", "b"], "y": [1, 2]})
+    assert "background:#0f172a" in build_chart_html(df, "line", "x", ["y"], dark=True)
+    assert "background:#ffffff" in build_chart_html(df, "line", "x", ["y"])
 
 
 # --------------------------------------------------------------------------- #

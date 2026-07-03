@@ -1,15 +1,30 @@
 # Project-level Streamlit theme. Brands the app shell (sidebar controls, the
-# source-data dataframe, code blocks, buttons). The Highcharts charts render in
-# an iframe, so these colors do NOT reach them directly: the charts are themed
-# separately via highcharts_builder.DEFAULT_COLORS (which leads with primaryColor
-# below). Keep primaryColor in sync with DEFAULT_COLORS[0].
+# source-data dataframe, code blocks, buttons) in BOTH modes: defining both
+# [theme.light] and [theme.dark] unlocks the light/dark toggle in the app's
+# settings menu (and follows the viewer's OS preference). A lone [theme] would
+# lock the app to one mode.
+#
+# The Highcharts charts render in an iframe / server-side PNG, so these colors do
+# NOT reach them. The charts are themed separately in highcharts_builder: the
+# series palette (DEFAULT_COLORS) is shared across modes and its first color stays
+# in sync with the LIGHT primaryColor below, while the chart "chrome"
+# (background/text/axes) flips per mode via _DARK_CHROME — selected from
+# st.context.theme.type in streamlit_app.py. Keep [theme.dark] background/text in
+# sync with _DARK_CHROME's "bg"/"text".
 [theme]
-base = "light"
+font = "sans-serif"
+
+[theme.light]
 primaryColor = "#2563eb"
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f1f5f9"
 textColor = "#0f172a"
-font = "sans-serif"
+
+[theme.dark]
+primaryColor = "#3b82f6"
+backgroundColor = "#0f172a"
+secondaryBackgroundColor = "#1e293b"
+textColor = "#e2e8f0"
 
 [server]
 # Auto-rerun on file save, so editing streamlit_app.py / the builder reloads

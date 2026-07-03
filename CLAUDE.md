@@ -19,9 +19,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter edge cases, the brand palette, and the validation guards) and
   `sample_data` unit tests, plus headless `AppTest` interaction tests.
-- `.streamlit/config.toml` — project Streamlit theme (brands the app shell). The
-  chart colors are themed separately (see Conventions) since charts render in an
-  iframe the shell theme can't reach.
+- `.streamlit/config.toml` — project Streamlit theme (brands the app shell in
+  both light and dark via `[theme.light]`/`[theme.dark]`, which unlocks the
+  in-app light/dark toggle). The chart colors are themed separately (see
+  Conventions) since charts render in an iframe the shell theme can't reach.
 
 ## How a chart is built
 
@@ -37,6 +38,10 @@ html = build_chart_html(df, chart_type, x_col, y_cols, height=height, title=titl
 # static: rendered server-side to PNG bytes via the export server, for st.image
 png = build_chart_png(df, chart_type, x_col, y_cols, title=title)
 ```
+
+All three helpers take an optional `dark=` flag (default `False`) that themes the
+chart chrome (background/text/axes/gridlines) for dark mode; the app derives it
+from `st.context.theme.type` and threads it through the cached renderers.
 
 Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
 `scatter`.
@@ -61,10 +66,11 @@ uv run pytest
 `tests/test_smoke.py` exercises the pure builder (`build_options`) —
 parametrized across every supported chart type, covering missing data
 (`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
-numeric vs non-numeric scatter paths, the brand palette, and the validation
-guards — plus the sample datasets, then drives the full app headless via
-Streamlit's `AppTest` (switching controls, checking the render-mode selector
-offers its two modes, and asserting the guard messages).
+numeric vs non-numeric scatter paths, the brand palette, the light/dark theming
+(dark-mode chrome vs. the shared palette), and the validation guards — plus the
+sample datasets, then drives the full app headless via Streamlit's `AppTest`
+(switching controls, checking the render-mode selector offers its two modes, and
+asserting the guard messages).
 
 ## Lint & format
 
@@ -105,4 +111,9 @@ catch the same problems in our own code.
   `None`.
 - Theme charts via `highcharts_builder.DEFAULT_COLORS` (applied by
   `build_options` to every chart, so the iframe and PNG paths are themed too),
-  keeping its first color in sync with `primaryColor` in `.streamlit/config.toml`.
+  keeping its first color in sync with the light-mode `primaryColor` in
+  `.streamlit/config.toml`. The palette is shared across light/dark; only the
+  chart chrome (background/text/axes/gridlines) flips, via `build_options(...,
+  dark=...)` / `_DARK_CHROME`. `streamlit_app.py` reads `dark` from
+  `st.context.theme.type` and threads it through the cached renderers (so it's
+  part of their cache key).
