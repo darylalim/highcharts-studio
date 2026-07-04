@@ -1,5 +1,7 @@
 [build-system]
-requires = ["hatchling"]
+# >=1.27 for PEP 639 support: the [project].license SPDX string + license-files
+# below are only honored (and emitted into the wheel metadata) by hatchling 1.27+.
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]

@@ -37,7 +37,7 @@ def _collapse_ws(text: str) -> str:
 
 
 def test_pyproject_declares_mit_via_spdx():
-    # PEP 639 SPDX string form (what Streamlit and pandas use), not the
+    # PEP 639 SPDX string form (as Streamlit already does), not the
     # deprecated ``license = {text = ...}`` table — so the build emits a
     # ``License-Expression``, and tooling/PyPI read "MIT" from the metadata.
     project = _project_metadata()
@@ -68,13 +68,20 @@ def test_license_notice_flags_both_proprietary_layers():
     assert "export server" in text
     assert "highcharts-core" in text
     assert "proprietary" in text
+    # ...and that the MIT grant is explicitly disclaimed over them (the notice's
+    # legal crux) — not merely that the layers are named.
+    assert "does not grant" in text
 
 
 def test_readme_license_section_reflects_mit_and_the_notice():
     readme = (ROOT / "README.md").read_text()
     assert "## License" in readme
     section = _collapse_ws(readme.split("## License", 1)[1])
-    assert "mit" in section
-    # Both proprietary layers get surfaced to a reader who never opens LICENSE.
+    # "mit license", not a bare "mit" (which "permit"/"commit" would satisfy).
+    assert "mit license" in section
+    # Both proprietary layers get surfaced to a reader who never opens LICENSE,
+    # with the same proprietary framing the LICENSE-file test pins.
     assert "highcharts js" in section
+    assert "export server" in section
     assert "highcharts-core" in section
+    assert "proprietary" in section
