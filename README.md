@@ -77,7 +77,9 @@ sample datasets; then drives the full app headless with Streamlit's `AppTest` �
 switching controls, revealing the generated config behind its toggle, the KPI
 metric row, the wide-CSV `st.multiselect` fallback, the render-mode selector's
 two modes, and asserting the guard messages. `tests/test_hooks.py` adds unit
-coverage for the `.claude/hooks/` scripts (see Claude Code hooks below).
+coverage for the `.claude/hooks/` scripts (see Claude Code hooks below), and
+`tests/test_packaging.py` guards the licensing metadata — the `pyproject.toml`
+`license` fields, the `LICENSE` file, and its third-party notice — against drift.
 
 ## Lint & format
 
@@ -146,7 +148,7 @@ them. See `CLAUDE.md` for details.
 
 Runtime:
 
-- `highcharts-core` — Highcharts for Python charting library
+- `highcharts-core` — Highcharts for Python charting library (proprietary; see the License section)
 - `pandas` — DataFrames feeding the charts
 - `streamlit` — app runtime (pinned ≥ 1.57, the version this app is built and CI-tested against)
 

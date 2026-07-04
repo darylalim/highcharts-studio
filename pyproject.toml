@@ -39,7 +39,9 @@ dev = [
 
 # This project ships a Streamlit app, not an importable package, so tell
 # Hatchling it's fine to build an empty wheel (otherwise `uv sync` fails
-# trying to determine which files to ship).
+# trying to determine which files to ship). The wheel still carries the LICENSE
+# and license metadata (see [project].license / license-files above) — it just
+# ships no code modules.
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
 

@@ -44,6 +44,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `.github/workflows/ci.yml` — GitHub Actions: three jobs (pytest, Ruff
   lint/format, ty) that `uv sync --locked` then run the same gates the hooks
   mirror, on every push to `main` and every PR.
+- `LICENSE` — MIT for this project's own code, followed by a third-party notice
+  that the two proprietary layers it renders with (Highcharts JS/the export
+  server, and the `highcharts-core` wrapper) are separately licensed and not
+  covered by the MIT grant. Declared to packaging tools via `pyproject.toml`'s
+  `license`/`license-files`; guarded against drift by `tests/test_packaging.py`.
 
 ## How a chart is built
 
