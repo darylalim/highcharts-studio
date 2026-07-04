@@ -14,10 +14,11 @@ that deserves regression coverage:
   hook from running the suite on conversational turns).
 
 Those pure functions are exercised directly (fast, no toolchain, no git repo,
-reliable in CI). Two black-box tests then drive ``guard_paths.py`` and
+reliable in CI). A few black-box tests then drive ``guard_paths.py`` and
 ``post_edit_py.py`` as real subprocesses over stdin to pin the exit-code
-contract Claude Code relies on (2 blocks, 0 allows) — using only ``python3`` so
-they stay fast and don't shell out to uv/ruff/ty/pytest.
+contract Claude Code relies on (2 blocks, 0 allows) — under the current
+interpreter (``sys.executable``), not shelling out to uv/ruff/ty/pytest, so they
+stay fast.
 
 The scripts live outside any importable package, so they're loaded by file path
 via ``importlib``; importing only defines functions (the work is behind an
@@ -139,6 +140,7 @@ def test_post_edit_skips_empty_path():
         " M a.txt\n M highcharts_builder.py\n",  # .py alongside a non-.py
         "R  old.py -> renamed.py\n",  # rename: new side is .py
         "R  legacy.py -> legacy.txt\n",  # rename: old side was .py (still counts)
+        "?? .claude/hooks/guard_paths.py\n",  # hook scripts ARE tested (test_hooks.py)
     ],
 )
 def test_dirty_python_detects_changes(porcelain):
@@ -150,7 +152,8 @@ def test_dirty_python_detects_changes(porcelain):
     [
         "",  # clean tree
         "?? .claude/\n",  # a wholly-untracked .claude dir (git collapses it)
-        "?? .claude/hooks/guard_paths.py\n",  # .claude .py is excluded (not app code)
+        " M .claude/settings.json\n",  # .claude config (non-hook) isn't app code
+        "?? .claude/scratch.py\n",  # a .py directly under .claude/ (not a hook) is excluded
         " M README.md\n M .streamlit/config.toml\n",  # only non-.py changes
         "R  notes.txt -> archive.md\n",  # rename with no .py on either side
     ],

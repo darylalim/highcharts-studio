@@ -8,11 +8,16 @@ Fires after Edit/Write/MultiEdit. For a ``.py`` file it:
    so the edit lands lint-clean and formatted; and
 2. runs ``ty check`` on the project (mirrors the CI "Type check (ty)" gate; ty
    needs the whole project to resolve pandas/streamlit/highcharts-core imports).
-   On type errors it exits 2 so the diagnostics are fed back to Claude to fix.
+   On type errors (ty exit 1) it exits 2 so the diagnostics are fed back to
+   Claude to fix; a ty tooling/env failure (exit >=2, e.g. an unsynced venv) is
+   left as a silent no-op rather than mislabeled to Claude as type errors.
 
 ruff runs *before* ty in this one script (rather than as two separate hooks) so
 the format write can't race ty's read. Any non-.py edit, a missing file, or a
-missing toolchain is a silent no-op — a hook must never wedge editing.
+missing/failed toolchain is a silent no-op — a hook must never wedge editing.
+Because ruff may rewrite the file in place, Claude's cached copy can go stale, so
+a follow-up exact-match Edit may need a re-read; that is the accepted cost of
+format-on-edit.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ from pathlib import Path
 def _read_file_path() -> str:
     try:
         data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:  # malformed / empty stdin (JSONDecodeError is a ValueError)
         return ""
     return (data.get("tool_input") or {}).get("file_path", "") or ""
 
@@ -61,19 +66,24 @@ def main() -> int:
         except FileNotFoundError:
             return 0  # no uv on PATH — nothing to enforce
 
-    # 2) ty: type-check the project; feed any diagnostics back to Claude.
+    # 2) ty: type-check the project; feed real type errors back to Claude.
     try:
         proc = subprocess.run(
             ["uv", "run", "ty", "check"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=root,
         )
     except FileNotFoundError:
         return 0
-    if proc.returncode != 0:
+    # ty exits 1 for type errors, 0 when clean, and >=2 for a tooling/env failure
+    # (bad flag, unsynced venv, missing tool). Only exit 1 is the user's to fix —
+    # feed it back; treat a tooling failure as a no-op so it isn't mislabeled.
+    if proc.returncode == 1:
         sys.stderr.write(
-            "ty reported type errors after this edit — please fix them:\n\n"
+            "ty reported type errors (it checks the whole project) — please fix:\n\n"
             + (proc.stdout or "")
             + (proc.stderr or "")
         )

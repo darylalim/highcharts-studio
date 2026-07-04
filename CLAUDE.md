@@ -24,7 +24,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `sample_data` unit tests, plus headless `AppTest` interaction tests.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
   decision functions (path guard, `.py` routing, git-dirty detection) plus a
-  black-box check of each hook's exit-code contract.
+  black-box check of the exit-code contract for `guard_paths.py` and
+  `post_edit_py.py`.
 - `.streamlit/config.toml` — project Streamlit theme (brands the app shell in
   both light and dark via `[theme.light]`/`[theme.dark]`, which unlocks the
   in-app light/dark toggle). The chart colors are themed separately (see
@@ -129,10 +130,11 @@ excluded), so the tooling that enforces the app enforces the hooks too.
   edit, runs `ruff check --fix` + `ruff format` in place, then `ty check`; exits
   2 on type errors so the diagnostics feed back to fix. Mirrors the Ruff and ty
   gates.
-- `pytest_stop.py` (Stop) — runs `uv run pytest` only when the working tree has
-  uncommitted `.py` changes outside `.claude/`; exits 2 on failure to feed the
-  output back, with a `stop_hook_active` guard so it can't loop. Mirrors the test
-  gate.
+- `pytest_stop.py` (Stop) — runs `uv run pytest` when the working tree has
+  uncommitted `.py` changes (app, test, or the hook scripts under
+  `.claude/hooks/`); exits 2 on a real failure (pytest exit 1/2) to feed the
+  output back, treating a tooling/env failure as a no-op, with a
+  `stop_hook_active` guard so it can't loop. Mirrors the test gate.
 - `guard_paths.py` (PreToolUse) — blocks direct edits to `uv.lock`,
   `.streamlit/secrets.toml`, and `.git/` internals.
 
