@@ -1,9 +1,21 @@
 # highcharts-studio
 
+[![CI](https://github.com/darylalim/highcharts-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/darylalim/highcharts-studio/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Streamlit 1.57+](https://img.shields.io/badge/streamlit-1.57%2B-ff4b4b.svg)](https://streamlit.io)
+
 A [Streamlit](https://streamlit.io) application for building data visualizations
 with [Highcharts](https://github.com/highcharts-for-python) — **every chart is
 produced by `highcharts-core`** (the Highcharts for Python toolkit), with no
 native Streamlit charts.
+
+## Contents
+
+[Setup](#setup) · [Run](#run) · [What it does](#what-it-does) · [Files](#files) ·
+[Test](#test) · [Lint &amp; format](#lint--format) · [Type check](#type-check) ·
+[CI](#ci) · [Claude Code hooks](#claude-code-hooks) · [Notes](#notes) ·
+[Dependencies](#dependencies) · [License](#license)
 
 ## Setup
 
@@ -41,10 +53,11 @@ light/dark theme, which you can toggle from the settings menu.
   OS by default). The charts are theme-aware in both render modes: their
   background, text, axes, and tooltip flip to match the mode, while each series
   keeps its palette color.
-- An at-a-glance KPI row (rows, numeric columns, series plotted, chart type)
-  above the chart, a side-by-side source-data preview, and a toggle that reveals
-  the generated Highcharts config (the `to_js_literal()` output). The Y-series
-  picker uses compact pills, falling back to `st.multiselect` for wide CSVs.
+- An at-a-glance KPI row (rows, numeric columns, series plotted) above the chart
+  — with the chart type shown as a badge beside it — a side-by-side source-data
+  preview, and a toggle that reveals the generated Highcharts config (the
+  `to_js_literal()` output). The Y-series picker uses compact pills, falling back
+  to `st.multiselect` for wide CSVs.
 - Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
   `scatter`.
 
@@ -71,17 +84,19 @@ light/dark theme, which you can toggle from the settings menu.
 uv run pytest
 ```
 
-`tests/test_smoke.py` covers the builder across every chart type (parametrized),
-the missing-data and scatter edge cases, the brand palette, the light/dark
-theming (including the dark-mode tooltip), and the validation guards, plus the
-sample datasets; then drives the full app headless with Streamlit's `AppTest` —
-switching controls, revealing the generated config behind its toggle, the KPI
-metric row, the wide-CSV `st.multiselect` fallback, the render-mode selector's
-two modes, and asserting the guard messages. `tests/test_hooks.py` adds unit
-coverage for the `.claude/hooks/` scripts (see Claude Code hooks below), and
-`tests/test_packaging.py` guards the licensing metadata — the `pyproject.toml`
-`license` fields, the `LICENSE` file, and the `NOTICE` third-party notice —
-against drift.
+Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
+
+- **`tests/test_smoke.py`** — the pure builder (every chart type, the
+  missing-data and scatter edge cases, the brand palette, the light/dark theming
+  including the dark-mode tooltip, and the validation guards) and the sample
+  datasets, plus a headless `AppTest` pass that drives the full app (switching
+  controls, the config toggle, the KPI row, the wide-CSV `st.multiselect`
+  fallback, both render modes, and the guard messages).
+- **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see
+  [Claude Code hooks](#claude-code-hooks)).
+- **`tests/test_packaging.py`** — the licensing metadata (`pyproject.toml`
+  `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice),
+  guarded against drift.
 
 ## Lint & format
 
