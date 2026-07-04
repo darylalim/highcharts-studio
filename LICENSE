@@ -1,0 +1,46 @@
+MIT License
+
+Copyright (c) 2025-2026 Daryl Lim
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Third-party components
+
+This MIT license covers only the original source code of highcharts-studio
+(the Streamlit application and its helpers). It does NOT relicense, and does
+NOT grant you any rights to, the third-party components this project depends on
+at runtime. Two of them are proprietary and separately licensed:
+
+  * Highcharts JS (loaded from the Highcharts CDN) and the Highcharts export
+    server are proprietary software owned by Highsoft AS. They are free for
+    personal and non-commercial use; commercial use requires a paid Highcharts
+    license obtained from Highsoft.
+
+  * highcharts-core (the "Highcharts for Python" toolkit) is proprietary
+    software governed by the Highcharts for Python Toolkit License, owned by
+    HCP LLC and distributed by Highsoft. Its use is subject to that license
+    (which itself presupposes a Highcharts Software license — a paid one for
+    commercial use, or a Personal/Educational license otherwise).
+
+If you use, fork, or deploy this project, you are responsible for obtaining
+whatever Highcharts and Highcharts-for-Python licenses your usage requires.
+Streamlit (Apache-2.0) and pandas (BSD-3-Clause) are permissively licensed and
+carry no such restriction.

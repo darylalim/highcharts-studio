@@ -61,6 +61,7 @@ light/dark theme, which you can toggle from the settings menu.
 | `tests/test_hooks.py` | Unit tests for the Claude Code hook scripts (pure decision functions + exit-code contract). |
 | `.claude/settings.json`, `.claude/hooks/` | Committed Claude Code hooks that mirror the CI gates (see Claude Code hooks below). |
 | `.github/workflows/ci.yml` | GitHub Actions: pytest, Ruff lint/format, and ty on every push to `main` and every PR. |
+| `LICENSE` | MIT license for this project's own code, plus a third-party notice for the proprietary Highcharts JS / export server and `highcharts-core` dependencies. |
 
 ## Test
 
@@ -157,9 +158,23 @@ Dev (in the `dev` dependency group, installed by `uv sync`):
 
 ## License
 
-No license is granted for this project — all rights reserved. With no license,
-the default of copyright law applies: you may view the code here, but you may
-not use, copy, modify, or distribute it without the author's permission.
-Rendering relies on Highcharts JS (loaded from the CDN) and the Highcharts
-export server, which are subject to Highcharts' own licensing — free for
-non-commercial use; commercial use requires a Highcharts license.
+This project's own source code (the Streamlit app and its helpers) is released
+under the [MIT License](LICENSE) — you're free to use, modify, and distribute
+it.
+
+The MIT license covers **only this project's code**, not the third-party tools
+it renders with. Two of its dependencies are proprietary and separately
+licensed, and the MIT grant does not extend to them:
+
+- **Highcharts JS** (loaded from the CDN) and the **Highcharts export server**
+  are owned by Highsoft — free for personal/non-commercial use; commercial use
+  requires a paid Highcharts license.
+- **`highcharts-core`** (the Highcharts for Python toolkit) is itself
+  proprietary, governed by the Highcharts for Python Toolkit License (which
+  presupposes a Highcharts Software license — paid for commercial use, or a
+  Personal/Educational license otherwise).
+
+If you fork or deploy this, obtaining the required Highcharts and
+Highcharts-for-Python licenses for your usage is your responsibility. Streamlit
+(Apache-2.0) and pandas (BSD-3-Clause) are permissively licensed. See the
+[`LICENSE`](LICENSE) file for the full text and third-party notice.
