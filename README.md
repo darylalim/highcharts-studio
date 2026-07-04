@@ -56,7 +56,7 @@ light/dark theme, which you can toggle from the settings menu.
 | `highcharts_builder.py` | Pure (Streamlit-free) functions that turn a DataFrame into a Highcharts options dict, a `Chart`, and embeddable HTML / PNG bytes. Independently importable and unit-testable. |
 | `sample_data.py` | Pure (Streamlit-free) built-in sample datasets offered when no CSV is uploaded. |
 | `.streamlit/config.toml` | Streamlit light/dark themes (app shell) and dev settings (`runOnSave`). |
-| `pyproject.toml` | Dependencies + the `dev` group, and the Ruff / ty config. |
+| `pyproject.toml` | Dependencies + the `dev` group and the Ruff / ty config. |
 | `tests/test_smoke.py` | Builder and sample-data unit tests plus headless `AppTest` interaction tests. |
 | `tests/test_hooks.py` | Unit tests for the Claude Code hook scripts (pure decision functions + exit-code contract). |
 | `.claude/settings.json`, `.claude/hooks/` | Committed Claude Code hooks that mirror the CI gates (see Claude Code hooks below). |

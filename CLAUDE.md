@@ -38,7 +38,6 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `.github/workflows/ci.yml` — GitHub Actions: three jobs (pytest, Ruff
   lint/format, ty) that `uv sync --locked` then run the same gates the hooks
   mirror, on every push to `main` and every PR.
-- `README.md` — contributor-facing overview (setup, run, the two render modes).
 
 ## How a chart is built
 
@@ -70,12 +69,12 @@ uv run streamlit run streamlit_app.py
 ```
 
 `.streamlit/config.toml` themes the shell and enables `runOnSave`, so saves
-auto-rerun. A blank chart can be a network issue rather than a stale cache:
-interactive mode loads Highcharts from the CDN (`code.highcharts.com`) and static
-mode needs the export server (`export.highcharts.com`). When a stale chart or an
-export-server failure is suspected, flush the four `@st.cache_data` caches (the
-CSV loader plus the three chart renderers) with `uv run streamlit cache clear`;
-verify config with `uv run streamlit config show`.
+auto-rerun. When a stale chart is suspected, flush the four `@st.cache_data`
+caches (the CSV loader plus the three chart renderers) with
+`uv run streamlit cache clear`; verify config with `uv run streamlit config show`.
+A *blank* chart is usually a network issue instead: interactive mode loads
+Highcharts from the CDN (`code.highcharts.com`), static mode from the export
+server (`export.highcharts.com`).
 
 ## Test
 
@@ -161,7 +160,7 @@ before it runs.
 - Keep each hook's decision logic in a pure, importable function in
   `.claude/hooks/` (as the builder is), so `tests/test_hooks.py` can cover it
   without subprocesses; the `main()` wrapper handles the stdin/exit-code plumbing
-  and the impure subprocess orchestration (ruff/ty/pytest/git).
+  and any impure subprocess orchestration (ruff/ty/pytest/git).
 - Render every visualization with Highcharts (`highcharts-core`); do not use
   native Streamlit charts.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
