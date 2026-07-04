@@ -72,7 +72,7 @@ light/dark theme, which you can toggle from the settings menu.
 | `pyproject.toml` | Dependencies + the `dev` group and the Ruff / ty config. |
 | `tests/test_smoke.py` | Builder and sample-data unit tests plus headless `AppTest` interaction tests. |
 | `tests/test_hooks.py` | Unit tests for the Claude Code hook scripts (pure decision functions + exit-code contract). |
-| `tests/test_packaging.py` | Unit tests guarding the licensing metadata (pyproject `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) against drift. |
+| `tests/test_packaging.py` | Unit tests guarding the licensing metadata (pyproject `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) — plus the README's own header badges and `## Contents` list — against drift. |
 | `.claude/settings.json`, `.claude/hooks/` | Committed Claude Code hooks that mirror the CI gates (see Claude Code hooks below). |
 | `.github/workflows/ci.yml` | GitHub Actions: pytest, Ruff lint/format, and ty on every push to `main` and every PR. |
 | `LICENSE` | MIT license for this project's own code (kept pristine so GitHub detects it as MIT). |
