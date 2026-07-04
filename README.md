@@ -95,8 +95,8 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
 - **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see
   [Claude Code hooks](#claude-code-hooks)).
 - **`tests/test_packaging.py`** — the licensing metadata (`pyproject.toml`
-  `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice),
-  guarded against drift.
+  `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) plus
+  the README's own header badges and `## Contents` list, guarded against drift.
 
 ## Lint & format
 

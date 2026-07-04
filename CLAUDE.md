@@ -31,7 +31,9 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   pristine MIT text (nothing appended, so GitHub detects it as MIT), and the
   `NOTICE` third-party notice naming both proprietary layers (Highcharts
   JS/export server and `highcharts-core`), kept in sync with the README
-  `## License` section.
+  `## License` section — plus the README's header badges (pinned to the
+  `pyproject.toml` license and Python/Streamlit version floors) and its
+  `## Contents` table of contents (pinned to the real `##` section headings).
 - `.streamlit/config.toml` — project Streamlit theme (brands the app shell in
   both light and dark via `[theme.light]`/`[theme.dark]`, which unlocks the
   in-app light/dark toggle). The chart colors are themed separately (see
@@ -119,8 +121,10 @@ drift apart: the `pyproject.toml` SPDX `license`/`license-files` fields, the
 `LICENSE` file (kept pristine MIT so GitHub detects it — re-appending prose is
 pinned as a regression), the `NOTICE` third-party notice (which must keep naming
 both proprietary layers — Highcharts JS/the export server and `highcharts-core`),
-and the README `## License` section. It reads the files directly (no build step),
-the same mechanical-sync idea as `test_theme_colors_stay_in_sync_with_config`.
+the README `## License` section, its header badges (pinned to the `pyproject.toml`
+license and Python/Streamlit version floors), and its `## Contents` list (pinned
+to the real `##` headings). It reads the files directly (no build step), the same
+mechanical-sync idea as `test_theme_colors_stay_in_sync_with_config`.
 
 ## Lint & format
 
