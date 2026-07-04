@@ -18,7 +18,9 @@ reliable in CI). A few black-box tests then drive ``guard_paths.py`` and
 ``post_edit_py.py`` as real subprocesses over stdin to pin the exit-code
 contract Claude Code relies on (2 blocks, 0 allows) — under the current
 interpreter (``sys.executable``), not shelling out to uv/ruff/ty/pytest, so they
-stay fast.
+stay fast. Under ``uv run pytest`` that interpreter is the project's 3.12 venv —
+the same one settings.json runs the live hooks under (``uv run … python``) — so
+the tests validate the interpreter the hooks actually use.
 
 The scripts live outside any importable package, so they're loaded by file path
 via ``importlib``; importing only defines functions (the work is behind an

@@ -120,9 +120,10 @@ catch the same problems in our own code.
 `.claude/settings.json` wires three project hooks (committed; the per-developer
 `.claude/settings.local.json` stays gitignored) that mirror the CI gates so edits
 stay green before a push. Each is a stdlib-only Python script under
-`.claude/hooks/`, run via `python3 "$CLAUDE_PROJECT_DIR/.claude/hooks/<name>.py"`,
-and keeps its decision logic in a pure, importable function that
-`tests/test_hooks.py` covers. The scripts are themselves held to those gates:
+`.claude/hooks/`, run via `uv run --project "$CLAUDE_PROJECT_DIR" python …` so it
+executes on the project's pinned 3.12 interpreter — the same one the tests use,
+not the machine's system `python3` — and keeps its decision logic in a pure,
+importable function that `tests/test_hooks.py` covers. The scripts are themselves held to those gates:
 `ruff check .` and `uv run ty check` include `.claude/hooks/` (dot-dirs aren't
 excluded), so the tooling that enforces the app enforces the hooks too.
 
