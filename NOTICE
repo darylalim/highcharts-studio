@@ -1,0 +1,23 @@
+highcharts-studio — Third-party components notice
+
+This NOTICE accompanies the MIT License in the LICENSE file. The MIT license
+covers only the original source code of highcharts-studio (the Streamlit
+application and its helpers). It does NOT relicense, and does NOT grant you any
+rights to, the third-party components this project depends on at runtime. Two of
+them are proprietary and separately licensed:
+
+  * Highcharts JS (loaded from the Highcharts CDN) and the Highcharts export
+    server are proprietary software owned by Highsoft AS. They are free for
+    personal and non-commercial use; commercial use requires a paid Highcharts
+    license obtained from Highsoft.
+
+  * highcharts-core (the "Highcharts for Python" toolkit) is proprietary
+    software governed by the Highcharts for Python Toolkit License, owned by
+    HCP LLC and distributed by Highsoft. Its use is subject to that license
+    (which itself presupposes a Highcharts Software license — a paid one for
+    commercial use, or a Personal/Educational license otherwise).
+
+If you use, fork, or deploy this project, you are responsible for obtaining
+whatever Highcharts and Highcharts-for-Python licenses your usage requires.
+Streamlit (Apache-2.0) and pandas (BSD-3-Clause) are permissively licensed and
+carry no such restriction.

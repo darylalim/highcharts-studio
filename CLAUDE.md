@@ -28,9 +28,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `post_edit_py.py`.
 - `tests/test_packaging.py` — unit tests guarding the licensing metadata: the
   `pyproject.toml` SPDX `license`/`license-files` fields, the `LICENSE` file's
-  MIT text, and its third-party notice naming both proprietary layers
-  (Highcharts JS/export server and `highcharts-core`), kept in sync with the
-  README `## License` section.
+  pristine MIT text (nothing appended, so GitHub detects it as MIT), and the
+  `NOTICE` third-party notice naming both proprietary layers (Highcharts
+  JS/export server and `highcharts-core`), kept in sync with the README
+  `## License` section.
 - `.streamlit/config.toml` — project Streamlit theme (brands the app shell in
   both light and dark via `[theme.light]`/`[theme.dark]`, which unlocks the
   in-app light/dark toggle). The chart colors are themed separately (see
@@ -44,11 +45,15 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `.github/workflows/ci.yml` — GitHub Actions: three jobs (pytest, Ruff
   lint/format, ty) that `uv sync --locked` then run the same gates the hooks
   mirror, on every push to `main` and every PR.
-- `LICENSE` — MIT for this project's own code, followed by a third-party notice
-  that the two proprietary layers it renders with (Highcharts JS/the export
-  server, and the `highcharts-core` wrapper) are separately licensed and not
-  covered by the MIT grant. Declared to packaging tools via `pyproject.toml`'s
-  `license`/`license-files`; guarded against drift by `tests/test_packaging.py`.
+- `LICENSE` — MIT for this project's own code, kept *pristine* (no text
+  appended) so GitHub's license detector classifies the repo as MIT rather than
+  "Other".
+- `NOTICE` — the third-party notice, split out of `LICENSE` for that reason:
+  the two proprietary layers it renders with (Highcharts JS/the export server,
+  and the `highcharts-core` wrapper) are separately licensed and not covered by
+  the MIT grant. Both files are declared to packaging tools via
+  `pyproject.toml`'s `license`/`license-files`; guarded against drift by
+  `tests/test_packaging.py`.
 
 ## How a chart is built
 
@@ -109,9 +114,10 @@ plus a black-box pass that drives `guard_paths.py` / `post_edit_py.py` over stdi
 to pin their exit-code contract (2 blocks, 0 allows) without spawning the
 toolchain.
 
-`tests/test_packaging.py` guards the licensing metadata so its three homes can't
+`tests/test_packaging.py` guards the licensing metadata so its homes can't
 drift apart: the `pyproject.toml` SPDX `license`/`license-files` fields, the
-`LICENSE` file (MIT text plus the third-party notice, which must keep naming
+`LICENSE` file (kept pristine MIT so GitHub detects it — re-appending prose is
+pinned as a regression), the `NOTICE` third-party notice (which must keep naming
 both proprietary layers — Highcharts JS/the export server and `highcharts-core`),
 and the README `## License` section. It reads the files directly (no build step),
 the same mechanical-sync idea as `test_theme_colors_stay_in_sync_with_config`.

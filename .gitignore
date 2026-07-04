@@ -6,8 +6,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .ty_cache/
-# Python build artifacts (`uv build` output); the project declares a license in
-# pyproject.toml but isn't published as a package, so these stay uncommitted.
+# Python build artifacts (`uv build` output); the project declares its license
+# files (LICENSE + NOTICE) in pyproject.toml but isn't published as a package, so
+# these stay uncommitted.
 build/
 dist/
 *.egg-info/

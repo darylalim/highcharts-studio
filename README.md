@@ -59,10 +59,11 @@ light/dark theme, which you can toggle from the settings menu.
 | `pyproject.toml` | Dependencies + the `dev` group and the Ruff / ty config. |
 | `tests/test_smoke.py` | Builder and sample-data unit tests plus headless `AppTest` interaction tests. |
 | `tests/test_hooks.py` | Unit tests for the Claude Code hook scripts (pure decision functions + exit-code contract). |
-| `tests/test_packaging.py` | Unit tests guarding the licensing metadata (pyproject `license` fields, the `LICENSE` file, and its third-party notice) against drift. |
+| `tests/test_packaging.py` | Unit tests guarding the licensing metadata (pyproject `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) against drift. |
 | `.claude/settings.json`, `.claude/hooks/` | Committed Claude Code hooks that mirror the CI gates (see Claude Code hooks below). |
 | `.github/workflows/ci.yml` | GitHub Actions: pytest, Ruff lint/format, and ty on every push to `main` and every PR. |
-| `LICENSE` | MIT license for this project's own code, plus a third-party notice for the proprietary Highcharts JS / export server and `highcharts-core` dependencies. |
+| `LICENSE` | MIT license for this project's own code (kept pristine so GitHub detects it as MIT). |
+| `NOTICE` | Third-party notice for the proprietary Highcharts JS / export server and `highcharts-core` dependencies, split out of `LICENSE`. |
 
 ## Test
 
@@ -79,7 +80,8 @@ metric row, the wide-CSV `st.multiselect` fallback, the render-mode selector's
 two modes, and asserting the guard messages. `tests/test_hooks.py` adds unit
 coverage for the `.claude/hooks/` scripts (see Claude Code hooks below), and
 `tests/test_packaging.py` guards the licensing metadata — the `pyproject.toml`
-`license` fields, the `LICENSE` file, and its third-party notice — against drift.
+`license` fields, the `LICENSE` file, and the `NOTICE` third-party notice —
+against drift.
 
 ## Lint & format
 
@@ -180,4 +182,5 @@ licensed, and the MIT grant does not extend to them:
 If you fork or deploy this, obtaining the required Highcharts and
 Highcharts-for-Python licenses for your usage is your responsibility. Streamlit
 (Apache-2.0) and pandas (BSD-3-Clause) are permissively licensed. See the
-[`LICENSE`](LICENSE) file for the full text and third-party notice.
+[`LICENSE`](LICENSE) file for the full MIT text and [`NOTICE`](NOTICE) for the
+third-party notice.

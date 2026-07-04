@@ -10,9 +10,11 @@ version = "0.1.0"
 description = "Streamlit application for building data visualizations with Highcharts."
 # SPDX expression (PEP 639). Covers this project's own code only; the Highcharts
 # JS/export server and the highcharts-core wrapper are proprietary and
-# separately licensed — see the LICENSE file's third-party notice and the README.
+# separately licensed — see the NOTICE file's third-party notice and the README.
+# LICENSE is kept as pristine MIT (notice lives in NOTICE) so GitHub's license
+# detector classifies the repo as "MIT" rather than "Other".
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 dependencies = [
     "highcharts-core>=1.10.3",
@@ -42,8 +44,8 @@ dev = [
 # This project ships a Streamlit app, not an importable package, so tell
 # Hatchling it's fine to build an empty wheel (otherwise `uv sync` fails
 # trying to determine which files to ship). The wheel still carries the LICENSE
-# and license metadata (see [project].license / license-files above) — it just
-# ships no code modules.
+# and NOTICE plus the license metadata (see [project].license / license-files
+# above) — it just ships no code modules.
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
 
