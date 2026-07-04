@@ -26,6 +26,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   decision functions (path guard, `.py` routing, git-dirty detection) plus a
   black-box check of the exit-code contract for `guard_paths.py` and
   `post_edit_py.py`.
+- `tests/test_packaging.py` — unit tests guarding the licensing metadata: the
+  `pyproject.toml` SPDX `license`/`license-files` fields, the `LICENSE` file's
+  MIT text, and its third-party notice naming both proprietary layers
+  (Highcharts JS/export server and `highcharts-core`), kept in sync with the
+  README `## License` section.
 - `.streamlit/config.toml` — project Streamlit theme (brands the app shell in
   both light and dark via `[theme.light]`/`[theme.dark]`, which unlocks the
   in-app light/dark toggle). The chart colors are themed separately (see
@@ -33,7 +38,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `.claude/settings.json` + `.claude/hooks/*.py` — committed Claude Code hooks
   that mirror the CI gates (see Hooks). `.claude/settings.local.json` holds
   per-developer overrides and is gitignored.
-- `pyproject.toml` — dependencies + the `dev` group and the Ruff/ty config (see
+- `pyproject.toml` — dependencies + the `dev` group, the project license (MIT,
+  via the PEP 639 `license`/`license-files` fields), and the Ruff/ty config (see
   Lint & format, Type check).
 - `.github/workflows/ci.yml` — GitHub Actions: three jobs (pytest, Ruff
   lint/format, ty) that `uv sync --locked` then run the same gates the hooks
@@ -97,6 +103,13 @@ functions (`protected_reason`, `is_python_target`, `has_dirty_python`) directly,
 plus a black-box pass that drives `guard_paths.py` / `post_edit_py.py` over stdin
 to pin their exit-code contract (2 blocks, 0 allows) without spawning the
 toolchain.
+
+`tests/test_packaging.py` guards the licensing metadata so its three homes can't
+drift apart: the `pyproject.toml` SPDX `license`/`license-files` fields, the
+`LICENSE` file (MIT text plus the third-party notice, which must keep naming
+both proprietary layers — Highcharts JS/the export server and `highcharts-core`),
+and the README `## License` section. It reads the files directly (no build step),
+the same mechanical-sync idea as `test_theme_colors_stay_in_sync_with_config`.
 
 ## Lint & format
 
