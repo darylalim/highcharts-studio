@@ -351,6 +351,20 @@ def test_sample_datasets_are_plottable_and_fresh():
     assert factory() is not factory()
 
 
+def test_daily_temperature_sample_builds_an_areaspline_chart():
+    # The areaspline sample is wired to its intended type: plot the real sample
+    # as an areaspline and pin the shape it produces (24 hourly categories, one
+    # full series) — ties the new dataset to the new chart type end to end.
+    from sample_data import _daily_temperature
+
+    df = _daily_temperature()
+    opts = build_options(df, "areaspline", "hour", ["temp_c"])
+    assert opts["chart"]["type"] == "areaspline"
+    assert opts["series"][0]["name"] == "temp_c"
+    assert opts["xAxis"]["categories"][0] == "00:00"
+    assert len(opts["xAxis"]["categories"]) == len(opts["series"][0]["data"]) == 24
+
+
 # --------------------------------------------------------------------------- #
 # Full app, headless (Streamlit AppTest)
 #
@@ -399,6 +413,15 @@ def test_app_switch_to_pie_regenerates_config(app):
     _reveal_config(app)
     assert not app.exception
     assert "type: 'pie'" in app.code[0].value
+
+
+def test_app_switch_to_areaspline_regenerates_config(app):
+    # The new cartesian type reaches the builder from the app like any other:
+    # switch to it and confirm it flows through to the generated config.
+    app.selectbox[1].set_value("areaspline")  # Chart type -> areaspline
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'areaspline'" in app.code[0].value
 
 
 def test_app_custom_title_flows_into_config(app):
