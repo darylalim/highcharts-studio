@@ -20,8 +20,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
-  and scatter edge cases, the brand palette, and the validation guards) and
-  `sample_data` unit tests, plus headless `AppTest` interaction tests.
+  and scatter edge cases, the brand palette, the validation guards, and an
+  end-to-end pass driving every cartesian type through `Chart.from_options` /
+  `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
+  interaction tests.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
   decision functions (path guard, `.py` routing, git-dirty detection) plus a
   black-box check of the exit-code contract for `guard_paths.py` and
@@ -105,7 +107,10 @@ parametrized across every supported chart type, covering missing data
 (`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
 numeric vs non-numeric scatter paths, the brand palette, the light/dark theming
 (dark-mode chrome — including the tooltip — vs. the shared palette), and the
-validation guards — plus the sample datasets, then drives the full app headless
+validation guards (including an end-to-end pass that drives every cartesian type
+through the real `Chart.from_options` → `to_js_literal` pipeline, so a newly added
+type is proven to serialize rather than just assumed) — plus the sample datasets,
+then drives the full app headless
 via Streamlit's `AppTest` (switching controls, revealing the generated config
 behind its toggle, the KPI metric row, the wide-CSV `st.multiselect` fallback,
 the render-mode selector's two modes, and asserting the guard messages).
