@@ -15,8 +15,9 @@ lives can't silently drift apart:
   detector isn't thrown off,
 - the ``README.md`` ``## License`` section,
 - the ``README.md`` header badges — the MIT / Python / Streamlit badges pinned
-  to the same ``pyproject.toml`` facts they advertise, and the CI badge to a
-  workflow file that actually exists,
+  to the same ``pyproject.toml`` facts they advertise (both the shields URL slug
+  and the human-readable label), and the CI badge to a workflow file that exists
+  with an owner/repo slug that agrees between its image and click-through link,
 - the ``README.md`` ``## Contents`` table of contents — pinned to equal the
   real ``##`` section headings, so a renamed, added, or removed section can't
   leave a dead jump-link.
@@ -49,6 +50,7 @@ def _collapse_ws(text: str) -> str:
 
 
 def _readme() -> str:
+    """The README.md text."""
     return (ROOT / "README.md").read_text()
 
 
@@ -62,6 +64,13 @@ def _github_slug(heading: str) -> str:
     chars, spaces, hyphens), then spaces -> hyphens. "Lint & format" ->
     "lint--format"; "What it does" -> "what-it-does"."""
     return re.sub(r"[^\w\s-]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def _req_name(dep: str) -> str:
+    """The PEP 508 project name from a dependency string — the part before any
+    version specifier, marker, extras, or whitespace, lowercased so the match is
+    case-insensitive (``Streamlit>=1.57`` and ``streamlit`` both -> "streamlit")."""
+    return re.split(r"[<>=!~;\[\s]", dep, maxsplit=1)[0].strip().lower()
 
 
 def test_pyproject_declares_mit_via_spdx():
@@ -122,7 +131,7 @@ def test_license_notice_flags_both_proprietary_layers():
 
 
 def test_readme_license_section_reflects_mit_and_the_notice():
-    readme = (ROOT / "README.md").read_text()
+    readme = _readme()
     assert "## License" in readme
     section = _collapse_ws(readme.split("## License", 1)[1])
     # "mit license", not a bare "mit" (which "permit"/"commit" would satisfy).
@@ -148,31 +157,62 @@ def test_readme_badges_stay_in_sync_with_project():
     readme = _readme()
     project = _project_metadata()
 
-    # MIT license badge <-> [project].license.
+    # MIT license badge <-> [project].license — both the shields URL slug and the
+    # human-readable alt-text label (same line, but they can drift apart).
     assert project["license"] == "MIT"
     assert "License-MIT" in readme
+    assert "License: MIT" in readme
 
-    # Python floor badge <-> requires-python (e.g. ">=3.12" -> "python-3.12%2B").
+    # Python floor badge <-> requires-python (e.g. ">=3.12" -> "python-3.12%2B"),
+    # pinning the URL slug and the "Python 3.12+" label.
     py_match = re.search(r"(\d+\.\d+)", project["requires-python"])
     assert py_match, "requires-python floor is unparseable"
     py_floor = py_match.group(1)
     assert f"python-{py_floor}%2B" in readme, (
         f"Python badge should advertise the requires-python floor {py_floor}"
     )
+    assert f"Python {py_floor}+" in readme, (
+        f"Python badge label should read 'Python {py_floor}+'"
+    )
 
-    # Streamlit floor badge <-> the streamlit dependency floor.
-    st_dep = next(d for d in project["dependencies"] if d.startswith("streamlit"))
+    # Streamlit floor badge <-> the streamlit dependency floor. Match the PEP 508
+    # name exactly (not a loose prefix, which would also catch a `streamlit-*`
+    # plugin) and default None so a rename/typo fails with a clear message rather
+    # than a bare StopIteration.
+    st_dep = next(
+        (d for d in project["dependencies"] if _req_name(d) == "streamlit"), None
+    )
+    assert st_dep, "no streamlit dependency found in pyproject dependencies"
     st_match = re.search(r">=(\d+\.\d+)", st_dep)
     assert st_match, f"streamlit dependency floor is unparseable: {st_dep!r}"
     st_floor = st_match.group(1)
     assert f"streamlit-{st_floor}%2B" in readme, (
         f"Streamlit badge should advertise the dependency floor {st_floor}"
     )
+    assert f"Streamlit {st_floor}+" in readme, (
+        f"Streamlit badge label should read 'Streamlit {st_floor}+'"
+    )
 
-    # CI badge must point at a workflow file that actually exists.
-    ci_match = re.search(r"actions/workflows/([\w.-]+)/badge\.svg", readme)
-    assert ci_match, "CI status badge is missing or malformed"
-    assert (ROOT / ".github" / "workflows" / ci_match.group(1)).is_file()
+    # CI badge must point at a workflow file that exists, and its image src and
+    # the click-through link must agree on the owner/repo slug — a rename or a
+    # typo in just one silently 404s the badge (broken image or dead link).
+    ci_img = re.search(
+        r"github\.com/([\w.-]+/[\w.-]+)/actions/workflows/([\w.-]+)/badge\.svg",
+        readme,
+    )
+    assert ci_img, "CI status badge is missing or malformed"
+    img_slug, workflow = ci_img.groups()
+    assert (ROOT / ".github" / "workflows" / workflow).is_file()
+    ci_link = re.search(
+        r"github\.com/([\w.-]+/[\w.-]+)/actions/workflows/"
+        + re.escape(workflow)
+        + r"\)",
+        readme,
+    )
+    assert ci_link, "CI badge click-through link is missing or malformed"
+    assert img_slug == ci_link.group(1), (
+        "CI badge image and link owner/repo slugs disagree"
+    )
 
 
 def test_readme_toc_covers_every_section():

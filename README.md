@@ -54,10 +54,10 @@ light/dark theme, which you can toggle from the settings menu.
   background, text, axes, and tooltip flip to match the mode, while each series
   keeps its palette color.
 - An at-a-glance KPI row (rows, numeric columns, series plotted) above the chart
-  — with the chart type shown as a badge beside it — a side-by-side source-data
-  preview, and a toggle that reveals the generated Highcharts config (the
-  `to_js_literal()` output). The Y-series picker uses compact pills, falling back
-  to `st.multiselect` for wide CSVs.
+  — with the chart type shown as a badge above the chart rather than a metric in
+  the row — a side-by-side source-data preview, and a toggle that reveals the
+  generated Highcharts config (the `to_js_literal()` output). The Y-series picker
+  uses compact pills, falling back to `st.multiselect` for wide CSVs.
 - Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
   `scatter`.
 
