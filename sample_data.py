@@ -37,9 +37,48 @@ def _height_vs_weight() -> pd.DataFrame:
     )
 
 
+def _daily_temperature() -> pd.DataFrame:
+    """Hourly temperature across one day — a smooth rise to an afternoon peak and
+    back down overnight. Tailored to areaspline: the rounded rise-then-fall puts a
+    curved peak where a straight-segment ``area`` chart would show a sharp elbow,
+    so the spline smoothing actually shows."""
+    return pd.DataFrame(
+        {
+            "hour": [f"{h:02d}:00" for h in range(24)],
+            "temp_c": [
+                12,
+                11,
+                11,
+                10,
+                10,
+                11,
+                12,
+                14,
+                16,
+                18,
+                20,
+                22,
+                23,
+                24,
+                24,
+                23,
+                21,
+                19,
+                17,
+                16,
+                15,
+                14,
+                13,
+                12,
+            ],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
     "Fruit sales (pie/bar/column)": _fruit_sales,
     "Height vs weight (scatter)": _height_vs_weight,
+    "Daily temperature (areaspline)": _daily_temperature,
 }

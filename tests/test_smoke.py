@@ -196,7 +196,7 @@ def test_theme_colors_stay_in_sync_with_config():
 
 
 # --------------------------------------------------------------------------- #
-# Cartesian: line / spline / area / column / bar
+# Cartesian: line / spline / area / areaspline / column / bar
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("chart_type", CARTESIAN_TYPES)
 def test_cartesian_categories_and_series(chart_type):
@@ -207,6 +207,20 @@ def test_cartesian_categories_and_series(chart_type):
     assert opts["xAxis"]["title"]["text"] == "x"
     assert opts["series"][0]["name"] == "y"
     assert opts["series"][0]["data"] == [1.0, 2.0, 3.0]
+
+
+@pytest.mark.parametrize("chart_type", CARTESIAN_TYPES)
+def test_cartesian_type_builds_a_working_highcharts_core_chart(chart_type):
+    # build_options's SUPPORTED_TYPES check only guards against a Python-level
+    # typo — it can't catch a chart_type string highcharts-core itself would
+    # reject. Drive every cartesian type through the real pipeline (make_chart ->
+    # Chart.from_options -> to_js_literal), not just the options dict, so a newly
+    # added type (e.g. areaspline) is proven to work end-to-end, not just assumed.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"x": ["a", "b", "c"], "y": [1.0, 2.0, 3.0]})
+    js = make_chart(df, chart_type, "x", ["y"]).to_js_literal()
+    assert js and f"type: '{chart_type}'" in js
 
 
 @pytest.mark.parametrize("chart_type", CARTESIAN_TYPES)
@@ -505,6 +519,7 @@ def test_app_chart_type_selector_has_help(app):
     help_text = app.selectbox[1].help  # selectbox [1] is Chart type
     assert help_text
     assert "pie" in help_text and "scatter" in help_text
+    assert "areaspline" in help_text  # pins the help prose in sync with CARTESIAN_TYPES
 
 
 def test_app_kpi_row_summarizes_active_data(app):

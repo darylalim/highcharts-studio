@@ -149,7 +149,7 @@ with st.sidebar:
             "How the type reshapes the controls below:\n"
             "- **pie** — one label column + one value column\n"
             "- **scatter** — an X column paired with one or more numeric Y series\n"
-            "- **line / spline / area / column / bar** — a category X axis with "
+            "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
     )

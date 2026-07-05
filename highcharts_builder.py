@@ -18,7 +18,7 @@ from highcharts_core.chart import Chart
 from highcharts_core.constants import EnforcedNull
 
 # Chart types this example supports, grouped by the data shape they need.
-CARTESIAN_TYPES = ("line", "spline", "area", "column", "bar")
+CARTESIAN_TYPES = ("line", "spline", "area", "areaspline", "column", "bar")
 SINGLE_VALUE_TYPES = ("pie",)
 XY_TYPES = ("scatter",)
 SUPPORTED_TYPES = CARTESIAN_TYPES + SINGLE_VALUE_TYPES + XY_TYPES
@@ -116,7 +116,7 @@ def build_options(
 ) -> dict:
     """Return a Highcharts options ``dict`` for the given DataFrame and columns.
 
-    - cartesian types (line/spline/area/column/bar): ``x_col`` becomes the
+    - cartesian types (line/spline/area/areaspline/column/bar): ``x_col`` becomes the
       category axis and each column in ``y_cols`` becomes a series.
     - ``pie``: ``x_col`` labels the slices and the first column in ``y_cols``
       gives their values.
@@ -208,7 +208,7 @@ def build_options(
             dark=dark,
         )
 
-    # cartesian: line / spline / area / column / bar
+    # cartesian: line / spline / area / areaspline / column / bar
     categories = [str(v) for v in df[x_col].tolist()]
     series = [
         {"name": col, "data": [_num(v) for v in df[col].tolist()]} for col in y_cols

@@ -58,8 +58,8 @@ light/dark theme, which you can toggle from the settings menu.
   the row — a side-by-side source-data preview, and a toggle that reveals the
   generated Highcharts config (the `to_js_literal()` output). The Y-series picker
   uses compact pills, falling back to `st.multiselect` for wide CSVs.
-- Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
-  `scatter`.
+- Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`,
+  `bar`, `pie`, `scatter`.
 
 ## Files
 

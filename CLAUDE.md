@@ -77,8 +77,8 @@ chart chrome (background/text/axes/gridlines/tooltip) for dark mode; the app
 derives it from `st.context.theme.type` and threads it through the cached
 renderers.
 
-Supported chart types: `line`, `spline`, `area`, `column`, `bar`, `pie`,
-`scatter`.
+Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
+`pie`, `scatter`.
 
 ## Run
 
