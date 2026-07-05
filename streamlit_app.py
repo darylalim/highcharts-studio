@@ -62,7 +62,9 @@ def load_csv(file) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner="Rendering Highcharts…", max_entries=128)
-def cached_chart_html(df, chart_type, x_col, y_cols, height, title, dark) -> str:
+def cached_chart_html(
+    df, chart_type, x_col, y_cols, height, title, dark, size_col
+) -> str:
     return build_chart_html(
         df,
         chart_type,
@@ -71,13 +73,16 @@ def cached_chart_html(df, chart_type, x_col, y_cols, height, title, dark) -> str
         height=height,
         title=title,
         dark=dark,
+        size_col=size_col,
     )
 
 
 @st.cache_data(
     show_spinner="Rendering PNG via the Highcharts export server…", max_entries=64
 )
-def cached_chart_png(df, chart_type, x_col, y_cols, height, title, dark) -> bytes:
+def cached_chart_png(
+    df, chart_type, x_col, y_cols, height, title, dark, size_col
+) -> bytes:
     return build_chart_png(
         df,
         chart_type,
@@ -86,15 +91,16 @@ def cached_chart_png(df, chart_type, x_col, y_cols, height, title, dark) -> byte
         height=height,
         title=title,
         dark=dark,
+        size_col=size_col,
     )
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
-def cached_chart_js(df, chart_type, x_col, y_cols, title, dark) -> str:
+def cached_chart_js(df, chart_type, x_col, y_cols, title, dark, size_col) -> str:
     # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
     # literal string for a built chart.
     return make_chart(  # ty: ignore[invalid-return-type]
-        df, chart_type, x_col, list(y_cols), title=title, dark=dark
+        df, chart_type, x_col, list(y_cols), title=title, dark=dark, size_col=size_col
     ).to_js_literal()
 
 
@@ -149,6 +155,8 @@ with st.sidebar:
             "How the type reshapes the controls below:\n"
             "- **pie** — one label column + one value column\n"
             "- **scatter** — an X column paired with one or more numeric Y series\n"
+            "- **bubble** — scatter plus a numeric Size (Z) column driving each "
+            "marker's area\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -156,7 +164,7 @@ with st.sidebar:
 
     if chart_type == "pie":
         x_label, y_label, multi = "Slice labels", "Slice values", False
-    elif chart_type == "scatter":
+    elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     else:  # cartesian
         x_label, y_label, multi = "Category (X) axis", "Series (Y) — one or more", True
@@ -178,6 +186,14 @@ with st.sidebar:
             y_cols = st.multiselect(y_label, numeric_cols, default=default)
     else:
         y_cols = [st.selectbox(y_label, numeric_cols)]
+
+    # Bubble encodes a third dimension as marker size; pick the numeric column
+    # that drives it. Only shown for bubble (None otherwise, and ignored by the
+    # other builders). Default to the last numeric column so it differs from the
+    # X/Y defaults, which both lead with the first numeric column.
+    size_col = None
+    if chart_type == "bubble":
+        size_col = st.selectbox("Size (Z)", numeric_cols, index=len(numeric_cols) - 1)
 
     # A stable key keeps a typed title across reruns; an empty field falls back
     # to a per-chart-type default (shown as the placeholder, applied in
@@ -276,7 +292,7 @@ with left.container(border=True, height="stretch"):
         # Server-side render: no Highcharts JS runs in the browser.
         try:
             png = cached_chart_png(
-                df, chart_type, x_col, tuple(y_cols), height, title, dark
+                df, chart_type, x_col, tuple(y_cols), height, title, dark, size_col
             )
         except Exception as exc:  # build error or export-server failure
             st.error(
@@ -300,7 +316,7 @@ with left.container(border=True, height="stretch"):
         )
     else:
         html = cached_chart_html(
-            df, chart_type, x_col, tuple(y_cols), height, title, dark
+            df, chart_type, x_col, tuple(y_cols), height, title, dark, size_col
         )
         # The HTML is embedded in a sandboxed iframe with a FIXED height — it
         # does not auto-grow to its content, so size it to the chart.
@@ -319,5 +335,7 @@ with left.container(border=True, height="stretch"):
     # can't open it — so the toggle (the performance reference's alternative) keeps
     # the config both cheap and observable to the headless tests.
     if st.toggle(":material/code: Show the generated Highcharts config (JavaScript)"):
-        chart_js = cached_chart_js(df, chart_type, x_col, tuple(y_cols), title, dark)
+        chart_js = cached_chart_js(
+            df, chart_type, x_col, tuple(y_cols), title, dark, size_col
+        )
         st.code(chart_js, language="javascript")

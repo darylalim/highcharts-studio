@@ -80,7 +80,7 @@ derives it from `st.context.theme.type` and threads it through the cached
 renderers.
 
 Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
-`pie`, `scatter`.
+`pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension).
 
 ## Run
 

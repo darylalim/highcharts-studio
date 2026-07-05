@@ -75,10 +75,36 @@ def _daily_temperature() -> pd.DataFrame:
     )
 
 
+def _country_economics() -> pd.DataFrame:
+    """GDP per capita vs life expectancy, sized by population — the classic
+    Gapminder-style bubble where the marker area carries a third dimension.
+    Tailored to bubble: a numeric GDP (X) and life-expectancy (Y) pair plus a
+    population column whose wide range (tens to ~1,400 millions) makes the size
+    encoding legible."""
+    return pd.DataFrame(
+        {
+            "country": [
+                "USA",
+                "China",
+                "India",
+                "Germany",
+                "Brazil",
+                "Nigeria",
+                "Japan",
+                "Indonesia",
+            ],
+            "gdp_per_capita_k": [76.0, 12.6, 2.5, 52.7, 8.9, 2.1, 33.8, 4.8],
+            "life_expectancy": [77.5, 78.2, 70.1, 81.2, 73.4, 52.7, 84.0, 71.7],
+            "population_m": [335, 1412, 1428, 84, 216, 224, 125, 278],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
     "Fruit sales (pie/bar/column)": _fruit_sales,
     "Height vs weight (scatter)": _height_vs_weight,
     "Daily temperature (areaspline)": _daily_temperature,
+    "Country economics (bubble)": _country_economics,
 }

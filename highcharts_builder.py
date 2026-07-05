@@ -21,7 +21,8 @@ from highcharts_core.constants import EnforcedNull
 CARTESIAN_TYPES = ("line", "spline", "area", "areaspline", "column", "bar")
 SINGLE_VALUE_TYPES = ("pie",)
 XY_TYPES = ("scatter",)
-SUPPORTED_TYPES = CARTESIAN_TYPES + SINGLE_VALUE_TYPES + XY_TYPES
+BUBBLE_TYPES = ("bubble",)  # scatter (x, y) plus a size (z) dimension
+SUPPORTED_TYPES = CARTESIAN_TYPES + SINGLE_VALUE_TYPES + XY_TYPES + BUBBLE_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
 # and static PNG) share one look that matches the Streamlit theme in
@@ -104,6 +105,19 @@ def _num(value):
     return float(value)
 
 
+def _xy_x_axis(df: pd.DataFrame, x_col: str, *, numeric_x: bool) -> dict[str, object]:
+    """X-axis config shared by the scatter and bubble branches.
+
+    A titled axis; for a non-numeric ``x_col`` the points are placed by row
+    position, so the actual values label those positions via ``categories``
+    (rather than a bare ``0..N``).
+    """
+    x_axis: dict[str, object] = {"title": {"text": x_col}}
+    if not numeric_x:
+        x_axis["categories"] = [str(v) for v in df[x_col].tolist()]
+    return x_axis
+
+
 def build_options(
     df: pd.DataFrame,
     chart_type: str,
@@ -113,6 +127,7 @@ def build_options(
     title: str | None = None,
     colors: list[str] | None = None,
     dark: bool = False,
+    size_col: str | None = None,
 ) -> dict:
     """Return a Highcharts options ``dict`` for the given DataFrame and columns.
 
@@ -123,13 +138,19 @@ def build_options(
     - ``scatter``: ``x_col`` and each ``y_cols`` column form (x, y) point pairs.
       A non-numeric ``x_col`` is plotted by row position and labelled with the
       column's values via the x-axis categories.
+    - ``bubble``: like ``scatter``, but each point carries a third value from
+      ``size_col`` that drives the marker area — points are (x, y, size) triples,
+      and every ``y_cols`` series shares the one ``size_col``.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
     tooltip) for dark mode; the series palette itself is shared across modes.
+    ``size_col`` names the marker-size column and is required for ``bubble``
+    (ignored by the other types).
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
-    or (for cartesian types) an ``x_col`` that is also one of the ``y_cols``.
+    a ``bubble`` chart with no ``size_col``, or (for cartesian types) an
+    ``x_col`` that is also one of the ``y_cols``.
     """
     if chart_type not in SUPPORTED_TYPES:
         raise ValueError(
@@ -137,6 +158,8 @@ def build_options(
         )
     if not y_cols:
         raise ValueError("At least one y column is required.")
+    if chart_type in BUBBLE_TYPES and not size_col:
+        raise ValueError("A bubble chart requires a size (z) column via size_col.")
     if chart_type in CARTESIAN_TYPES and x_col in y_cols:
         raise ValueError(
             f"x_col {x_col!r} cannot also be a y series for a {chart_type} chart"
@@ -186,21 +209,51 @@ def build_options(
                     if not pd.isna(x) and not pd.isna(y)
                 ]
             else:
+                # Non-numeric x: place points by row position (the values label
+                # those positions via _xy_x_axis's categories); drop missing y.
                 points = [
                     [i, float(y)] for i, y in enumerate(df[col]) if not pd.isna(y)
                 ]
             series.append({"name": col, "data": points})
-        # With a non-numeric x_col the points use the row position as x, so
-        # label those positions with the actual values instead of a bare 0..N.
-        x_axis: dict[str, object] = {"title": {"text": x_col}}
-        if not numeric_x:
-            x_axis["categories"] = [str(v) for v in df[x_col].tolist()]
         return _themed(
             {
                 "chart": {"type": "scatter", "zooming": {"type": "xy"}},
                 "colors": colors,
                 "title": {"text": title},
-                "xAxis": x_axis,
+                "xAxis": _xy_x_axis(df, x_col, numeric_x=numeric_x),
+                "yAxis": {"title": {"text": ", ".join(y_cols)}},
+                "legend": {"enabled": len(series) > 1},
+                "series": series,
+            },
+            dark=dark,
+        )
+
+    if chart_type in BUBBLE_TYPES:  # bubble: scatter plus a size (z) dimension
+        assert size_col is not None  # guarded above for bubble
+        numeric_x = pd.api.types.is_numeric_dtype(df[x_col])
+        series = []
+        for col in y_cols:
+            if numeric_x:
+                points = [
+                    [float(x), float(y), float(z)]
+                    for x, y, z in zip(df[x_col], df[col], df[size_col], strict=True)
+                    if not pd.isna(x) and not pd.isna(y) and not pd.isna(z)
+                ]
+            else:
+                # Non-numeric x: place points by row position (like scatter), each
+                # still carrying its y and size; drop rows missing y or size.
+                points = [
+                    [i, float(y), float(z)]
+                    for i, (y, z) in enumerate(zip(df[col], df[size_col], strict=True))
+                    if not pd.isna(y) and not pd.isna(z)
+                ]
+            series.append({"name": col, "data": points})
+        return _themed(
+            {
+                "chart": {"type": "bubble", "zooming": {"type": "xy"}},
+                "colors": colors,
+                "title": {"text": title},
+                "xAxis": _xy_x_axis(df, x_col, numeric_x=numeric_x),
                 "yAxis": {"title": {"text": ", ".join(y_cols)}},
                 "legend": {"enabled": len(series) > 1},
                 "series": series,
@@ -236,9 +289,12 @@ def make_chart(
     container_id: str = "hc_chart",
     title: str | None = None,
     dark: bool = False,
+    size_col: str | None = None,
 ) -> Chart:
     """Build and return a highcharts-core ``Chart`` for the given columns."""
-    options = build_options(df, chart_type, x_col, list(y_cols), title=title, dark=dark)
+    options = build_options(
+        df, chart_type, x_col, list(y_cols), title=title, dark=dark, size_col=size_col
+    )
     chart = Chart.from_options(options)
     chart.container = container_id
     return chart
@@ -254,16 +310,24 @@ def build_chart_html(
     height: int = 480,
     title: str | None = None,
     dark: bool = False,
+    size_col: str | None = None,
 ) -> str:
     """Build a full, self-contained HTML document that renders the chart.
 
     Includes the Highcharts CDN ``<script>`` tags the chart actually needs
-    (resolved by ``get_script_tags``) plus the ``Highcharts.chart(...)`` call
-    emitted by ``to_js_literal``. Pass the result to ``st.iframe(html,
-    height=...)``.
+    (resolved by ``get_script_tags`` — e.g. ``highcharts-more`` for a bubble
+    chart) plus the ``Highcharts.chart(...)`` call emitted by ``to_js_literal``.
+    Pass the result to ``st.iframe(html, height=...)``.
     """
     chart = make_chart(
-        df, chart_type, x_col, y_cols, container_id=container_id, title=title, dark=dark
+        df,
+        chart_type,
+        x_col,
+        y_cols,
+        container_id=container_id,
+        title=title,
+        dark=dark,
+        size_col=size_col,
     )
 
     script_tags = chart.get_script_tags(as_str=True)
@@ -298,6 +362,7 @@ def build_chart_png(
     width: int | None = None,
     timeout: int = 30,
     dark: bool = False,
+    size_col: str | None = None,
 ) -> bytes:
     """Render the chart to PNG bytes via the Highcharts export server.
 
@@ -308,7 +373,9 @@ def build_chart_png(
     (``export.highcharts.com`` by default; pass a ``server_instance`` to
     ``download_chart`` to self-host). ``scale=2`` yields a crisper image.
     """
-    chart = make_chart(df, chart_type, x_col, y_cols, title=title, dark=dark)
+    chart = make_chart(
+        df, chart_type, x_col, y_cols, title=title, dark=dark, size_col=size_col
+    )
     if height is not None:
         # highcharts-core types `options` and `options.chart` as Optional, but
         # `Chart.from_options` always populates both, so setting height is safe.

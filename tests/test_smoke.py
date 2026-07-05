@@ -50,12 +50,22 @@ def labeled_frame() -> pd.DataFrame:
     return pd.DataFrame({"label": ["a", "b", "c"], "value": [1.0, 2.0, 3.0]})
 
 
+def _size_for(chart_type: str) -> str | None:
+    """The size column the SUPPORTED_TYPES-parametrized tests pass for the bubble
+    case: bubble requires one (its marker-size dimension); other types ignore it,
+    so it's None. The shared ``labeled_frame`` has "value" as its only numeric
+    column, so it doubles as the size."""
+    return "value" if chart_type == "bubble" else None
+
+
 # --------------------------------------------------------------------------- #
 # Every supported type builds
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_supported_type_builds(labeled_frame, chart_type):
-    opts = build_options(labeled_frame, chart_type, "label", ["value"])
+    opts = build_options(
+        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+    )
     assert opts["chart"]["type"] == chart_type
     assert opts["series"]  # at least one series/data set was produced
 
@@ -73,13 +83,17 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
     # the chart_type variable, so nothing else validates those literals end to end.
     from highcharts_builder import make_chart
 
-    js = make_chart(labeled_frame, chart_type, "label", ["value"]).to_js_literal()
+    js = make_chart(
+        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+    ).to_js_literal()
     assert js and f"type: '{chart_type}'" in js
 
 
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_default_title_per_type(labeled_frame, chart_type):
-    opts = build_options(labeled_frame, chart_type, "label", ["value"])
+    opts = build_options(
+        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+    )
     assert opts["title"]["text"] == f"{chart_type.title()} chart"
 
 
@@ -91,7 +105,9 @@ def test_explicit_title_overrides_default(labeled_frame):
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_default_palette_applied_per_type(labeled_frame, chart_type):
     # Every chart type carries the brand palette so all render modes share a look.
-    opts = build_options(labeled_frame, chart_type, "label", ["value"])
+    opts = build_options(
+        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+    )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
 
@@ -111,7 +127,14 @@ def test_colors_override(labeled_frame):
 def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
     # Dark mode paints the chart background so it matches the dark app shell
     # (kept in sync with .streamlit/config.toml [theme.dark] backgroundColor).
-    opts = build_options(labeled_frame, chart_type, "label", ["value"], dark=True)
+    opts = build_options(
+        labeled_frame,
+        chart_type,
+        "label",
+        ["value"],
+        dark=True,
+        size_col=_size_for(chart_type),
+    )
     assert opts["chart"]["backgroundColor"] == "#0f172a"
 
 
@@ -119,13 +142,22 @@ def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
 def test_light_mode_leaves_chart_background_unset(labeled_frame, chart_type):
     # Light mode is a no-op: no backgroundColor is injected, so the output is
     # exactly what it was before dark mode existed.
-    opts = build_options(labeled_frame, chart_type, "label", ["value"])
+    opts = build_options(
+        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+    )
     assert "backgroundColor" not in opts["chart"]
 
 
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
-    opts = build_options(labeled_frame, chart_type, "label", ["value"], dark=True)
+    opts = build_options(
+        labeled_frame,
+        chart_type,
+        "label",
+        ["value"],
+        dark=True,
+        size_col=_size_for(chart_type),
+    )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
 
@@ -158,7 +190,14 @@ def test_dark_mode_themes_pie_labels_and_skips_axes():
 def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
     # The tooltip is lazily rendered by Highcharts and defaults to a light box, so
     # dark mode must theme it explicitly or it floats light-on-dark on hover.
-    opts = build_options(labeled_frame, chart_type, "label", ["value"], dark=True)
+    opts = build_options(
+        labeled_frame,
+        chart_type,
+        "label",
+        ["value"],
+        dark=True,
+        size_col=_size_for(chart_type),
+    )
     assert opts["tooltip"]["backgroundColor"] == "#0f172a"
     assert opts["tooltip"]["borderColor"] == "#475569"
     assert opts["tooltip"]["style"]["color"] == "#e2e8f0"
@@ -337,6 +376,75 @@ def test_scatter_multiple_y_cols_make_one_series_each_with_legend():
 
 
 # --------------------------------------------------------------------------- #
+# Bubble (scatter + a size dimension)
+# --------------------------------------------------------------------------- #
+def test_bubble_numeric_x_makes_xyz_triples_and_drops_missing():
+    df = pd.DataFrame(
+        {
+            "x": [1.0, 2.0, 3.0],
+            "y": [10.0, 20.0, 30.0],
+            "size": [5.0, float("nan"), 15.0],
+        }
+    )
+    opts = build_options(df, "bubble", "x", ["y"], size_col="size")
+    assert opts["chart"]["type"] == "bubble"
+    # Numeric x: points are [x, y, z] triples; the row with a NaN size is dropped.
+    assert opts["series"][0]["data"] == [[1.0, 10.0, 5.0], [3.0, 30.0, 15.0]]
+    # No category axis for a numeric x (same rule as scatter).
+    assert "categories" not in opts["xAxis"]
+
+
+def test_bubble_non_numeric_x_uses_positions_and_categories():
+    df = pd.DataFrame(
+        {
+            "label": ["p", "q", "r"],
+            "y": [10.0, 20.0, 30.0],
+            "size": [5.0, float("nan"), 15.0],
+        }
+    )
+    opts = build_options(df, "bubble", "label", ["y"], size_col="size")
+    # Non-numeric x: points use row position as x; the NaN-size row (q) is dropped,
+    # leaving a gap in positions (0, 2) rather than renumbering the rest.
+    assert opts["series"][0]["data"] == [[0, 10.0, 5.0], [2, 30.0, 15.0]]
+    # Every x value still labels the axis — including q, whose point was dropped.
+    assert opts["xAxis"]["categories"] == ["p", "q", "r"]
+
+
+def test_bubble_multiple_y_cols_share_the_size_column():
+    # Like scatter, each y column is its own series; every series carries the one
+    # size column as its z, and the legend turns on once there's more than one.
+    df = pd.DataFrame(
+        {"x": [1.0, 2.0], "a": [10.0, 20.0], "b": [100.0, 200.0], "size": [3.0, 4.0]}
+    )
+    opts = build_options(df, "bubble", "x", ["a", "b"], size_col="size")
+    assert [s["name"] for s in opts["series"]] == ["a", "b"]
+    assert opts["series"][0]["data"] == [[1.0, 10.0, 3.0], [2.0, 20.0, 4.0]]
+    assert opts["series"][1]["data"] == [[1.0, 100.0, 3.0], [2.0, 200.0, 4.0]]
+    assert opts["legend"]["enabled"] is True
+
+
+def test_bubble_requires_a_size_column():
+    # Bubble minus its size dimension is just a scatter, so the size column is
+    # mandatory — omitting it is a ValueError, not a silent 2-D fallback.
+    df = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
+    with pytest.raises(ValueError):
+        build_options(df, "bubble", "x", ["y"])  # no size_col
+
+
+def test_bubble_serializes_and_pulls_in_the_more_module():
+    # End to end: the [x, y, z] shape must serialize AND resolve highcharts-more,
+    # the module bubble lives in — a plain scatter/core template renders blank
+    # because the browser never loads that module.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0], "size": [5.0, 6.0]})
+    chart = make_chart(df, "bubble", "x", ["y"], size_col="size")
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'bubble'" in js
+    assert "highcharts-more" in chart.get_script_tags(as_str=True)
+
+
+# --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
 def test_sample_datasets_are_plottable_and_fresh():
@@ -366,6 +474,22 @@ def test_daily_temperature_sample_builds_an_areaspline_chart():
     assert opts["series"][0]["name"] == "temp_c"
     assert opts["xAxis"]["categories"][0] == "00:00"
     assert len(opts["xAxis"]["categories"]) == len(opts["series"][0]["data"]) == 24
+
+
+def test_country_economics_sample_builds_a_bubble_chart():
+    # Ties the new bubble sample to its intended type end to end: a numeric GDP (X)
+    # and life-expectancy (Y) pair with a population size column produces one
+    # [x, y, z] triple per country row.
+    from sample_data import _country_economics
+
+    df = _country_economics()
+    opts = build_options(
+        df, "bubble", "gdp_per_capita_k", ["life_expectancy"], size_col="population_m"
+    )
+    assert opts["chart"]["type"] == "bubble"
+    assert opts["series"][0]["name"] == "life_expectancy"
+    assert len(opts["series"][0]["data"]) == len(df)
+    assert len(opts["series"][0]["data"][0]) == 3  # [x, y, z]
 
 
 # --------------------------------------------------------------------------- #
@@ -416,6 +540,18 @@ def test_app_switch_to_pie_regenerates_config(app):
     _reveal_config(app)
     assert not app.exception
     assert "type: 'pie'" in app.code[0].value
+
+
+def test_app_switch_to_bubble_shows_size_control_and_regenerates_config(app):
+    # Bubble adds a "Size (Z)" selectbox that no other type shows, and drives the
+    # config through the size_col plumbing. Stays on the network-free config path.
+    assert not any(sb.label == "Size (Z)" for sb in app.selectbox)  # absent by default
+    app.selectbox[1].set_value("bubble").run()  # Chart type -> bubble
+    assert not app.exception
+    assert any(sb.label == "Size (Z)" for sb in app.selectbox)  # now present
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'bubble'" in app.code[0].value
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):
@@ -546,7 +682,7 @@ def test_app_chart_type_selector_has_help(app):
     # markdown help tooltip naming each type's data shape (mirrors the Mode help).
     help_text = app.selectbox[1].help  # selectbox [1] is Chart type
     assert help_text
-    assert "pie" in help_text and "scatter" in help_text
+    assert "pie" in help_text and "scatter" in help_text and "bubble" in help_text
     # Every cartesian type is named in the prose; loop so a future addition to
     # CARTESIAN_TYPES that's forgotten in the help text actually fails here.
     for chart_type in CARTESIAN_TYPES:
