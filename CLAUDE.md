@@ -10,7 +10,9 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
-  `st.multiselect` on wide CSVs), caching, a KPI metric row, the render-mode
+  `st.multiselect` on wide CSVs, plus a Size (Z) selector for bubble charts;
+  the Y default skips the X column so a numeric X doesn't open as an X == Y
+  diagonal), caching, a KPI metric row, the render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
   and a toggle that reveals the generated Highcharts config (JS).
@@ -20,10 +22,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
-  and scatter edge cases, the brand palette, the validation guards, and an
-  end-to-end pass driving every supported type through `Chart.from_options` /
-  `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
-  interaction tests.
+  and scatter/bubble edge cases, the brand palette, the validation guards
+  including bubble's required size column, and an end-to-end pass driving every
+  supported type through `Chart.from_options` / `to_js_literal`) and
+  `sample_data` unit tests, plus headless `AppTest` interaction tests.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
   decision functions (path guard, `.py` routing, git-dirty detection) plus a
   black-box check of the exit-code contract for `guard_paths.py` and
@@ -77,7 +79,9 @@ png = build_chart_png(df, chart_type, x_col, y_cols, title=title)
 All three helpers take an optional `dark=` flag (default `False`) that themes the
 chart chrome (background/text/axes/gridlines/tooltip) for dark mode; the app
 derives it from `st.context.theme.type` and threads it through the cached
-renderers.
+renderers. Bubble charts also take a `size_col=` naming the numeric column that
+drives each marker's area (required for `bubble`, raising `ValueError` if
+omitted; ignored by the other types), threaded through the same renderers.
 
 Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
 `pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension).
@@ -105,15 +109,19 @@ uv run pytest
 `tests/test_smoke.py` exercises the pure builder (`build_options`) —
 parametrized across every supported chart type, covering missing data
 (`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
-numeric vs non-numeric scatter paths, the brand palette, the light/dark theming
-(dark-mode chrome — including the tooltip — vs. the shared palette), and the
-validation guards — plus an end-to-end pass driving every supported type through
-the real `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is
-proven to serialize rather than just assumed) and the sample datasets,
-then drives the full app headless
-via Streamlit's `AppTest` (switching controls, revealing the generated config
-behind its toggle, the KPI metric row, the wide-CSV `st.multiselect` fallback,
-the render-mode selector's two modes, and asserting the guard messages).
+numeric vs non-numeric scatter/bubble paths (bubble adds the `(x, y, size)`
+triples whose series share one size column, plus its dimension-naming tooltip),
+the brand palette, the light/dark theming (dark-mode chrome — including the
+tooltip — vs. the shared palette), and the validation guards (including bubble's
+required size column) — plus an end-to-end pass driving every supported type
+through the real `Chart.from_options` → `to_js_literal` pipeline (so a newly
+added type is proven to serialize — bubble also pulling in the `highcharts-more`
+module — rather than just assumed) and the sample datasets, then drives the full
+app headless via Streamlit's `AppTest` (switching controls — including the bubble
+Size (Z) control — the default Y series avoiding the X column, revealing the
+generated config behind its toggle, the KPI metric row, the wide-CSV
+`st.multiselect` fallback, the render-mode selector's two modes, and asserting
+the guard messages).
 
 `tests/test_hooks.py` covers the `.claude/hooks/` scripts: the extracted pure
 functions (`protected_reason`, `is_python_target`, `has_dirty_python`) directly,

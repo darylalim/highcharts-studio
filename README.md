@@ -59,7 +59,8 @@ light/dark theme, which you can toggle from the settings menu.
   generated Highcharts config (the `to_js_literal()` output). The Y-series picker
   uses compact pills, falling back to `st.multiselect` for wide CSVs.
 - Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`,
-  `bar`, `pie`, `scatter`, `bubble`.
+  `bar`, `pie`, `scatter`, and `bubble` (scatter plus a size column that drives
+  each marker's area).
 
 ## Files
 
@@ -87,13 +88,14 @@ uv run pytest
 Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
 
 - **`tests/test_smoke.py`** — the pure builder (every chart type, the
-  missing-data and scatter edge cases, the brand palette, the light/dark theming
-  including the dark-mode tooltip, and the validation guards — plus an end-to-end
-  pass driving every supported type through the real `Chart.from_options` →
-  `to_js_literal` pipeline) and the sample datasets, plus a headless `AppTest`
-  pass that drives the full app (switching controls, the config toggle, the KPI
-  row, the wide-CSV `st.multiselect` fallback, both render modes, and the guard
-  messages).
+  missing-data and scatter/bubble edge cases, the brand palette, the light/dark
+  theming including the dark-mode tooltip, and the validation guards — plus an
+  end-to-end pass driving every supported type through the real
+  `Chart.from_options` → `to_js_literal` pipeline) and the sample datasets, plus
+  a headless `AppTest` pass that drives the full app (switching controls
+  including the bubble Size (Z) selector, the default Y series avoiding the X
+  column, the config toggle, the KPI row, the wide-CSV `st.multiselect` fallback,
+  both render modes, and the guard messages).
 - **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see
   [Claude Code hooks](#claude-code-hooks)).
 - **`tests/test_packaging.py`** — the licensing metadata (`pyproject.toml`

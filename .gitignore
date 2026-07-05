@@ -13,6 +13,10 @@ build/
 dist/
 *.egg-info/
 
+# Chart exports the app generates, not source: the Static-PNG "Download PNG"
+# button saves `<type>-chart.png` (e.g. `bubble-chart.png`).
+*-chart.png
+
 # Editor config is per-developer, not committed.
 .vscode/
 .idea/
