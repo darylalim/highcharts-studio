@@ -248,11 +248,25 @@ def build_options(
                     if not pd.isna(y) and not pd.isna(z)
                 ]
             series.append({"name": col, "data": points})
+        # Name all three dimensions in the tooltip (the default shows a bare
+        # x/y/z). For a non-numeric x the point's x is a row index, so reference
+        # the category label instead. _themed() merges dark chrome onto this — as
+        # it does for the pie tooltip — so these labels survive theming.
+        x_ref = "{point.x}" if numeric_x else "{point.category}"
+        tooltip = {
+            "headerFormat": "",
+            "pointFormat": (
+                f"{x_col}: <b>{x_ref}</b><br/>"
+                f"{{series.name}}: <b>{{point.y}}</b><br/>"
+                f"{size_col}: <b>{{point.z}}</b>"
+            ),
+        }
         return _themed(
             {
                 "chart": {"type": "bubble", "zooming": {"type": "xy"}},
                 "colors": colors,
                 "title": {"text": title},
+                "tooltip": tooltip,
                 "xAxis": _xy_x_axis(df, x_col, numeric_x=numeric_x),
                 "yAxis": {"title": {"text": ", ".join(y_cols)}},
                 "legend": {"enabled": len(series) > 1},

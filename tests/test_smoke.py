@@ -444,6 +444,32 @@ def test_bubble_serializes_and_pulls_in_the_more_module():
     assert "highcharts-more" in chart.get_script_tags(as_str=True)
 
 
+def test_bubble_tooltip_names_the_size_column_and_survives_dark_merge():
+    # The bubble tooltip names all three dimensions (the default shows a bare
+    # x/y/z); the size column in particular is labelled by name.
+    df = pd.DataFrame({"gdp": [1.0, 2.0], "life": [3.0, 4.0], "population": [5.0, 6.0]})
+    light = build_options(df, "bubble", "gdp", ["life"], size_col="population")
+    fmt = light["tooltip"]["pointFormat"]
+    assert "population" in fmt and "{point.z}" in fmt  # size named + wired
+    assert "gdp" in fmt and "{point.x}" in fmt  # numeric x -> point.x
+    # Dark mode merges chrome onto the tooltip without dropping the pointFormat
+    # (the same merge the pie path relies on).
+    dark = build_options(
+        df, "bubble", "gdp", ["life"], size_col="population", dark=True
+    )
+    assert dark["tooltip"]["backgroundColor"] == "#0f172a"
+    assert "population" in dark["tooltip"]["pointFormat"]
+
+
+def test_bubble_tooltip_uses_category_for_non_numeric_x():
+    # With a non-numeric x the point's x is a row index, so the tooltip references
+    # the category label instead of the bare position.
+    df = pd.DataFrame({"country": ["A", "B"], "life": [3.0, 4.0], "pop": [5.0, 6.0]})
+    opts = build_options(df, "bubble", "country", ["life"], size_col="pop")
+    fmt = opts["tooltip"]["pointFormat"]
+    assert "{point.category}" in fmt and "{point.x}" not in fmt
+
+
 # --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
@@ -552,6 +578,17 @@ def test_app_switch_to_bubble_shows_size_control_and_regenerates_config(app):
     _reveal_config(app)
     assert not app.exception
     assert "type: 'bubble'" in app.code[0].value
+
+
+def test_app_default_y_avoids_the_x_column(app):
+    # With a numeric X, the default Y is the next numeric column, not X itself, so
+    # scatter/bubble don't open as a degenerate X == Y diagonal. The height-vs-weight
+    # sample has a numeric first column, so X defaults to it and Y must differ.
+    app.selectbox[0].set_value("Height vs weight (scatter)").run()  # Dataset
+    app.selectbox[1].set_value("scatter").run()  # Chart type
+    assert not app.exception
+    assert app.selectbox[2].value == "height_cm"  # X: first column
+    assert app.pills[0].value == ["weight_kg"]  # Y: the *other* numeric column
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):

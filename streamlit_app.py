@@ -177,7 +177,11 @@ with st.sidebar:
         # the narrow sidebar, so fall back to st.multiselect (a dropdown, and
         # inherently multi — hence no selection_mode and the two separate calls).
         # The empty-set guard in the main panel handles a cleared selection.
-        default = numeric_cols[:1]
+        # Default the Y series to the first numeric column that isn't the X column
+        # so a numeric X (scatter/bubble) doesn't open as a degenerate X == Y
+        # diagonal (and cartesian doesn't trip its own x-in-y guard); fall back to
+        # the first numeric column when X is the only one.
+        default = [next((c for c in numeric_cols if c != x_col), numeric_cols[0])]
         if len(numeric_cols) <= MAX_PILL_OPTIONS:
             y_cols = st.pills(
                 y_label, numeric_cols, selection_mode="multi", default=default
