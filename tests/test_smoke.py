@@ -61,6 +61,23 @@ def test_supported_type_builds(labeled_frame, chart_type):
 
 
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_supported_type_builds_a_working_highcharts_core_chart(
+    labeled_frame, chart_type
+):
+    # build_options's SUPPORTED_TYPES check only guards against a Python-level
+    # typo — it can't catch a chart_type string highcharts-core itself would
+    # reject. Drive every type through the real pipeline (make_chart ->
+    # Chart.from_options -> to_js_literal), not just the options dict. This is the
+    # only test that proves the pie and scatter branches serialize: they hardcode
+    # their chart.type literal (scatter also its zooming block) rather than using
+    # the chart_type variable, so nothing else validates those literals end to end.
+    from highcharts_builder import make_chart
+
+    js = make_chart(labeled_frame, chart_type, "label", ["value"]).to_js_literal()
+    assert js and f"type: '{chart_type}'" in js
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_default_title_per_type(labeled_frame, chart_type):
     opts = build_options(labeled_frame, chart_type, "label", ["value"])
     assert opts["title"]["text"] == f"{chart_type.title()} chart"
@@ -207,20 +224,6 @@ def test_cartesian_categories_and_series(chart_type):
     assert opts["xAxis"]["title"]["text"] == "x"
     assert opts["series"][0]["name"] == "y"
     assert opts["series"][0]["data"] == [1.0, 2.0, 3.0]
-
-
-@pytest.mark.parametrize("chart_type", CARTESIAN_TYPES)
-def test_cartesian_type_builds_a_working_highcharts_core_chart(chart_type):
-    # build_options's SUPPORTED_TYPES check only guards against a Python-level
-    # typo — it can't catch a chart_type string highcharts-core itself would
-    # reject. Drive every cartesian type through the real pipeline (make_chart ->
-    # Chart.from_options -> to_js_literal), not just the options dict, so a newly
-    # added type (e.g. areaspline) is proven to work end-to-end, not just assumed.
-    from highcharts_builder import make_chart
-
-    df = pd.DataFrame({"x": ["a", "b", "c"], "y": [1.0, 2.0, 3.0]})
-    js = make_chart(df, chart_type, "x", ["y"]).to_js_literal()
-    assert js and f"type: '{chart_type}'" in js
 
 
 @pytest.mark.parametrize("chart_type", CARTESIAN_TYPES)
@@ -415,13 +418,15 @@ def test_app_switch_to_pie_regenerates_config(app):
     assert "type: 'pie'" in app.code[0].value
 
 
-def test_app_switch_to_areaspline_regenerates_config(app):
-    # The new cartesian type reaches the builder from the app like any other:
-    # switch to it and confirm it flows through to the generated config.
-    app.selectbox[1].set_value("areaspline")  # Chart type -> areaspline
-    _reveal_config(app)
-    assert not app.exception
-    assert "type: 'areaspline'" in app.code[0].value
+def test_app_chart_type_selector_offers_every_supported_type(app):
+    # Contract test mirroring test_app_render_mode_selector_offers_the_two_modes:
+    # the chart-type selectbox offers exactly SUPPORTED_TYPES (so a new builder
+    # type shows up in the UI, and a removed/renamed one fails here) and defaults
+    # to the first. Also pins the positional index [1] other app tests rely on.
+    selector = app.selectbox[1]
+    assert selector.label == "Chart type"
+    assert list(selector.options) == list(SUPPORTED_TYPES)
+    assert selector.value == SUPPORTED_TYPES[0]
 
 
 def test_app_custom_title_flows_into_config(app):
@@ -542,7 +547,10 @@ def test_app_chart_type_selector_has_help(app):
     help_text = app.selectbox[1].help  # selectbox [1] is Chart type
     assert help_text
     assert "pie" in help_text and "scatter" in help_text
-    assert "areaspline" in help_text  # pins the help prose in sync with CARTESIAN_TYPES
+    # Every cartesian type is named in the prose; loop so a future addition to
+    # CARTESIAN_TYPES that's forgotten in the help text actually fails here.
+    for chart_type in CARTESIAN_TYPES:
+        assert chart_type in help_text
 
 
 def test_app_kpi_row_summarizes_active_data(app):

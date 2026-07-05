@@ -21,7 +21,7 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter edge cases, the brand palette, the validation guards, and an
-  end-to-end pass driving every cartesian type through `Chart.from_options` /
+  end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
   interaction tests.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
@@ -107,9 +107,9 @@ parametrized across every supported chart type, covering missing data
 (`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
 numeric vs non-numeric scatter paths, the brand palette, the light/dark theming
 (dark-mode chrome — including the tooltip — vs. the shared palette), and the
-validation guards (including an end-to-end pass that drives every cartesian type
-through the real `Chart.from_options` → `to_js_literal` pipeline, so a newly added
-type is proven to serialize rather than just assumed) — plus the sample datasets,
+validation guards — plus an end-to-end pass driving every supported type through
+the real `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is
+proven to serialize rather than just assumed) and the sample datasets,
 then drives the full app headless
 via Streamlit's `AppTest` (switching controls, revealing the generated config
 behind its toggle, the KPI metric row, the wide-CSV `st.multiselect` fallback,
