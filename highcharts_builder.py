@@ -13,6 +13,8 @@ The flow mirrors the highcharts-core pattern (an options ``dict`` ->
 
 from __future__ import annotations
 
+import html
+
 import pandas as pd
 from highcharts_core.chart import Chart
 from highcharts_core.constants import EnforcedNull
@@ -116,6 +118,15 @@ def _xy_x_axis(df: pd.DataFrame, x_col: str, *, numeric_x: bool) -> dict[str, ob
     if not numeric_x:
         x_axis["categories"] = [str(v) for v in df[x_col].tolist()]
     return x_axis
+
+
+def _tooltip_label(name: str) -> str:
+    """Sanitize a (possibly user/CSV-supplied) column name for use as literal
+    text in a Highcharts tooltip format string. Strips the ``{``/``}`` that
+    Highcharts would otherwise parse as value tokens (so ``weight {kg}`` keeps
+    its unit rather than vanishing), and HTML-escapes the rest since tooltips
+    render as HTML (so a name can't inject markup)."""
+    return html.escape(str(name)).replace("{", "").replace("}", "")
 
 
 def build_options(
@@ -256,9 +267,9 @@ def build_options(
         tooltip = {
             "headerFormat": "",
             "pointFormat": (
-                f"{x_col}: <b>{x_ref}</b><br/>"
+                f"{_tooltip_label(x_col)}: <b>{x_ref}</b><br/>"
                 f"{{series.name}}: <b>{{point.y}}</b><br/>"
-                f"{size_col}: <b>{{point.z}}</b>"
+                f"{_tooltip_label(size_col)}: <b>{{point.z}}</b>"
             ),
         }
         return _themed(

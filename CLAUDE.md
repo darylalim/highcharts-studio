@@ -10,9 +10,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
-  `st.multiselect` on wide CSVs, plus a Size (Z) selector for bubble charts;
-  the Y default skips the X column so a numeric X doesn't open as an X == Y
-  diagonal), caching, a KPI metric row, the render-mode
+  `st.multiselect` on wide CSVs, plus a Size (Z) selector for bubble charts),
+  caching, a KPI metric row, the render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
   and a toggle that reveals the generated Highcharts config (JS).
@@ -118,8 +117,8 @@ through the real `Chart.from_options` → `to_js_literal` pipeline (so a newly
 added type is proven to serialize — bubble also pulling in the `highcharts-more`
 module — rather than just assumed) and the sample datasets, then drives the full
 app headless via Streamlit's `AppTest` (switching controls — including the bubble
-Size (Z) control — the default Y series avoiding the X column, revealing the
-generated config behind its toggle, the KPI metric row, the wide-CSV
+Size (Z) control — revealing the generated config behind its toggle, the KPI
+metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
 the guard messages).
 

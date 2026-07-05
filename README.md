@@ -93,9 +93,8 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
   end-to-end pass driving every supported type through the real
   `Chart.from_options` → `to_js_literal` pipeline) and the sample datasets, plus
   a headless `AppTest` pass that drives the full app (switching controls
-  including the bubble Size (Z) selector, the default Y series avoiding the X
-  column, the config toggle, the KPI row, the wide-CSV `st.multiselect` fallback,
-  both render modes, and the guard messages).
+  including the bubble Size (Z) selector, the config toggle, the KPI row, the
+  wide-CSV `st.multiselect` fallback, both render modes, and the guard messages).
 - **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see
   [Claude Code hooks](#claude-code-hooks)).
 - **`tests/test_packaging.py`** — the licensing metadata (`pyproject.toml`

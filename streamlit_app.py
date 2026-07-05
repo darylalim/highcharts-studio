@@ -177,11 +177,11 @@ with st.sidebar:
         # the narrow sidebar, so fall back to st.multiselect (a dropdown, and
         # inherently multi — hence no selection_mode and the two separate calls).
         # The empty-set guard in the main panel handles a cleared selection.
-        # Default the Y series to the first numeric column that isn't the X column
-        # so a numeric X (scatter/bubble) doesn't open as a degenerate X == Y
-        # diagonal (and cartesian doesn't trip its own x-in-y guard); fall back to
-        # the first numeric column when X is the only one.
-        default = [next((c for c in numeric_cols if c != x_col), numeric_cols[0])]
+        # A constant default (not one derived from x_col): these widgets are
+        # keyless, so Streamlit folds `default` into their identity — a default
+        # that varied with X would re-mint the widget and silently reset the
+        # user's Y selection whenever they changed X.
+        default = numeric_cols[:1]
         if len(numeric_cols) <= MAX_PILL_OPTIONS:
             y_cols = st.pills(
                 y_label, numeric_cols, selection_mode="multi", default=default
@@ -193,8 +193,8 @@ with st.sidebar:
 
     # Bubble encodes a third dimension as marker size; pick the numeric column
     # that drives it. Only shown for bubble (None otherwise, and ignored by the
-    # other builders). Default to the last numeric column so it differs from the
-    # X/Y defaults, which both lead with the first numeric column.
+    # other builders). Default to the last numeric column, so it usually differs
+    # from the X and Y pickers (which lead with the earlier columns).
     size_col = None
     if chart_type == "bubble":
         size_col = st.selectbox("Size (Z)", numeric_cols, index=len(numeric_cols) - 1)

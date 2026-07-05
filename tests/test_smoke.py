@@ -20,12 +20,11 @@ Layers:
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type (including bubble, which reveals a
-  Size (Z) control), title, and series, the default Y series avoiding the X
-  column, revealing the generated Highcharts config behind its toggle, the KPI
-  metric row, the wide-CSV multiselect fallback, and the render-mode selector's
-  two modes (interactive iframe / static PNG), plus tripping the x-in-y warning
-  and the no-CSV-uploaded info guard — asserting on the generated config (incl.
-  the brand palette) and the guard messages.
+  Size (Z) control), title, and series, revealing the generated Highcharts config
+  behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
+  the render-mode selector's two modes (interactive iframe / static PNG), plus
+  tripping the x-in-y warning and the no-CSV-uploaded info guard — asserting on
+  the generated config (incl. the brand palette) and the guard messages.
 """
 
 import sys
@@ -473,6 +472,24 @@ def test_bubble_tooltip_uses_category_for_non_numeric_x():
     assert "{point.category}" in fmt and "{point.x}" not in fmt
 
 
+def test_bubble_tooltip_sanitizes_user_column_names():
+    # Column names are user/CSV-controlled and land in a Highcharts format string:
+    # braces would be parsed as (empty) value tokens and HTML would inject, so the
+    # interpolated x/size names are brace-stripped and HTML-escaped.
+    df = pd.DataFrame({"w {kg}": [1.0], "y": [2.0], "<b>pop</b>": [3.0]})
+    fmt = build_options(df, "bubble", "w {kg}", ["y"], size_col="<b>pop</b>")[
+        "tooltip"
+    ]["pointFormat"]
+    # Braces stripped from the label, so Highcharts won't tokenize `{kg}` away.
+    assert "{kg}" not in fmt
+    assert "w kg: " in fmt
+    # HTML in the size column name is escaped, not emitted as live markup.
+    assert "<b>pop</b>" not in fmt
+    assert "&lt;b&gt;pop&lt;/b&gt;" in fmt
+    # The genuine Highcharts tokens are untouched.
+    assert "{point.z}" in fmt
+
+
 # --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
@@ -581,17 +598,6 @@ def test_app_switch_to_bubble_shows_size_control_and_regenerates_config(app):
     _reveal_config(app)
     assert not app.exception
     assert "type: 'bubble'" in app.code[0].value
-
-
-def test_app_default_y_avoids_the_x_column(app):
-    # With a numeric X, the default Y is the next numeric column, not X itself, so
-    # scatter/bubble don't open as a degenerate X == Y diagonal. The height-vs-weight
-    # sample has a numeric first column, so X defaults to it and Y must differ.
-    app.selectbox[0].set_value("Height vs weight (scatter)").run()  # Dataset
-    app.selectbox[1].set_value("scatter").run()  # Chart type
-    assert not app.exception
-    assert app.selectbox[2].value == "height_cm"  # X: first column
-    assert app.pills[0].value == ["weight_kg"]  # Y: the *other* numeric column
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):
@@ -739,9 +745,7 @@ def test_app_kpi_row_summarizes_active_data(app):
     assert _metrics(app) == {
         "Rows": f"{len(default_df):,}",
         "Numeric columns": str(len(numeric)),
-        # Default Y is the first numeric column that isn't X; the default
-        # dataset's X (month) is non-numeric, so that's one column -> one series.
-        "Series plotted": "1",
+        "Series plotted": "1",  # the default selects numeric_cols[:1]
     }
 
 
