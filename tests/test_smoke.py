@@ -5,11 +5,13 @@ Run with: ``uv run pytest``
 Layers:
 
 - ``build_options`` unit tests covering every supported chart type, the
-  missing-data and scatter edge cases (NaN -> ``EnforcedNull`` for cartesian
-  series, dropped points/slices elsewhere, and numeric vs non-numeric scatter
-  x), the brand-palette (``DEFAULT_COLORS`` / ``colors`` override), and the
-  validation guards (unsupported type, empty ``y_cols``, and the cartesian-only
-  x-in-y rule).
+  missing-data and scatter/bubble edge cases (NaN -> ``EnforcedNull`` for
+  cartesian series, dropped points/slices elsewhere, numeric vs non-numeric x,
+  and bubble's (x, y, size) triples whose series share one size column, its
+  ``highcharts-more`` module resolution, and its dimension-naming tooltip), the
+  brand-palette (``DEFAULT_COLORS`` / ``colors`` override), and the validation
+  guards (unsupported type, empty ``y_cols``, the cartesian-only x-in-y rule,
+  and the bubble size-column requirement).
 - light/dark theming: dark mode paints the chart background (light leaves it
   unset), the chart chrome (axes/text/gridlines, pie labels, and the tooltip)
   flips while the ``DEFAULT_COLORS`` palette stays shared across modes, and
@@ -17,12 +19,13 @@ Layers:
 - ``sample_data`` unit tests: every built-in dataset is plottable (fresh,
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
-  control flow — switching chart type, title, and series, revealing the
-  generated Highcharts config behind its toggle, the KPI metric row, the
-  wide-CSV multiselect fallback, and the render-mode selector's two modes
-  (interactive iframe / static PNG), plus tripping the x-in-y warning and the
-  no-CSV-uploaded info guard — asserting on the generated config (incl. the
-  brand palette) and the guard messages.
+  control flow — switching chart type (including bubble, which reveals a
+  Size (Z) control), title, and series, the default Y series avoiding the X
+  column, revealing the generated Highcharts config behind its toggle, the KPI
+  metric row, the wide-CSV multiselect fallback, and the render-mode selector's
+  two modes (interactive iframe / static PNG), plus tripping the x-in-y warning
+  and the no-CSV-uploaded info guard — asserting on the generated config (incl.
+  the brand palette) and the guard messages.
 """
 
 import sys
@@ -736,7 +739,9 @@ def test_app_kpi_row_summarizes_active_data(app):
     assert _metrics(app) == {
         "Rows": f"{len(default_df):,}",
         "Numeric columns": str(len(numeric)),
-        "Series plotted": "1",  # the default selects numeric_cols[:1]
+        # Default Y is the first numeric column that isn't X; the default
+        # dataset's X (month) is non-numeric, so that's one column -> one series.
+        "Series plotted": "1",
     }
 
 
