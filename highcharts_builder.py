@@ -325,14 +325,19 @@ def build_options(
                         # area already carries the value, so color distinguishes
                         # tiles rather than re-encoding size.
                         "colorByPoint": True,
-                        # Label each tile with its name (the area conveys the
-                        # value). "contrast" text + outline stays legible on every
-                        # palette fill in BOTH themes — the label sits on the tile,
-                        # not the chart background — so, unlike pie's labels, it
-                        # needs no dark-mode color flip.
+                        # Label each tile with its name AND value on two lines.
+                        # Like pie ("{name}: {y}") and heatmap ("{value}"), the
+                        # value is printed IN the mark, so the Static-PNG mode
+                        # (which has no hover tooltip) still shows the numbers, not
+                        # just relative areas. Two lines rather than one keeps it
+                        # from crowding narrow tiles; Highcharts hides any label
+                        # that still doesn't fit. "contrast" text + outline stays
+                        # legible on every palette fill in BOTH themes — the label
+                        # sits on the tile, not the chart background — so, unlike
+                        # pie's labels, it needs no dark-mode color flip.
                         "dataLabels": {
                             "enabled": True,
-                            "format": "{point.name}",
+                            "format": "{point.name}<br>{point.value}",
                             "color": "contrast",
                             "style": {
                                 "textOutline": "1px contrast",

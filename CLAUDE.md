@@ -138,7 +138,8 @@ category-x x-in-y rule, widened to heatmap, and bubble's required size column) �
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
 to serialize — bubble and radar both pulling in the `highcharts-more` module,
-heatmap the `modules/heatmap` module — rather than just assumed) and the sample
+heatmap the `modules/heatmap` module, and treemap the `modules/treemap` module —
+rather than just assumed) and the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, and treemap —
 revealing the generated config behind its toggle,

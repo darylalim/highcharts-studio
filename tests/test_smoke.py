@@ -793,7 +793,9 @@ def test_treemap_light_mode_shape():
     # treemap-specific choices are otherwise unguarded: the {name, value} tooltip
     # (headerFormat blanked so a hovered tile isn't a bare value), the disabled
     # legend (the in-tile labels carry identity, so a legend would just repeat
-    # them), and the name-only "contrast" tile labels (the area conveys the value).
+    # them), and the two-line name+value "contrast" tile labels (printed in the
+    # mark so the Static-PNG mode, which has no hover, still shows the numbers —
+    # like pie and heatmap).
     df = pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]})
     opts = build_options(df, "treemap", "name", ["v"])
     assert opts["legend"]["enabled"] is False
@@ -801,10 +803,25 @@ def test_treemap_light_mode_shape():
     assert opts["tooltip"]["pointFormat"] == "{point.name}: <b>{point.value}</b>"
     labels = opts["plotOptions"]["treemap"]["dataLabels"]
     assert labels["enabled"] is True
-    assert labels["format"] == "{point.name}"
+    assert labels["format"] == "{point.name}<br>{point.value}"
     assert labels["color"] == "contrast"
     # Light mode injects no dark chrome onto the tooltip (a no-op, as elsewhere).
     assert "backgroundColor" not in opts["tooltip"]
+
+
+@pytest.mark.parametrize("chart_type", ["pie", "treemap"])
+def test_single_value_numeric_labels_coerce_to_strings(chart_type):
+    # The single-value point-name types (pie, treemap) build leaves as
+    # {"name": str(label), ...}. That str() is load-bearing: highcharts-core's
+    # point model rejects a non-string name (CannotCoerceError on render), so a
+    # user who picks a numeric label column (years, IDs) would otherwise get a
+    # blank/erroring chart. This is the point-name analog of the category-axis
+    # coercion tests (test_category_x_numeric_x_becomes_string_categories,
+    # test_heatmap_numeric_x_becomes_string_categories); the shared labeled_frame
+    # sweeps only use string labels, so nothing else pins it for these two.
+    df = pd.DataFrame({"yr": [2001, 2002], "v": [1.0, 2.0]})
+    data = build_options(df, chart_type, "yr", ["v"])["series"][0]["data"]
+    assert [pt["name"] for pt in data] == ["2001", "2002"]  # strings, not ints
 
 
 # --------------------------------------------------------------------------- #
