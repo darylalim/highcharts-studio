@@ -22,10 +22,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter/bubble edge cases, radar's polar-line shape, heatmap's colorAxis
-  value matrix, the brand palette, the validation guards including bubble's
-  required size column and the heatmap x-in-y rule, and an end-to-end pass driving
-  every supported type through `Chart.from_options` / `to_js_literal`) and
-  `sample_data` unit tests, plus headless `AppTest` interaction tests.
+  value matrix, treemap's value-sized tiles, the brand palette, the validation
+  guards including bubble's required size column and the heatmap x-in-y rule, and
+  an end-to-end pass driving every supported type through `Chart.from_options` /
+  `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
+  interaction tests.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
   decision functions (path guard, `.py` routing, git-dirty detection) plus a
   black-box check of the exit-code contract for `guard_paths.py` and
@@ -90,7 +91,12 @@ shape, rendered as a `line` with `chart.polar` on polar axes), `heatmap` (a
 category-X × category-Y value matrix — the wide-form category-X data
 reinterpreted as `[x, y, value]` cells colored by a sequential `colorAxis`, with
 `x_col`'s values as the X categories and each `y_cols` column *name* as a Y
-category, pulling in the `modules/heatmap` module).
+category, pulling in the `modules/heatmap` module), `treemap` (nested rectangles
+sized by value — the same single-value data shape as `pie`: `x_col` labels each
+tile and the first `y_cols` column gives its `value`, but tiles are colored
+categorically from the palette via `colorByPoint` and laid out by the
+`squarified` algorithm, dropping missing values like pie; pulls in the
+`modules/treemap` module).
 
 ## Run
 
@@ -121,7 +127,10 @@ its dimension-naming tooltip), radar's polar-line shape (`chart.type` `line` +
 `chart.polar`, sharing the `highcharts-more` module and themed by the same
 `_themed` chrome), heatmap's colorAxis value matrix (`[x, y, value]` cells over
 two category axes, empty cells kept as `EnforcedNull`, its colorAxis themed for
-dark mode and resolving the `modules/heatmap` module), the brand palette, the
+dark mode and resolving the `modules/heatmap` module), treemap's value-sized tiles
+(`{name, value}` leaves colored categorically via `colorByPoint`, missing values
+dropped like pie, its tile gaps themed for dark mode and resolving the
+`modules/treemap` module), the brand palette, the
 light/dark theming (dark-mode chrome — including the tooltip and the heatmap
 colorAxis — vs. the shared palette), and the validation guards (including the
 category-x x-in-y rule, widened to heatmap, and bubble's required size column) —
@@ -130,8 +139,8 @@ plus an end-to-end pass driving every supported type through the real
 to serialize — bubble and radar both pulling in the `highcharts-more` module,
 heatmap the `modules/heatmap` module — rather than just assumed) and the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
-controls — including the bubble Size (Z) control, radar, and heatmap — revealing
-the generated config behind its toggle,
+controls — including the bubble Size (Z) control, radar, heatmap, and treemap —
+revealing the generated config behind its toggle,
 the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
 the guard messages).

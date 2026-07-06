@@ -12,7 +12,10 @@ Layers:
   tooltip), radar's polar-line shape (chart.type "line" + ``chart.polar``,
   sharing the ``highcharts-more`` module), heatmap's category × category value
   matrix (``[x, y, value]`` cells colored by a ``colorAxis``, empty cells kept as
-  ``EnforcedNull``, resolving its own ``modules/heatmap.js``), the brand-palette
+  ``EnforcedNull``, resolving its own ``modules/heatmap.js``), treemap's
+  value-sized tiles (``{name, value}`` leaves colored categorically via
+  ``colorByPoint``, missing values dropped like pie, resolving its own
+  ``modules/treemap.js``), the brand-palette
   (``DEFAULT_COLORS`` / ``colors`` override), and the validation guards
   (unsupported type, empty ``y_cols``, the category-x x-in-y rule widened to
   heatmap, and the bubble size-column requirement).
@@ -24,8 +27,8 @@ Layers:
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type (including bubble, which reveals a
-  Size (Z) control, radar, and heatmap), title, and series, revealing the generated
-  Highcharts config
+  Size (Z) control, radar, heatmap, and treemap), title, and series, revealing
+  the generated Highcharts config
   behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
   the render-mode selector's two modes (interactive iframe / static PNG), plus
   tripping the x-in-y warning and the no-CSV-uploaded info guard — asserting on
@@ -720,6 +723,71 @@ def test_heatmap_all_nan_column_serializes_null_cells():
 
 
 # --------------------------------------------------------------------------- #
+# Treemap (nested rectangles sized by value, colored categorically like pie)
+# --------------------------------------------------------------------------- #
+def test_treemap_builds_leaves_and_skips_missing():
+    # Treemap shares pie's single-value shape (a label column + one value column)
+    # but is its own branch: leaves are keyed "value" (NOT pie's "y" — highcharts-
+    # core's treemap point model reads "value" and ignores a stray "y"), colored
+    # categorically via colorByPoint, and laid out by the squarified algorithm.
+    # Like pie, a NaN-valued row is dropped (a tile can't be sized without a value).
+    df = pd.DataFrame({"name": ["A", "B", "C"], "v": [10.0, float("nan"), 30.0]})
+    opts = build_options(df, "treemap", "name", ["v"])
+    assert opts["chart"]["type"] == "treemap"
+    assert opts["series"][0]["name"] == "v"
+    # The NaN-valued tile (B) is dropped; leaves use "value", not "y".
+    assert opts["series"][0]["data"] == [
+        {"name": "A", "value": 10.0},
+        {"name": "C", "value": 30.0},
+    ]
+    tm = opts["plotOptions"]["treemap"]
+    assert tm["colorByPoint"] is True
+    assert tm["layoutAlgorithm"] == "squarified"
+    # Colored categorically from the shared palette (like pie), NOT a colorAxis —
+    # so this is not a value-colored type (unlike heatmap).
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    assert "colorAxis" not in opts
+
+
+def test_treemap_uses_only_first_y_col():
+    # Single-value like pie: only the first selected column sizes the tiles.
+    df = pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0], "v2": [9.0, 9.0]})
+    opts = build_options(df, "treemap", "name", ["v", "v2"])
+    assert opts["series"][0]["name"] == "v"
+    assert [pt["value"] for pt in opts["series"][0]["data"]] == [1.0, 2.0]
+
+
+def test_treemap_dark_mode_themes_tiles_and_skips_axes():
+    # Dark mode paints the background and matches the tile gaps (borderColor) to it
+    # so they don't read as white grid-lines — as pie does for its slice gaps. The
+    # data-label color stays "contrast" (NOT flipped to light like pie's): treemap
+    # labels sit on the palette-colored tile, not the chart background, so the same
+    # value stays legible in both themes.
+    df = pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]})
+    opts = build_options(df, "treemap", "name", ["v"], dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["plotOptions"]["treemap"]["borderColor"] == "#0f172a"
+    assert opts["plotOptions"]["treemap"]["dataLabels"]["color"] == "contrast"
+    # Treemap has no axes, so the axis-theming loop must simply skip it (not crash).
+    assert "xAxis" not in opts
+
+
+def test_treemap_serializes_and_pulls_in_the_treemap_module():
+    # End to end: the {name, value} leaf shape must serialize AND resolve
+    # modules/treemap.js — treemap's own module, distinct from bubble/radar's
+    # highcharts-more; without it the browser renders the chart blank.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"name": ["A", "B", "C"], "v": [1.0, 2.0, 3.0]})
+    chart = make_chart(df, "treemap", "name", ["v"])
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'treemap'" in js
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/treemap.js" in tags
+    assert "highcharts-more" not in tags  # treemap's own module, not bubble/radar's
+
+
+# --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
 def test_sample_datasets_are_plottable_and_fresh():
@@ -795,6 +863,21 @@ def test_website_activity_sample_builds_a_heatmap_chart():
     assert opts["yAxis"]["categories"] == y_cols
     assert opts["xAxis"]["categories"][0] == "Mon"
     assert len(opts["series"][0]["data"]) == len(df) * len(y_cols)
+
+
+def test_company_market_cap_sample_builds_a_treemap_chart():
+    # Ties the new treemap sample to its intended type end to end: a company label
+    # (X) plus one market-cap value column (Y) produce one sized tile per company
+    # row, each a {name, value} leaf.
+    from sample_data import _company_market_cap
+
+    df = _company_market_cap()
+    opts = build_options(df, "treemap", "company", ["market_cap_b"])
+    assert opts["chart"]["type"] == "treemap"
+    assert opts["series"][0]["name"] == "market_cap_b"
+    assert len(opts["series"][0]["data"]) == len(df)
+    assert opts["series"][0]["data"][0]["name"] == "Apple"
+    assert "value" in opts["series"][0]["data"][0]
 
 
 # --------------------------------------------------------------------------- #
@@ -881,6 +964,19 @@ def test_app_switch_to_heatmap_regenerates_config(app):
     assert not app.exception
     assert "type: 'heatmap'" in app.code[0].value
     assert "colorAxis" in app.code[0].value
+
+
+def test_app_switch_to_treemap_regenerates_config(app):
+    # Treemap is single-value like pie, so switching to it swaps the Y pills for a
+    # single-select Y (an extra selectbox, exactly as pie does) and drives the
+    # config through the treemap branch. `type: 'treemap'` proves that branch
+    # produced it. Modeled on the pie test (widgets addressed by index [1]) — NOT
+    # heatmap, whose multi=True pills leave the widget indices unchanged. Network-free.
+    app.selectbox[1].set_value("treemap").run()  # Chart type -> treemap
+    assert not app.exception
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'treemap'" in app.code[0].value
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):
@@ -1015,6 +1111,7 @@ def test_app_chart_type_selector_has_help(app):
     assert "pie" in help_text and "scatter" in help_text and "bubble" in help_text
     assert "radar" in help_text
     assert "heatmap" in help_text
+    assert "treemap" in help_text
     # Every cartesian type is named in the prose; loop so a future addition to
     # CARTESIAN_TYPES that's forgotten in the help text actually fails here.
     for chart_type in CARTESIAN_TYPES:
@@ -1058,6 +1155,22 @@ def test_app_heatmap_kpi_shows_cells_not_series(app):
     # Default dataset (6 rows); the default Y selection is one column -> 6 cells.
     default_df = next(iter(SAMPLES.values()))()
     assert metrics["Cells"] == f"{len(default_df) * 1:,}"
+
+
+def test_app_treemap_kpi_shows_tiles(app):
+    # Treemap is one series of tiles (like pie), so the KPI swaps "Series plotted"
+    # (which would read a bare 1) for "Tiles" = the non-null values that become
+    # rectangles — mirroring heatmap's "Cells".
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("treemap").run()  # Chart type -> treemap
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    # Default dataset; treemap's single-value control selects one column, so every
+    # (non-null) row is one tile.
+    default_df = next(iter(SAMPLES.values()))()
+    assert metrics["Tiles"] == f"{len(default_df):,}"
 
 
 def test_app_chart_type_badge_reflects_selection(app):

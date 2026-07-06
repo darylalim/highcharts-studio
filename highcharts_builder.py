@@ -26,6 +26,7 @@ XY_TYPES = ("scatter",)
 BUBBLE_TYPES = ("bubble",)  # scatter (x, y) plus a size (z) dimension
 POLAR_TYPES = ("radar",)  # a polar (spider/web) line chart over the categories
 HEATMAP_TYPES = ("heatmap",)  # an x-category × y-category matrix colored by value
+TREEMAP_TYPES = ("treemap",)  # nested rectangles sized by value, like pie
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -33,6 +34,7 @@ SUPPORTED_TYPES = (
     + BUBBLE_TYPES
     + POLAR_TYPES
     + HEATMAP_TYPES
+    + TREEMAP_TYPES
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
@@ -133,6 +135,12 @@ def _themed(options: dict, *, dark: bool) -> dict:
         pie = options["plotOptions"]["pie"]
         pie["dataLabels"] = {**pie.get("dataLabels", {}), "color": t["text"]}
         pie["borderColor"] = t["bg"]  # slice gaps match the dark background
+    if options["chart"].get("type") == "treemap":
+        # Tile gaps default to light borders; match them to the dark background so
+        # they don't read as white grid-lines (as pie does for its slice gaps). The
+        # data-label color stays "contrast" (set in build_options): tiles are
+        # palette-colored in both themes, so it needs no dark flip.
+        options["plotOptions"]["treemap"]["borderColor"] = t["bg"]
     if options["chart"].get("type") == "heatmap":
         # The colorAxis gradient legend + its tick labels aren't reached by the
         # xAxis/yAxis loop above (nor by the categorical legend theming), so flip
@@ -221,6 +229,11 @@ def build_options(
       the categorical series palette. A missing cell stays in place as
       ``EnforcedNull`` (an empty ``nullColor`` cell) rather than being dropped, so
       the grid never misaligns.
+    - ``treemap``: nested rectangles sized by value — the same single-value shape
+      as ``pie`` (``x_col`` labels each tile, the first ``y_cols`` column gives its
+      value), but each tile is colored categorically from the palette
+      (``colorByPoint``) and laid out by the ``squarified`` algorithm. Missing
+      values are dropped like pie's slices. Pulls in the ``modules/treemap`` module.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
@@ -271,6 +284,60 @@ def build_options(
                         "dataLabels": {
                             "enabled": True,
                             "format": "{point.name}: {point.y}",
+                        },
+                    }
+                },
+                "series": [{"name": value_col, "data": data}],
+            },
+            dark=dark,
+        )
+
+    if chart_type in TREEMAP_TYPES:  # nested rectangles sized by value (like pie)
+        value_col = y_cols[0]
+        # Same single-value shape as pie: x_col labels each tile, the first y
+        # column sizes it. Drop NaN-valued rows like pie (a tile can't be sized
+        # without a value) — not the heatmap keep-as-EnforcedNull path. The leaf
+        # key is "value" (NOT pie's "y"): highcharts-core's treemap point model
+        # reads "value" and silently ignores a stray "y".
+        data = [
+            {"name": str(name), "value": float(value)}
+            for name, value in zip(df[x_col], df[value_col], strict=True)
+            if not pd.isna(value)
+        ]
+        return _themed(
+            {
+                "chart": {"type": "treemap"},
+                "colors": colors,
+                "title": {"text": title},
+                # Name the tile and its value (the default shows a bare value);
+                # _themed() merges dark chrome onto this as it does for the pie one.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": "{point.name}: <b>{point.value}</b>",
+                },
+                # In-tile labels already identify each tile, so a categorical
+                # legend (which would just repeat them) is turned off.
+                "legend": {"enabled": False},
+                "plotOptions": {
+                    "treemap": {
+                        "layoutAlgorithm": "squarified",
+                        # Each tile a distinct DEFAULT_COLORS hue, like pie — the
+                        # area already carries the value, so color distinguishes
+                        # tiles rather than re-encoding size.
+                        "colorByPoint": True,
+                        # Label each tile with its name (the area conveys the
+                        # value). "contrast" text + outline stays legible on every
+                        # palette fill in BOTH themes — the label sits on the tile,
+                        # not the chart background — so, unlike pie's labels, it
+                        # needs no dark-mode color flip.
+                        "dataLabels": {
+                            "enabled": True,
+                            "format": "{point.name}",
+                            "color": "contrast",
+                            "style": {
+                                "textOutline": "1px contrast",
+                                "fontWeight": "normal",
+                            },
                         },
                     }
                 },

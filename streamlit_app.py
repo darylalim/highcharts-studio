@@ -154,6 +154,8 @@ with st.sidebar:
         help=(
             "How the type reshapes the controls below:\n"
             "- **pie** — one label column + one value column\n"
+            "- **treemap** — one label column + one value column; each tile's "
+            "area shows the value (scales to more categories than a pie)\n"
             "- **scatter** — an X column paired with one or more numeric Y series\n"
             "- **bubble** — scatter plus a numeric Size (Z) column driving each "
             "marker's area\n"
@@ -169,6 +171,9 @@ with st.sidebar:
 
     if chart_type == "pie":
         x_label, y_label, multi = "Slice labels", "Slice values", False
+    elif chart_type == "treemap":
+        # Single-value shape like pie: one label column + one value column.
+        x_label, y_label, multi = "Tile labels", "Tile values", False
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     elif chart_type == "heatmap":
@@ -256,6 +261,13 @@ with st.container(horizontal=True):
     # column, where len(y_cols) IS the series count.
     if chart_type == "heatmap":
         st.metric("Cells", f"{len(df) * len(y_cols):,}", border=True)
+    elif chart_type == "treemap":
+        # Treemap is one series of tiles (like pie), so "Series plotted" would read
+        # a bare 1. Show the tile count instead — the non-null values that become
+        # rectangles — mirroring heatmap's "Cells". y_cols has exactly one column
+        # here (treemap uses the single-value controls), so [0] is always present.
+        tiles = int(df[y_cols[0]].notna().sum())
+        st.metric("Tiles", f"{tiles:,}", border=True)
     else:
         st.metric("Series plotted", len(y_cols), border=True)
 

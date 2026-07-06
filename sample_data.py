@@ -141,6 +141,32 @@ def _weekly_activity() -> pd.DataFrame:
     )
 
 
+def _company_market_cap() -> pd.DataFrame:
+    """Market capitalization of the largest tech companies — the part-of-whole a
+    treemap is built for: each tile's area shows one company's share, and the
+    ~10-way split stays readable where a 10-slice pie would be a cluttered ring.
+    Tailored to treemap: a single label column (company) + one numeric value
+    column (market_cap_b) whose wide range makes the nested-rectangle sizing
+    legible."""
+    return pd.DataFrame(
+        {
+            "company": [
+                "Apple",
+                "Microsoft",
+                "Nvidia",
+                "Alphabet",
+                "Amazon",
+                "Meta",
+                "TSMC",
+                "Broadcom",
+                "Tesla",
+                "Netflix",
+            ],
+            "market_cap_b": [3400, 3100, 2900, 2100, 1900, 1300, 950, 780, 720, 380],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -150,4 +176,5 @@ SAMPLES = {
     "Country economics (bubble)": _country_economics,
     "Product ratings (radar)": _product_ratings,
     "Website activity by weekday (heatmap)": _weekly_activity,
+    "Company market cap (treemap)": _company_market_cap,
 }
