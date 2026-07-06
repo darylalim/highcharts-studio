@@ -297,6 +297,18 @@ def test_category_x_missing_value_becomes_enforced_null(chart_type):
     assert data[2] == 3.0
 
 
+@pytest.mark.parametrize("chart_type", CATEGORY_X_TYPES)
+def test_category_x_numeric_x_becomes_string_categories(chart_type):
+    # A numeric x column is coerced to string category *labels* (Highcharts
+    # categories are labels, not values) — shared by cartesian and radar, so a
+    # numeric CSV x-column plots as discrete categories, not along a value axis.
+    # Pins the str() coercion in the category-x branch (a no-op on the string-x
+    # data every other categories assertion here feeds).
+    df = pd.DataFrame({"x": [1, 2, 3], "y": [4, 5, 6]})
+    opts = build_options(df, chart_type, "x", ["y"])
+    assert opts["xAxis"]["categories"] == ["1", "2", "3"]
+
+
 @pytest.mark.parametrize(
     ("y_cols", "legend_enabled"),
     [(["y"], False), (["y", "z"], True)],
@@ -721,8 +733,9 @@ def test_app_multiple_series_selected(app):
 
 
 def test_app_x_equals_y_shows_guard_warning(app):
-    # Force the cartesian "X can't also be a Y series" guard from the UI: set the
-    # X axis to a numeric column and pick that same column as the Y series.
+    # Force the category-x "X can't also be a Y series" guard (CATEGORY_X_TYPES)
+    # from the UI, exercised here via the default line/cartesian type: set the X
+    # axis to a numeric column and pick that same column as the Y series.
     app.selectbox[2].set_value("revenue").run()  # Category (X) axis
     app.pills[0].set_value(["revenue"]).run()  # Series (Y)
     assert not app.exception

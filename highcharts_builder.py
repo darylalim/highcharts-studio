@@ -317,7 +317,6 @@ def build_options(
                 "chart": {"type": "line", "polar": True},
                 "colors": colors,
                 "title": {"text": title},
-                "pane": {"size": "85%"},
                 "xAxis": {
                     "categories": categories,
                     "tickmarkPlacement": "on",
