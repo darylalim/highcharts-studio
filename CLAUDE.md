@@ -11,7 +11,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
   `st.multiselect` on wide CSVs, plus a Size (Z) selector for bubble charts),
-  caching, a KPI metric row, the render-mode
+  caching, a KPI metric row (its third metric adapts to the chart type — series
+  plotted, cells for a heatmap, tiles for a treemap), the render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
   and a toggle that reveals the generated Highcharts config (JS).

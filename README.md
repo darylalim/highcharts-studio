@@ -53,7 +53,9 @@ light/dark theme, which you can toggle from the settings menu.
   OS by default). The charts are theme-aware in both render modes: their
   background, text, axes, and tooltip flip to match the mode, while each series
   keeps its palette color.
-- An at-a-glance KPI row (rows, numeric columns, series plotted) above the chart
+- An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
+  metric — series plotted, or cells for a heatmap and tiles for a treemap) above
+  the chart
   — with the chart type shown as a badge above the chart rather than a metric in
   the row — a side-by-side source-data preview, and a toggle that reveals the
   generated Highcharts config (the `to_js_literal()` output). The Y-series picker
