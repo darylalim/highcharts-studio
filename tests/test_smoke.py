@@ -787,6 +787,26 @@ def test_treemap_serializes_and_pulls_in_the_treemap_module():
     assert "highcharts-more" not in tags  # treemap's own module, not bubble/radar's
 
 
+def test_treemap_light_mode_shape():
+    # The dark test pins the dark counterparts; pin the light-mode chrome here so
+    # the pair reads symmetrically (mirrors test_heatmap_light_mode_shape). These
+    # treemap-specific choices are otherwise unguarded: the {name, value} tooltip
+    # (headerFormat blanked so a hovered tile isn't a bare value), the disabled
+    # legend (the in-tile labels carry identity, so a legend would just repeat
+    # them), and the name-only "contrast" tile labels (the area conveys the value).
+    df = pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]})
+    opts = build_options(df, "treemap", "name", ["v"])
+    assert opts["legend"]["enabled"] is False
+    assert opts["tooltip"]["headerFormat"] == ""
+    assert opts["tooltip"]["pointFormat"] == "{point.name}: <b>{point.value}</b>"
+    labels = opts["plotOptions"]["treemap"]["dataLabels"]
+    assert labels["enabled"] is True
+    assert labels["format"] == "{point.name}"
+    assert labels["color"] == "contrast"
+    # Light mode injects no dark chrome onto the tooltip (a no-op, as elsewhere).
+    assert "backgroundColor" not in opts["tooltip"]
+
+
 # --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
