@@ -36,13 +36,18 @@ SUPPORTED_TYPES = (
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
-# cartesian family plus radar (which shares their category-x data shape). Drives
-# the x-in-y validation guard (widened to HEATMAP_TYPES, whose x_col is likewise a
-# category axis) here and mirrored in the UI — but kept to exactly cartesian +
-# radar because it also parametrizes the shared category-x series tests
-# (EnforcedNull gaps, numeric-x-to-string), which heatmap's grid shape doesn't
-# share.
+# cartesian family plus radar (which shares their category-x data shape). Kept to
+# exactly cartesian + radar because it also parametrizes the shared category-x
+# series tests (EnforcedNull gaps, numeric-x-to-string), which heatmap's grid
+# shape doesn't share.
 CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
+
+# The full set the x-in-y guard rejects (x_col can't also be a y series): the
+# category-axis types plus heatmap (whose x_col is likewise a category axis, but
+# which stays out of CATEGORY_X_TYPES above so the shared series tests skip it).
+# Named once so the builder guard and its streamlit_app mirror share one constant
+# and can't drift apart.
+X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
 # and static PNG) share one look that matches the Streamlit theme in
@@ -83,6 +88,9 @@ _DARK_CHROME = {
 _HEATMAP_GRADIENT = {"minColor": "#e0ecff", "maxColor": DEFAULT_COLORS[0]}
 _HEATMAP_GRADIENT_DARK = {"minColor": "#1e293b", "maxColor": "#60a5fa"}
 _HEATMAP_NULL = "#f1f5f9"
+# Above this many cells, per-cell value labels overprint into noise, so they're
+# only drawn on smaller grids.
+_HEATMAP_DATALABEL_MAX_CELLS = 50
 
 
 def _themed(options: dict, *, dark: bool) -> dict:
@@ -149,6 +157,14 @@ def _num(value):
     return float(value)
 
 
+def _category_labels(df: pd.DataFrame, x_col: str) -> list[str]:
+    """Coerce an x column to string category *labels* (Highcharts categories are
+    labels, not values). Shared by the scatter/bubble non-numeric-x, heatmap, and
+    cartesian/radar branches — highcharts-core rejects non-string categories, so a
+    numeric x_col must be stringified here rather than passed through."""
+    return [str(value) for value in df[x_col].tolist()]
+
+
 def _xy_x_axis(df: pd.DataFrame, x_col: str, *, numeric_x: bool) -> dict[str, object]:
     """X-axis config shared by the scatter and bubble branches.
 
@@ -158,7 +174,7 @@ def _xy_x_axis(df: pd.DataFrame, x_col: str, *, numeric_x: bool) -> dict[str, ob
     """
     x_axis: dict[str, object] = {"title": {"text": x_col}}
     if not numeric_x:
-        x_axis["categories"] = [str(v) for v in df[x_col].tolist()]
+        x_axis["categories"] = _category_labels(df, x_col)
     return x_axis
 
 
@@ -225,7 +241,7 @@ def build_options(
         raise ValueError("At least one y column is required.")
     if chart_type in BUBBLE_TYPES and not size_col:
         raise ValueError("A bubble chart requires a size (z) column via size_col.")
-    if chart_type in CATEGORY_X_TYPES + HEATMAP_TYPES and x_col in y_cols:
+    if chart_type in X_IN_Y_GUARD_TYPES and x_col in y_cols:
         raise ValueError(
             f"x_col {x_col!r} cannot also be a y series for a {chart_type} chart"
         )
@@ -348,15 +364,26 @@ def build_options(
         # so the grid never misaligns, unlike the pie/scatter/bubble drop paths.
         # Cells are colored by a sequential colorAxis, not the categorical
         # DEFAULT_COLORS palette — so this is the one type that carries "colors"
-        # only for cross-type consistency; the tooltip shows the bare cell value
-        # (the category axes give the row/column context). dict() copies the
-        # module gradient so _themed's dark-mode mutation can't corrupt it.
-        categories = [str(v) for v in df[x_col].tolist()]
+        # only for cross-type consistency. dict() copies the module gradient so
+        # _themed's dark-mode mutation can't corrupt it.
+        categories = _category_labels(df, x_col)
         cells = [
             [i, j, _num(value)]
             for j, col in enumerate(y_cols)
             for i, value in enumerate(df[col].tolist())
         ]
+        heatmap_opts: dict[str, object] = {"nullColor": _HEATMAP_NULL}
+        # On a small grid, print each cell's value inside it (the norm for
+        # annotated heatmaps); "contrast" text + outline stays legible across the
+        # whole gradient and in dark mode. Skipped on large grids, where the labels
+        # would overprint into noise.
+        if len(cells) <= _HEATMAP_DATALABEL_MAX_CELLS:
+            heatmap_opts["dataLabels"] = {
+                "enabled": True,
+                "format": "{point.value}",
+                "color": "contrast",
+                "style": {"textOutline": "1px contrast", "fontWeight": "normal"},
+            }
         return _themed(
             {
                 "chart": {"type": "heatmap"},
@@ -373,9 +400,26 @@ def build_options(
                     "title": {"text": ""},
                 },
                 "colorAxis": dict(_HEATMAP_GRADIENT),
-                "legend": {"enabled": True},
-                "tooltip": {"headerFormat": "", "pointFormat": "<b>{point.value}</b>"},
-                "plotOptions": {"heatmap": {"nullColor": _HEATMAP_NULL}},
+                # A vertical gradient bar on the right (the heatmap convention) —
+                # reads as a quantitative scale beside the grid instead of a
+                # categorical key under it competing with the x-axis title.
+                "legend": {
+                    "enabled": True,
+                    "align": "right",
+                    "layout": "vertical",
+                    "verticalAlign": "top",
+                },
+                # Name both category axes + the value so a hovered cell says which
+                # (row, column) it is. The axis categories are already stringified,
+                # so unlike the x_col title this needs no _tooltip_label escaping.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": (
+                        "{series.xAxis.categories.(point.x)} · "
+                        "{series.yAxis.categories.(point.y)}: <b>{point.value}</b>"
+                    ),
+                },
+                "plotOptions": {"heatmap": heatmap_opts},
                 "series": [{"name": "value", "data": cells}],
             },
             dark=dark,
@@ -383,7 +427,7 @@ def build_options(
 
     # cartesian (line/spline/area/areaspline/column/bar) and radar share the same
     # category-x data shape: x_col labels the axis and each y column is a series.
-    categories = [str(v) for v in df[x_col].tolist()]
+    categories = _category_labels(df, x_col)
     series = [
         {"name": col, "data": [_num(v) for v in df[col].tolist()]} for col in y_cols
     ]

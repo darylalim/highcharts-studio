@@ -598,6 +598,15 @@ def test_heatmap_builds_matrix_over_category_axes():
     # title is suppressed with an empty string (None would be dropped and leak the
     # default back in).
     assert opts["yAxis"]["title"]["text"] == ""
+    # The color scale sits vertically to the right (the heatmap convention).
+    assert opts["legend"]["layout"] == "vertical"
+    # The tooltip names both category axes so a hovered cell says which (row,
+    # column) it is — not just the bare value.
+    fmt = opts["tooltip"]["pointFormat"]
+    assert "xAxis.categories" in fmt and "yAxis.categories" in fmt
+    assert "{point.value}" in fmt
+    # A small grid (4 cells) prints each cell's value inside it.
+    assert opts["plotOptions"]["heatmap"]["dataLabels"]["enabled"] is True
 
 
 def test_heatmap_missing_cell_becomes_enforced_null_and_keeps_the_grid():
@@ -649,6 +658,65 @@ def test_heatmap_serializes_and_pulls_in_the_heatmap_module():
     tags = chart.get_script_tags(as_str=True)
     assert "modules/heatmap.js" in tags
     assert "highcharts-more" not in tags  # heatmap's own module, not bubble/radar's
+
+
+def test_heatmap_numeric_x_becomes_string_categories():
+    # Heatmap has its OWN str() coercion (via _category_labels), separate from the
+    # cartesian/radar branch and deliberately excluded from the CATEGORY_X_TYPES
+    # parametrization — so a numeric x column must still become string category
+    # labels here, or highcharts-core raises CannotCoerceError on render for any
+    # user who picks a numeric X.
+    df = pd.DataFrame({"week": [1, 2, 3], "AM": [4.0, 5.0, 6.0]})
+    opts = build_options(df, "heatmap", "week", ["AM"])
+    assert opts["xAxis"]["categories"] == ["1", "2", "3"]
+
+
+def test_heatmap_light_mode_shape():
+    # The dark test pins the dark counterparts; pin the light-mode chrome + tooltip
+    # here so the pair reads symmetrically. reversed=True is load-bearing (flips the
+    # Y-row order, changing how the whole grid reads); the category-naming tooltip
+    # and the light nullColor/minColor are deliberate and otherwise unguarded.
+    df = pd.DataFrame({"day": ["Mon", "Tue"], "AM": [1.0, 2.0]})
+    opts = build_options(df, "heatmap", "day", ["AM"])
+    assert opts["colorAxis"]["minColor"] == "#e0ecff"
+    assert opts["plotOptions"]["heatmap"]["nullColor"] == "#f1f5f9"
+    assert opts["yAxis"]["reversed"] is True
+    assert opts["series"][0]["name"] == "value"
+    assert opts["tooltip"]["headerFormat"] == ""
+    assert "{point.value}" in opts["tooltip"]["pointFormat"]
+
+
+def test_heatmap_large_grid_omits_data_labels():
+    # Per-cell value labels help on a small grid but overprint into noise on a big
+    # one, so they're gated on the cell count: past the threshold, none are drawn.
+    from highcharts_builder import _HEATMAP_DATALABEL_MAX_CELLS
+
+    rows = _HEATMAP_DATALABEL_MAX_CELLS + 1  # one column, so cells == rows
+    df = pd.DataFrame({"x": [str(i) for i in range(rows)], "v": list(range(rows))})
+    opts = build_options(df, "heatmap", "x", ["v"])
+    assert len(opts["series"][0]["data"]) == rows
+    assert "dataLabels" not in opts["plotOptions"]["heatmap"]
+
+
+def test_heatmap_all_nan_column_serializes_null_cells():
+    # A fully-missing Y column must keep ALL its cells (as EnforcedNull) — the grid
+    # can't collapse — and those nulls must survive to_js_literal (Python None would
+    # be silently dropped; the other serialize test uses all-valid data, so nothing
+    # else proves an EnforcedNull cell reaches the JS).
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame(
+        {"day": ["Mon", "Tue"], "AM": [1.0, 2.0], "PM": [float("nan"), float("nan")]}
+    )
+    opts = build_options(df, "heatmap", "day", ["AM", "PM"])
+    assert len(opts["series"][0]["data"]) == 2 * 2  # full grid, nothing dropped
+    pm_cells = [cell for cell in opts["series"][0]["data"] if cell[1] == 1]  # PM col
+    assert pm_cells and all(cell[2] is EnforcedNull for cell in pm_cells)
+    js = make_chart(df, "heatmap", "day", ["AM", "PM"]).to_js_literal()
+    # A null closing a cell array — distinct from the unconditional nullColor key
+    # (whose substring makes a bare "null" check vacuous) — so this proves the
+    # EnforcedNull cell actually reached the data array.
+    assert js and "null]" in js
 
 
 # --------------------------------------------------------------------------- #
@@ -976,6 +1044,20 @@ def test_app_kpi_series_count_tracks_selection_and_empty_state(app):
     app.pills[0].set_value([]).run()
     assert not app.exception
     assert _metrics(app)["Series plotted"] == "0"
+
+
+def test_app_heatmap_kpi_shows_cells_not_series(app):
+    # Heatmap is a single series, so the KPI swaps "Series plotted" (which would
+    # misreport len(y_cols)) for "Cells" = rows × columns.
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("heatmap").run()  # Chart type -> heatmap
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    # Default dataset (6 rows); the default Y selection is one column -> 6 cells.
+    default_df = next(iter(SAMPLES.values()))()
+    assert metrics["Cells"] == f"{len(default_df) * 1:,}"
 
 
 def test_app_chart_type_badge_reflects_selection(app):

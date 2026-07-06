@@ -18,9 +18,8 @@ import pandas as pd
 import streamlit as st
 
 from highcharts_builder import (
-    CATEGORY_X_TYPES,
-    HEATMAP_TYPES,
     SUPPORTED_TYPES,
+    X_IN_Y_GUARD_TYPES,
     build_chart_html,
     build_chart_png,
     make_chart,
@@ -161,7 +160,8 @@ with st.sidebar:
             "- **radar** — a category X axis with one or more numeric Y series, "
             "drawn on polar (spider/web) axes\n"
             "- **heatmap** — a category X axis and one or more numeric Y columns "
-            "form a grid; each cell's color shows its value\n"
+            "form a grid (each selected column becomes a row); each cell's color "
+            "shows its value\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -250,7 +250,14 @@ with st.sidebar:
 with st.container(horizontal=True):
     st.metric("Rows", f"{len(df):,}", border=True)
     st.metric("Numeric columns", len(numeric_cols), border=True)
-    st.metric("Series plotted", len(y_cols), border=True)
+    # Heatmap is a single series of cells, so "Series plotted" (len(y_cols)) would
+    # misreport it as N — the app's own config toggle shows just one series. Show
+    # the grid's cell count instead. Every other type plots one series per y
+    # column, where len(y_cols) IS the series count.
+    if chart_type == "heatmap":
+        st.metric("Cells", f"{len(df) * len(y_cols):,}", border=True)
+    else:
+        st.metric("Series plotted", len(y_cols), border=True)
 
 left, right = st.columns([3, 2], gap="large")
 
@@ -281,7 +288,7 @@ with left.container(border=True, height="stretch"):
             "Pick at least one numeric column to plot.", icon=":material/warning:"
         )
         st.stop()
-    if chart_type in CATEGORY_X_TYPES + HEATMAP_TYPES and x_col in y_cols:
+    if chart_type in X_IN_Y_GUARD_TYPES and x_col in y_cols:
         st.warning(
             "The X-axis column can't also be a Y series — pick a different X.",
             icon=":material/warning:",
