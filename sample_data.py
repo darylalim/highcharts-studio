@@ -100,6 +100,29 @@ def _country_economics() -> pd.DataFrame:
     )
 
 
+def _product_ratings() -> pd.DataFrame:
+    """Two competing products scored 0–10 across the same attributes — the
+    natural radar (spider) chart, where each product is one closed polygon over
+    the shared axes and the comparison is the difference in their shapes.
+    Tailored to radar: a category axis (attribute) plus two numeric series whose
+    values share a common 0–10 range, so the overlaid webs are directly
+    comparable (and neither dominates the auto-scaled radial axis)."""
+    return pd.DataFrame(
+        {
+            "attribute": [
+                "Design",
+                "Performance",
+                "Battery",
+                "Camera",
+                "Price",
+                "Support",
+            ],
+            "Aurora": [9, 7, 6, 8, 5, 7],
+            "Zephyr": [6, 9, 8, 5, 8, 6],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -107,4 +130,5 @@ SAMPLES = {
     "Height vs weight (scatter)": _height_vs_weight,
     "Daily temperature (areaspline)": _daily_temperature,
     "Country economics (bubble)": _country_economics,
+    "Product ratings (radar)": _product_ratings,
 }

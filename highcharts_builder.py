@@ -24,7 +24,15 @@ CARTESIAN_TYPES = ("line", "spline", "area", "areaspline", "column", "bar")
 SINGLE_VALUE_TYPES = ("pie",)
 XY_TYPES = ("scatter",)
 BUBBLE_TYPES = ("bubble",)  # scatter (x, y) plus a size (z) dimension
-SUPPORTED_TYPES = CARTESIAN_TYPES + SINGLE_VALUE_TYPES + XY_TYPES + BUBBLE_TYPES
+POLAR_TYPES = ("radar",)  # a polar (spider/web) line chart over the categories
+SUPPORTED_TYPES = (
+    CARTESIAN_TYPES + SINGLE_VALUE_TYPES + XY_TYPES + BUBBLE_TYPES + POLAR_TYPES
+)
+
+# Types whose x_col is a *category* axis, so it can't double as a y series: the
+# cartesian family plus radar (which shares their category-x data shape). Used by
+# the x-in-y validation guard here and mirrored by the same guard in the UI.
+CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
 # and static PNG) share one look that matches the Streamlit theme in
@@ -152,6 +160,10 @@ def build_options(
     - ``bubble``: like ``scatter``, but each point carries a third value from
       ``size_col`` that drives the marker area — points are (x, y, size) triples,
       and every ``y_cols`` series shares the one ``size_col``.
+    - ``radar``: a polar (spider/web) line chart. Like the cartesian types,
+      ``x_col`` becomes the (angular) category axis and each ``y_cols`` column a
+      series, but the axes are drawn radially (so ``chart.type`` is ``line`` with
+      ``chart.polar`` set — Highcharts has no ``radar`` type).
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
@@ -160,8 +172,8 @@ def build_options(
     (ignored by the other types).
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
-    a ``bubble`` chart with no ``size_col``, or (for cartesian types) an
-    ``x_col`` that is also one of the ``y_cols``.
+    a ``bubble`` chart with no ``size_col``, or (for the category-axis types —
+    cartesian and radar) an ``x_col`` that is also one of the ``y_cols``.
     """
     if chart_type not in SUPPORTED_TYPES:
         raise ValueError(
@@ -171,7 +183,7 @@ def build_options(
         raise ValueError("At least one y column is required.")
     if chart_type in BUBBLE_TYPES and not size_col:
         raise ValueError("A bubble chart requires a size (z) column via size_col.")
-    if chart_type in CARTESIAN_TYPES and x_col in y_cols:
+    if chart_type in CATEGORY_X_TYPES and x_col in y_cols:
         raise ValueError(
             f"x_col {x_col!r} cannot also be a y series for a {chart_type} chart"
         )
@@ -286,11 +298,38 @@ def build_options(
             dark=dark,
         )
 
-    # cartesian: line / spline / area / areaspline / column / bar
+    # cartesian (line/spline/area/areaspline/column/bar) and radar share the same
+    # category-x data shape: x_col labels the axis and each y column is a series.
     categories = [str(v) for v in df[x_col].tolist()]
     series = [
         {"name": col, "data": [_num(v) for v in df[col].tolist()]} for col in y_cols
     ]
+
+    if chart_type in POLAR_TYPES:  # radar: a polar (spider/web) line chart
+        # Highcharts has no "radar" series type — a radar is a `line` drawn on
+        # polar axes, so chart.type serializes as "line" and it's chart.polar
+        # that pulls in the highcharts-more module (as bubble does). The category
+        # axis becomes the angular spokes and the value axis the concentric
+        # polygon rings; the value axis is left to auto-scale (no forced min),
+        # like the cartesian one, so tight or negative data isn't clipped.
+        return _themed(
+            {
+                "chart": {"type": "line", "polar": True},
+                "colors": colors,
+                "title": {"text": title},
+                "pane": {"size": "85%"},
+                "xAxis": {
+                    "categories": categories,
+                    "tickmarkPlacement": "on",
+                    "lineWidth": 0,
+                },
+                "yAxis": {"gridLineInterpolation": "polygon", "lineWidth": 0},
+                "legend": {"enabled": len(series) > 1},
+                "series": series,
+            },
+            dark=dark,
+        )
+
     return _themed(
         {
             "chart": {"type": chart_type},

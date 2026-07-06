@@ -83,7 +83,9 @@ drives each marker's area (required for `bubble`, raising `ValueError` if
 omitted; ignored by the other types), threaded through the same renderers.
 
 Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
-`pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension).
+`pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension),
+`radar` (a polar spider/web line chart — shares the cartesian category-X data
+shape, rendered as a `line` with `chart.polar` on polar axes).
 
 ## Run
 
@@ -107,18 +109,21 @@ uv run pytest
 
 `tests/test_smoke.py` exercises the pure builder (`build_options`) —
 parametrized across every supported chart type, covering missing data
-(`EnforcedNull` for cartesian series, dropped points/slices elsewhere), the
-numeric vs non-numeric scatter/bubble paths (bubble adds the `(x, y, size)`
-triples whose series share one size column, plus its dimension-naming tooltip),
-the brand palette, the light/dark theming (dark-mode chrome — including the
-tooltip — vs. the shared palette), and the validation guards (including bubble's
-required size column) — plus an end-to-end pass driving every supported type
-through the real `Chart.from_options` → `to_js_literal` pipeline (so a newly
-added type is proven to serialize — bubble also pulling in the `highcharts-more`
-module — rather than just assumed) and the sample datasets, then drives the full
-app headless via Streamlit's `AppTest` (switching controls — including the bubble
-Size (Z) control — revealing the generated config behind its toggle, the KPI
-metric row, the wide-CSV
+(`EnforcedNull` for the category-x family — cartesian and radar — dropped
+points/slices elsewhere), the numeric vs non-numeric scatter/bubble paths
+(bubble adds the `(x, y, size)` triples whose series share one size column, plus
+its dimension-naming tooltip), radar's polar-line shape (`chart.type` `line` +
+`chart.polar`, sharing the `highcharts-more` module and themed by the same
+`_themed` chrome), the brand palette, the light/dark theming (dark-mode chrome —
+including the tooltip — vs. the shared palette), and the validation guards
+(including the category-x x-in-y rule and bubble's required size column) — plus
+an end-to-end pass driving every supported type through the real
+`Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
+to serialize — bubble and radar both pulling in the `highcharts-more` module —
+rather than just assumed) and the sample datasets, then drives the full app
+headless via Streamlit's `AppTest` (switching controls — including the bubble
+Size (Z) control and radar — revealing the generated config behind its toggle,
+the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
 the guard messages).
 

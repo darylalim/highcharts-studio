@@ -18,7 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from highcharts_builder import (
-    CARTESIAN_TYPES,
+    CATEGORY_X_TYPES,
     SUPPORTED_TYPES,
     build_chart_html,
     build_chart_png,
@@ -157,6 +157,8 @@ with st.sidebar:
             "- **scatter** — an X column paired with one or more numeric Y series\n"
             "- **bubble** — scatter plus a numeric Size (Z) column driving each "
             "marker's area\n"
+            "- **radar** — a category X axis with one or more numeric Y series, "
+            "drawn on polar (spider/web) axes\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -166,7 +168,7 @@ with st.sidebar:
         x_label, y_label, multi = "Slice labels", "Slice values", False
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
-    else:  # cartesian
+    else:  # cartesian + radar (both a category X axis with one or more Y series)
         x_label, y_label, multi = "Category (X) axis", "Series (Y) — one or more", True
 
     x_col = st.selectbox(x_label, df.columns)
@@ -268,7 +270,7 @@ with left.container(border=True, height="stretch"):
             "Pick at least one numeric column to plot.", icon=":material/warning:"
         )
         st.stop()
-    if chart_type in CARTESIAN_TYPES and x_col in y_cols:
+    if chart_type in CATEGORY_X_TYPES and x_col in y_cols:
         st.warning(
             "The X-axis column can't also be a Y series — pick a different X.",
             icon=":material/warning:",

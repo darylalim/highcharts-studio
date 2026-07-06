@@ -59,8 +59,9 @@ light/dark theme, which you can toggle from the settings menu.
   generated Highcharts config (the `to_js_literal()` output). The Y-series picker
   uses compact pills, falling back to `st.multiselect` for wide CSVs.
 - Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`,
-  `bar`, `pie`, `scatter`, and `bubble` (scatter plus a size column that drives
-  each marker's area).
+  `bar`, `pie`, `scatter`, `bubble` (scatter plus a size column that drives
+  each marker's area), and `radar` (a polar spider/web line chart over a
+  category axis).
 
 ## Files
 

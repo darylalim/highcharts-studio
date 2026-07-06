@@ -6,12 +6,14 @@ Layers:
 
 - ``build_options`` unit tests covering every supported chart type, the
   missing-data and scatter/bubble edge cases (NaN -> ``EnforcedNull`` for
-  cartesian series, dropped points/slices elsewhere, numeric vs non-numeric x,
-  and bubble's (x, y, size) triples whose series share one size column, its
-  ``highcharts-more`` module resolution, and its dimension-naming tooltip), the
-  brand-palette (``DEFAULT_COLORS`` / ``colors`` override), and the validation
-  guards (unsupported type, empty ``y_cols``, the cartesian-only x-in-y rule,
-  and the bubble size-column requirement).
+  cartesian and radar series, dropped points/slices elsewhere, numeric vs
+  non-numeric x, and bubble's (x, y, size) triples whose series share one size
+  column, its ``highcharts-more`` module resolution, and its dimension-naming
+  tooltip), radar's polar-line shape (chart.type "line" + ``chart.polar``,
+  sharing the ``highcharts-more`` module), the brand-palette (``DEFAULT_COLORS``
+  / ``colors`` override), and the validation guards (unsupported type, empty
+  ``y_cols``, the category-x x-in-y rule, and the bubble size-column
+  requirement).
 - light/dark theming: dark mode paints the chart background (light leaves it
   unset), the chart chrome (axes/text/gridlines, pie labels, and the tooltip)
   flips while the ``DEFAULT_COLORS`` palette stays shared across modes, and
@@ -20,7 +22,8 @@ Layers:
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type (including bubble, which reveals a
-  Size (Z) control), title, and series, revealing the generated Highcharts config
+  Size (Z) control, and radar), title, and series, revealing the generated
+  Highcharts config
   behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
   the render-mode selector's two modes (interactive iframe / static PNG), plus
   tripping the x-in-y warning and the no-CSV-uploaded info guard — asserting on
@@ -39,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 
 from highcharts_builder import (  # noqa: E402
     CARTESIAN_TYPES,
+    CATEGORY_X_TYPES,
     DEFAULT_COLORS,
     SUPPORTED_TYPES,
     build_chart_html,
@@ -60,6 +64,18 @@ def _size_for(chart_type: str) -> str | None:
     return "value" if chart_type == "bubble" else None
 
 
+# Radar is the one "meta" type: Highcharts has no radar series type, so it renders
+# as a polar *line* chart — its chart.type serializes as "line", not "radar".
+# Every other supported type's chart.type equals its own name.
+_HC_TYPE = {"radar": "line"}
+
+
+def _hc_type(chart_type: str) -> str:
+    """The Highcharts ``chart.type`` a supported type renders as: identity for all
+    but radar, which is a polar line."""
+    return _HC_TYPE.get(chart_type, chart_type)
+
+
 # --------------------------------------------------------------------------- #
 # Every supported type builds
 # --------------------------------------------------------------------------- #
@@ -68,7 +84,7 @@ def test_supported_type_builds(labeled_frame, chart_type):
     opts = build_options(
         labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
     )
-    assert opts["chart"]["type"] == chart_type
+    assert opts["chart"]["type"] == _hc_type(chart_type)
     assert opts["series"]  # at least one series/data set was produced
 
 
@@ -80,15 +96,17 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
     # typo — it can't catch a chart_type string highcharts-core itself would
     # reject. Drive every type through the real pipeline (make_chart ->
     # Chart.from_options -> to_js_literal), not just the options dict. This is the
-    # only test that proves the pie and scatter branches serialize: they hardcode
-    # their chart.type literal (scatter also its zooming block) rather than using
-    # the chart_type variable, so nothing else validates those literals end to end.
+    # only test that proves the pie, scatter, and radar branches serialize: they
+    # hardcode their chart.type literal (scatter also its zooming block, radar its
+    # `line` + polar) rather than using the chart_type variable, so nothing else
+    # validates those literals end to end. Radar renders as a polar line, so its
+    # serialized type is "line" (see _hc_type), not "radar".
     from highcharts_builder import make_chart
 
     js = make_chart(
         labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
     ).to_js_literal()
-    assert js and f"type: '{chart_type}'" in js
+    assert js and f"type: '{_hc_type(chart_type)}'" in js
 
 
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
@@ -267,8 +285,11 @@ def test_cartesian_categories_and_series(chart_type):
     assert opts["series"][0]["data"] == [1.0, 2.0, 3.0]
 
 
-@pytest.mark.parametrize("chart_type", CARTESIAN_TYPES)
-def test_cartesian_missing_value_becomes_enforced_null(chart_type):
+@pytest.mark.parametrize("chart_type", CATEGORY_X_TYPES)
+def test_category_x_missing_value_becomes_enforced_null(chart_type):
+    # The category-x family (cartesian + radar) shares one series build, so a NaN
+    # is an EnforcedNull gap (a break in the line/polygon), not a dropped point —
+    # unlike pie/scatter/bubble, which drop missing rows entirely.
     df = pd.DataFrame({"x": ["a", "b", "c"], "y": [1.0, float("nan"), 3.0]})
     data = build_options(df, chart_type, "x", ["y"])["series"][0]["data"]
     assert data[0] == 1.0
@@ -303,16 +324,18 @@ def test_rejects_empty_y_cols(chart_type):
         build_options(df, chart_type, "x", [])
 
 
-@pytest.mark.parametrize("chart_type", CARTESIAN_TYPES)
-def test_cartesian_rejects_x_in_y(chart_type):
+@pytest.mark.parametrize("chart_type", CATEGORY_X_TYPES)
+def test_category_x_rejects_x_in_y(chart_type):
+    # The category-x family (cartesian + radar, i.e. CATEGORY_X_TYPES) treats
+    # x_col as the category/angular axis, so it can't double as a y value series.
     df = pd.DataFrame({"x": [1, 2], "y": [3, 4]})
     with pytest.raises(ValueError):
         build_options(df, chart_type, "y", ["y"])
 
 
 def test_scatter_allows_x_in_y():
-    # The x-in-y guard is cartesian-only; scatter happily pairs a column with
-    # itself (a diagonal of points).
+    # The x-in-y guard is category-x-only (cartesian + radar); scatter happily
+    # pairs a column with itself (a diagonal of points).
     df = pd.DataFrame({"a": [1.0, 2.0, 3.0]})
     opts = build_options(df, "scatter", "a", ["a"])
     assert opts["chart"]["type"] == "scatter"
@@ -491,6 +514,50 @@ def test_bubble_tooltip_sanitizes_user_column_names():
 
 
 # --------------------------------------------------------------------------- #
+# Radar (a polar line chart over the categories)
+# --------------------------------------------------------------------------- #
+def test_radar_builds_polar_line_over_categories():
+    # Radar shares the cartesian category-x shape but renders on polar axes: the
+    # chart.type is "line" (Highcharts has no radar type) with chart.polar set,
+    # the x values become the angular categories, and each y column is a series.
+    df = pd.DataFrame({"attr": ["a", "b", "c"], "p": [1, 2, 3], "q": [3, 2, 1]})
+    opts = build_options(df, "radar", "attr", ["p", "q"])
+    assert opts["chart"]["type"] == "line"
+    assert opts["chart"]["polar"] is True
+    assert opts["xAxis"]["categories"] == ["a", "b", "c"]
+    assert [s["name"] for s in opts["series"]] == ["p", "q"]
+    assert opts["series"][0]["data"] == [1.0, 2.0, 3.0]
+    # Two series -> legend on; the value axis is left to auto-scale (no forced
+    # min), like the cartesian one, and draws polygon gridlines for the web look.
+    assert opts["legend"]["enabled"] is True
+    assert "min" not in opts["yAxis"]
+    assert opts["yAxis"]["gridLineInterpolation"] == "polygon"
+
+
+def test_radar_dark_mode_themes_the_polar_axes():
+    # The polygon rings (yAxis gridlines) and the category labels must recolor in
+    # dark mode, or the web is invisible against the dark background.
+    df = pd.DataFrame({"attr": ["a", "b"], "p": [1, 2]})
+    opts = build_options(df, "radar", "attr", ["p"], dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["yAxis"]["gridLineColor"] == "#334155"
+    assert opts["xAxis"]["labels"]["style"]["color"] == "#94a3b8"
+
+
+def test_radar_serializes_and_pulls_in_the_more_module():
+    # End to end: the polar chart must serialize AND resolve highcharts-more, the
+    # module chart.polar lives in (like bubble) — without it the browser draws a
+    # plain, non-polar line instead of the radar.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"attr": ["a", "b", "c"], "p": [1.0, 2.0, 3.0]})
+    chart = make_chart(df, "radar", "attr", ["p"])
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'line'" in js and "polar: true" in js
+    assert "highcharts-more" in chart.get_script_tags(as_str=True)
+
+
+# --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
 def test_sample_datasets_are_plottable_and_fresh():
@@ -536,6 +603,21 @@ def test_country_economics_sample_builds_a_bubble_chart():
     assert opts["series"][0]["name"] == "life_expectancy"
     assert len(opts["series"][0]["data"]) == len(df)
     assert len(opts["series"][0]["data"][0]) == 3  # [x, y, z]
+
+
+def test_product_ratings_sample_builds_a_radar_chart():
+    # Ties the new radar sample to its intended type end to end: a category axis
+    # (attribute) with two numeric product-score series produces a polar line
+    # chart, one series per product, each covering every attribute row.
+    from sample_data import _product_ratings
+
+    df = _product_ratings()
+    opts = build_options(df, "radar", "attribute", ["Aurora", "Zephyr"])
+    assert opts["chart"]["type"] == "line" and opts["chart"]["polar"] is True
+    assert [s["name"] for s in opts["series"]] == ["Aurora", "Zephyr"]
+    assert opts["xAxis"]["categories"][0] == "Design"
+    assert len(opts["series"][0]["data"]) == len(df)
+    assert opts["legend"]["enabled"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -598,6 +680,17 @@ def test_app_switch_to_bubble_shows_size_control_and_regenerates_config(app):
     _reveal_config(app)
     assert not app.exception
     assert "type: 'bubble'" in app.code[0].value
+
+
+def test_app_switch_to_radar_regenerates_config(app):
+    # Radar renders as a polar line chart; switching to it drives the config
+    # through the shared category-x path. `polar: true` (absent from a plain line)
+    # proves the radar branch — not the cartesian one — produced it. Network-free.
+    app.selectbox[1].set_value("radar").run()  # Chart type -> radar
+    assert not app.exception
+    _reveal_config(app)
+    assert not app.exception
+    assert "polar: true" in app.code[0].value
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):
@@ -729,6 +822,7 @@ def test_app_chart_type_selector_has_help(app):
     help_text = app.selectbox[1].help  # selectbox [1] is Chart type
     assert help_text
     assert "pie" in help_text and "scatter" in help_text and "bubble" in help_text
+    assert "radar" in help_text
     # Every cartesian type is named in the prose; loop so a future addition to
     # CARTESIAN_TYPES that's forgotten in the help text actually fails here.
     for chart_type in CARTESIAN_TYPES:
