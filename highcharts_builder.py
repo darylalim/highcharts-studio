@@ -25,13 +25,23 @@ SINGLE_VALUE_TYPES = ("pie",)
 XY_TYPES = ("scatter",)
 BUBBLE_TYPES = ("bubble",)  # scatter (x, y) plus a size (z) dimension
 POLAR_TYPES = ("radar",)  # a polar (spider/web) line chart over the categories
+HEATMAP_TYPES = ("heatmap",)  # an x-category × y-category matrix colored by value
 SUPPORTED_TYPES = (
-    CARTESIAN_TYPES + SINGLE_VALUE_TYPES + XY_TYPES + BUBBLE_TYPES + POLAR_TYPES
+    CARTESIAN_TYPES
+    + SINGLE_VALUE_TYPES
+    + XY_TYPES
+    + BUBBLE_TYPES
+    + POLAR_TYPES
+    + HEATMAP_TYPES
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
-# cartesian family plus radar (which shares their category-x data shape). Used by
-# the x-in-y validation guard here and mirrored by the same guard in the UI.
+# cartesian family plus radar (which shares their category-x data shape). Drives
+# the x-in-y validation guard (widened to HEATMAP_TYPES, whose x_col is likewise a
+# category axis) here and mirrored in the UI — but kept to exactly cartesian +
+# radar because it also parametrizes the shared category-x series tests
+# (EnforcedNull gaps, numeric-x-to-string), which heatmap's grid shape doesn't
+# share.
 CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
@@ -63,6 +73,16 @@ _DARK_CHROME = {
     "grid": "#334155",  # y-axis gridlines
     "axis": "#475569",  # axis + tick lines
 }
+
+# Sequential colorAxis gradient for heatmap cell values — the one chart type that
+# colors by value, not by the categorical DEFAULT_COLORS series palette. The light
+# ramp is anchored on the brand primary (DEFAULT_COLORS[0]); the dark ramp keeps
+# the low end near the dark background and brightens the high end so cells stay
+# legible against _DARK_CHROME["bg"]. Missing cells use _HEATMAP_NULL, flipped to
+# _DARK_CHROME["grid"] in dark mode by _themed.
+_HEATMAP_GRADIENT = {"minColor": "#e0ecff", "maxColor": DEFAULT_COLORS[0]}
+_HEATMAP_GRADIENT_DARK = {"minColor": "#1e293b", "maxColor": "#60a5fa"}
+_HEATMAP_NULL = "#f1f5f9"
 
 
 def _themed(options: dict, *, dark: bool) -> dict:
@@ -105,6 +125,20 @@ def _themed(options: dict, *, dark: bool) -> dict:
         pie = options["plotOptions"]["pie"]
         pie["dataLabels"] = {**pie.get("dataLabels", {}), "color": t["text"]}
         pie["borderColor"] = t["bg"]  # slice gaps match the dark background
+    if options["chart"].get("type") == "heatmap":
+        # The colorAxis gradient legend + its tick labels aren't reached by the
+        # xAxis/yAxis loop above (nor by the categorical legend theming), so flip
+        # them here: a dark-anchored ramp, muted labels, and an empty-cell
+        # nullColor that reads against the dark background.
+        color_axis = options["colorAxis"]
+        # Swap the whole gradient as one unit (mirroring the light side's
+        # dict(_HEATMAP_GRADIENT)) so the two can't drift if a key is ever added.
+        color_axis.update(_HEATMAP_GRADIENT_DARK)
+        color_axis["labels"] = {
+            **color_axis.get("labels", {}),
+            "style": {"color": t["muted"]},
+        }
+        options["plotOptions"]["heatmap"]["nullColor"] = t["grid"]
     return options
 
 
@@ -164,6 +198,13 @@ def build_options(
       ``x_col`` becomes the (angular) category axis and each ``y_cols`` column a
       series, but the axes are drawn radially (so ``chart.type`` is ``line`` with
       ``chart.polar`` set — Highcharts has no ``radar`` type).
+    - ``heatmap``: an x-category × y-category value matrix. ``x_col``'s values are
+      the X (column) categories, each ``y_cols`` column *name* is a Y (row)
+      category, and every cell is ``df[row][col]`` — the category-x shape
+      reinterpreted as a grid, colored by a sequential ``colorAxis`` rather than
+      the categorical series palette. A missing cell stays in place as
+      ``EnforcedNull`` (an empty ``nullColor`` cell) rather than being dropped, so
+      the grid never misaligns.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
@@ -173,7 +214,8 @@ def build_options(
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
     a ``bubble`` chart with no ``size_col``, or (for the category-axis types —
-    cartesian and radar) an ``x_col`` that is also one of the ``y_cols``.
+    cartesian, radar, and heatmap) an ``x_col`` that is also one of the
+    ``y_cols``.
     """
     if chart_type not in SUPPORTED_TYPES:
         raise ValueError(
@@ -183,7 +225,7 @@ def build_options(
         raise ValueError("At least one y column is required.")
     if chart_type in BUBBLE_TYPES and not size_col:
         raise ValueError("A bubble chart requires a size (z) column via size_col.")
-    if chart_type in CATEGORY_X_TYPES and x_col in y_cols:
+    if chart_type in CATEGORY_X_TYPES + HEATMAP_TYPES and x_col in y_cols:
         raise ValueError(
             f"x_col {x_col!r} cannot also be a y series for a {chart_type} chart"
         )
@@ -294,6 +336,47 @@ def build_options(
                 "yAxis": {"title": {"text": ", ".join(y_cols)}},
                 "legend": {"enabled": len(series) > 1},
                 "series": series,
+            },
+            dark=dark,
+        )
+
+    if chart_type in HEATMAP_TYPES:  # an x-category × y-category value matrix
+        # Wide-form: x_col's values are the X (column) categories, each y column
+        # *name* is a Y (row) category, and every cell is [x_index, y_index,
+        # value] — the category-x + numeric-y shape reinterpreted as a grid. A
+        # missing value stays in place as EnforcedNull (an empty nullColor cell)
+        # so the grid never misaligns, unlike the pie/scatter/bubble drop paths.
+        # Cells are colored by a sequential colorAxis, not the categorical
+        # DEFAULT_COLORS palette — so this is the one type that carries "colors"
+        # only for cross-type consistency; the tooltip shows the bare cell value
+        # (the category axes give the row/column context). dict() copies the
+        # module gradient so _themed's dark-mode mutation can't corrupt it.
+        categories = [str(v) for v in df[x_col].tolist()]
+        cells = [
+            [i, j, _num(value)]
+            for j, col in enumerate(y_cols)
+            for i, value in enumerate(df[col].tolist())
+        ]
+        return _themed(
+            {
+                "chart": {"type": "heatmap"},
+                "colors": colors,
+                "title": {"text": title},
+                "xAxis": {"categories": categories, "title": {"text": x_col}},
+                "yAxis": {
+                    "categories": list(y_cols),
+                    "reversed": True,
+                    # Empty string (not None, which highcharts-core drops)
+                    # suppresses Highcharts' default "Values" y-axis title — the Y
+                    # categories are self-labelling and the values live in the cell
+                    # colors, not on this axis.
+                    "title": {"text": ""},
+                },
+                "colorAxis": dict(_HEATMAP_GRADIENT),
+                "legend": {"enabled": True},
+                "tooltip": {"headerFormat": "", "pointFormat": "<b>{point.value}</b>"},
+                "plotOptions": {"heatmap": {"nullColor": _HEATMAP_NULL}},
+                "series": [{"name": "value", "data": cells}],
             },
             dark=dark,
         )

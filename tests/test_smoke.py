@@ -10,10 +10,12 @@ Layers:
   non-numeric x, and bubble's (x, y, size) triples whose series share one size
   column, its ``highcharts-more`` module resolution, and its dimension-naming
   tooltip), radar's polar-line shape (chart.type "line" + ``chart.polar``,
-  sharing the ``highcharts-more`` module), the brand-palette (``DEFAULT_COLORS``
-  / ``colors`` override), and the validation guards (unsupported type, empty
-  ``y_cols``, the category-x x-in-y rule, and the bubble size-column
-  requirement).
+  sharing the ``highcharts-more`` module), heatmap's category × category value
+  matrix (``[x, y, value]`` cells colored by a ``colorAxis``, empty cells kept as
+  ``EnforcedNull``, resolving its own ``modules/heatmap.js``), the brand-palette
+  (``DEFAULT_COLORS`` / ``colors`` override), and the validation guards
+  (unsupported type, empty ``y_cols``, the category-x x-in-y rule widened to
+  heatmap, and the bubble size-column requirement).
 - light/dark theming: dark mode paints the chart background (light leaves it
   unset), the chart chrome (axes/text/gridlines, pie labels, and the tooltip)
   flips while the ``DEFAULT_COLORS`` palette stays shared across modes, and
@@ -22,7 +24,7 @@ Layers:
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type (including bubble, which reveals a
-  Size (Z) control, and radar), title, and series, revealing the generated
+  Size (Z) control, radar, and heatmap), title, and series, revealing the generated
   Highcharts config
   behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
   the render-mode selector's two modes (interactive iframe / static PNG), plus
@@ -570,6 +572,86 @@ def test_radar_serializes_and_pulls_in_the_more_module():
 
 
 # --------------------------------------------------------------------------- #
+# Heatmap (an x-category × y-category value matrix, colored by a colorAxis)
+# --------------------------------------------------------------------------- #
+def test_heatmap_builds_matrix_over_category_axes():
+    # Wide-form: x_col's values are the X categories, each y column *name* is a Y
+    # category, and every cell is [x_index, y_index, value] — the category-x shape
+    # reinterpreted as a grid. Cells are colored by a sequential colorAxis, not the
+    # categorical DEFAULT_COLORS palette (still carried, unused, for consistency).
+    df = pd.DataFrame({"day": ["Mon", "Tue"], "AM": [1.0, 2.0], "PM": [3.0, 4.0]})
+    opts = build_options(df, "heatmap", "day", ["AM", "PM"])
+    assert opts["chart"]["type"] == "heatmap"
+    assert opts["xAxis"]["categories"] == ["Mon", "Tue"]
+    assert opts["yAxis"]["categories"] == ["AM", "PM"]
+    # One [x_index, y_index, value] cell per (row, column): 2 rows × 2 columns = 4.
+    assert opts["series"][0]["data"] == [
+        [0, 0, 1.0],
+        [1, 0, 2.0],
+        [0, 1, 3.0],
+        [1, 1, 4.0],
+    ]
+    assert opts["colorAxis"]["maxColor"] == DEFAULT_COLORS[0]
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    assert opts["legend"]["enabled"] is True
+    # The Y categories are self-labelling, so Highcharts' default "Values" y-axis
+    # title is suppressed with an empty string (None would be dropped and leak the
+    # default back in).
+    assert opts["yAxis"]["title"]["text"] == ""
+
+
+def test_heatmap_missing_cell_becomes_enforced_null_and_keeps_the_grid():
+    # Unlike pie/scatter/bubble (which drop missing rows), a heatmap KEEPS the slot
+    # for a missing cell — as EnforcedNull (an empty nullColor cell) — so the grid
+    # stays aligned rather than shifting the remaining cells.
+    df = pd.DataFrame({"day": ["Mon", "Tue"], "AM": [1.0, float("nan")]})
+    data = build_options(df, "heatmap", "day", ["AM"])["series"][0]["data"]
+    assert len(data) == 2  # both slots kept, none dropped
+    assert data[0] == [0, 0, 1.0]
+    assert data[1][:2] == [1, 0]
+    assert data[1][2] is EnforcedNull  # missing cell, not Python None or dropped
+
+
+def test_heatmap_rejects_x_in_y():
+    # The X column is a category axis (its values label the columns), so it can't
+    # also be one of the Y value columns — the category-x rule, widened to heatmap.
+    df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+    with pytest.raises(ValueError):
+        build_options(df, "heatmap", "a", ["a"])
+
+
+def test_heatmap_dark_mode_themes_the_color_axis():
+    # The colorAxis gradient legend + its labels aren't reached by the generic
+    # xAxis/yAxis theming loop, so dark mode must flip them explicitly (a dark ramp
+    # + muted labels) and recolor the empty-cell nullColor — or the color legend
+    # renders light-on-dark.
+    df = pd.DataFrame({"day": ["Mon", "Tue"], "AM": [1.0, 2.0]})
+    opts = build_options(df, "heatmap", "day", ["AM"], dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["colorAxis"]["minColor"] == "#1e293b"
+    assert opts["colorAxis"]["maxColor"] == "#60a5fa"
+    assert opts["colorAxis"]["labels"]["style"]["color"] == "#94a3b8"
+    assert opts["plotOptions"]["heatmap"]["nullColor"] == "#334155"
+    # The category axes still recolor via the shared loop.
+    assert opts["xAxis"]["labels"]["style"]["color"] == "#94a3b8"
+
+
+def test_heatmap_serializes_and_pulls_in_the_heatmap_module():
+    # End to end: the [x, y, value] + colorAxis shape must serialize AND resolve
+    # the heatmap module (modules/heatmap.js) — a DIFFERENT module from bubble/
+    # radar's highcharts-more; without it the browser renders the chart blank.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"day": ["Mon", "Tue"], "AM": [1.0, 2.0], "PM": [3.0, 4.0]})
+    chart = make_chart(df, "heatmap", "day", ["AM", "PM"])
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'heatmap'" in js and "colorAxis" in js
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/heatmap.js" in tags
+    assert "highcharts-more" not in tags  # heatmap's own module, not bubble/radar's
+
+
+# --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
 def test_sample_datasets_are_plottable_and_fresh():
@@ -630,6 +712,21 @@ def test_product_ratings_sample_builds_a_radar_chart():
     assert opts["xAxis"]["categories"][0] == "Design"
     assert len(opts["series"][0]["data"]) == len(df)
     assert opts["legend"]["enabled"] is True
+
+
+def test_website_activity_sample_builds_a_heatmap_chart():
+    # Ties the new heatmap sample to its intended type end to end: a weekday
+    # category (X) plus four numeric time-block columns (Y) produce a full grid of
+    # [x, y, value] cells — one per (weekday, block), none dropped.
+    from sample_data import _weekly_activity
+
+    df = _weekly_activity()
+    y_cols = ["Night", "Morning", "Afternoon", "Evening"]
+    opts = build_options(df, "heatmap", "weekday", y_cols)
+    assert opts["chart"]["type"] == "heatmap"
+    assert opts["yAxis"]["categories"] == y_cols
+    assert opts["xAxis"]["categories"][0] == "Mon"
+    assert len(opts["series"][0]["data"]) == len(df) * len(y_cols)
 
 
 # --------------------------------------------------------------------------- #
@@ -703,6 +800,19 @@ def test_app_switch_to_radar_regenerates_config(app):
     _reveal_config(app)
     assert not app.exception
     assert "polar: true" in app.code[0].value
+
+
+def test_app_switch_to_heatmap_regenerates_config(app):
+    # Heatmap reinterprets the category-x data as a value matrix colored by a
+    # colorAxis; switching to it drives the config through the heatmap branch.
+    # `type: 'heatmap'` + the colorAxis prove it — heatmap adds no extra sidebar
+    # control, so the positional widget indices are unchanged. Network-free.
+    app.selectbox[1].set_value("heatmap").run()  # Chart type -> heatmap
+    assert not app.exception
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'heatmap'" in app.code[0].value
+    assert "colorAxis" in app.code[0].value
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):
@@ -836,6 +946,7 @@ def test_app_chart_type_selector_has_help(app):
     assert help_text
     assert "pie" in help_text and "scatter" in help_text and "bubble" in help_text
     assert "radar" in help_text
+    assert "heatmap" in help_text
     # Every cartesian type is named in the prose; loop so a future addition to
     # CARTESIAN_TYPES that's forgotten in the help text actually fails here.
     for chart_type in CARTESIAN_TYPES:

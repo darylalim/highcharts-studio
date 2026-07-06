@@ -19,6 +19,7 @@ import streamlit as st
 
 from highcharts_builder import (
     CATEGORY_X_TYPES,
+    HEATMAP_TYPES,
     SUPPORTED_TYPES,
     build_chart_html,
     build_chart_png,
@@ -159,6 +160,8 @@ with st.sidebar:
             "marker's area\n"
             "- **radar** — a category X axis with one or more numeric Y series, "
             "drawn on polar (spider/web) axes\n"
+            "- **heatmap** — a category X axis and one or more numeric Y columns "
+            "form a grid; each cell's color shows its value\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -168,6 +171,14 @@ with st.sidebar:
         x_label, y_label, multi = "Slice labels", "Slice values", False
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
+    elif chart_type == "heatmap":
+        # Wide-form matrix: x_col's values are the X (column) categories, and each
+        # selected numeric column becomes a Y row whose cells are the values.
+        x_label, y_label, multi = (
+            "Category (X) axis",
+            "Value columns (Y) — one or more",
+            True,
+        )
     else:  # cartesian + radar (both a category X axis with one or more Y series)
         x_label, y_label, multi = "Category (X) axis", "Series (Y) — one or more", True
 
@@ -270,7 +281,7 @@ with left.container(border=True, height="stretch"):
             "Pick at least one numeric column to plot.", icon=":material/warning:"
         )
         st.stop()
-    if chart_type in CATEGORY_X_TYPES and x_col in y_cols:
+    if chart_type in CATEGORY_X_TYPES + HEATMAP_TYPES and x_col in y_cols:
         st.warning(
             "The X-axis column can't also be a Y series — pick a different X.",
             icon=":material/warning:",

@@ -123,6 +123,24 @@ def _product_ratings() -> pd.DataFrame:
     )
 
 
+def _weekly_activity() -> pd.DataFrame:
+    """Website visits by weekday × time-of-day block — the activity matrix a
+    heatmap is built for: each (weekday, block) cell's color shows how busy that
+    slot is, so the weekday midday peak and the weekend evening shift read at a
+    glance. Tailored to the wide-form heatmap: a category column (weekday) plus
+    four numeric columns (the time blocks) whose values share one intensity scale,
+    so the color axis is directly comparable across every cell."""
+    return pd.DataFrame(
+        {
+            "weekday": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            "Night": [12, 10, 11, 13, 18, 26, 22],
+            "Morning": [48, 52, 50, 55, 60, 34, 28],
+            "Afternoon": [66, 70, 72, 74, 80, 46, 41],
+            "Evening": [40, 42, 45, 47, 68, 78, 64],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -131,4 +149,5 @@ SAMPLES = {
     "Daily temperature (areaspline)": _daily_temperature,
     "Country economics (bubble)": _country_economics,
     "Product ratings (radar)": _product_ratings,
+    "Website activity by weekday (heatmap)": _weekly_activity,
 }

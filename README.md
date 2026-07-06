@@ -60,8 +60,9 @@ light/dark theme, which you can toggle from the settings menu.
   uses compact pills, falling back to `st.multiselect` for wide CSVs.
 - Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`,
   `bar`, `pie`, `scatter`, `bubble` (scatter plus a size column that drives
-  each marker's area), and `radar` (a polar spider/web line chart over a
-  category axis).
+  each marker's area), `radar` (a polar spider/web line chart over a
+  category axis), and `heatmap` (a category × category grid whose cell colors,
+  on a sequential color axis, show the values).
 
 ## Files
 
@@ -89,14 +90,15 @@ uv run pytest
 Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
 
 - **`tests/test_smoke.py`** — the pure builder (every chart type, the
-  missing-data and scatter/bubble edge cases, radar's polar-line shape, the brand
-  palette, the light/dark theming including the dark-mode tooltip, and the
-  validation guards — plus an end-to-end pass driving every supported type through
-  the real `Chart.from_options` → `to_js_literal` pipeline) and the sample
-  datasets, plus a headless `AppTest` pass that drives the full app (switching
-  controls including the bubble Size (Z) selector and radar, the config toggle,
-  the KPI row, the wide-CSV `st.multiselect` fallback, both render modes, and the
-  guard messages).
+  missing-data and scatter/bubble edge cases, radar's polar-line shape, heatmap's
+  colorAxis value matrix, the brand palette, the light/dark theming including the
+  dark-mode tooltip and the heatmap colorAxis, and the validation guards — plus an
+  end-to-end pass driving every supported type through the real
+  `Chart.from_options` → `to_js_literal` pipeline) and the sample datasets, plus a
+  headless `AppTest` pass that drives the full app (switching controls including
+  the bubble Size (Z) selector, radar, and heatmap, the config toggle, the KPI
+  row, the wide-CSV `st.multiselect` fallback, both render modes, and the guard
+  messages).
 - **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see
   [Claude Code hooks](#claude-code-hooks)).
 - **`tests/test_packaging.py`** — the licensing metadata (`pyproject.toml`
