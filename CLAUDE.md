@@ -21,10 +21,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
-  and scatter/bubble edge cases, the brand palette, the validation guards
-  including bubble's required size column, and an end-to-end pass driving every
-  supported type through `Chart.from_options` / `to_js_literal`) and
-  `sample_data` unit tests, plus headless `AppTest` interaction tests.
+  and scatter/bubble edge cases, radar's polar-line shape, the brand palette, the
+  validation guards including bubble's required size column, and an end-to-end
+  pass driving every supported type through `Chart.from_options` /
+  `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
+  interaction tests.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
   decision functions (path guard, `.py` routing, git-dirty detection) plus a
   black-box check of the exit-code contract for `guard_paths.py` and
