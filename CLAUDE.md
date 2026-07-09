@@ -10,9 +10,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
-  `st.multiselect` on wide CSVs, plus a Size (Z) selector for bubble charts),
+  `st.multiselect` on wide CSVs, plus the two type-specific extra column
+  selectors — Size (Z) for bubble, Target (to) for sankey),
   caching, a KPI metric row (its third metric adapts to the chart type — series
-  plotted, cells for a heatmap, tiles for a treemap), the render-mode
+  plotted, cells for a heatmap, tiles for a treemap, flows for a sankey), the
+  render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
   and a toggle that reveals the generated Highcharts config (JS).
@@ -23,8 +25,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter/bubble edge cases, radar's polar-line shape, heatmap's colorAxis
-  value matrix, treemap's value-sized tiles, the brand palette, the validation
-  guards including bubble's required size column and the heatmap x-in-y rule, and
+  value matrix, treemap's value-sized tiles, sankey's node-link flows, the brand
+  palette, the validation
+  guards including bubble's required size column, sankey's required and distinct
+  target column, and the heatmap x-in-y rule, and
   an end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
   interaction tests.
@@ -83,7 +87,10 @@ chart chrome (background/text/axes/gridlines/tooltip) for dark mode; the app
 derives it from `st.context.theme.type` and threads it through the cached
 renderers. Bubble charts also take a `size_col=` naming the numeric column that
 drives each marker's area (required for `bubble`, raising `ValueError` if
-omitted; ignored by the other types), threaded through the same renderers.
+omitted; ignored by the other types), threaded through the same renderers, and
+sankey charts a `target_col=` naming the destination-node column (required for
+`sankey`, and raising `ValueError` if omitted or equal to `x_col`; likewise
+ignored by the other types), threaded the same way.
 
 Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
 `pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension),
@@ -97,7 +104,17 @@ sized by value — the same single-value data shape as `pie`: `x_col` labels eac
 tile and the first `y_cols` column gives its `value`, but tiles are colored
 categorically from the palette via `colorByPoint` and laid out by the
 `squarified` algorithm, dropping missing values like pie; pulls in the
-`modules/treemap` module).
+`modules/treemap` module), `sankey` (a node-link flow diagram — the only type
+that reads the data as *edges of a graph* rather than as series or categories:
+each row is one link, from the node named in `x_col` to the node named in
+`target_col`, weighted by the first `y_cols` column, encoded as
+`{from, to, weight}` dicts. Rows missing any of the three are dropped like pie's
+slices; a node that is both a target and a source chains the flow into a second
+hop; pulls in the `modules/sankey` module. Its nodes are named by Highcharts'
+default node label and each link carries its weight as a *per-link* `dataLabels`
+— gated on link count like heatmap's cell labels — because highcharts-core drops
+`plotOptions.sankey.dataLabels.nodeFormat` and the `format` that survives there
+would label the links with the node format and blank the node names).
 
 ## Run
 
@@ -131,17 +148,26 @@ two category axes, empty cells kept as `EnforcedNull`, its colorAxis themed for
 dark mode and resolving the `modules/heatmap` module), treemap's value-sized tiles
 (`{name, value}` leaves colored categorically via `colorByPoint`, missing values
 dropped like pie, its tile gaps themed for dark mode and resolving the
-`modules/treemap` module), the brand palette, the
+`modules/treemap` module), sankey's node-link flows (`{from, to, weight}` link
+dicts over two node columns — the `keys`-plus-arrays form highcharts-core
+rejects outright — rows missing any of the three dropped, its per-link weight
+labels gated on link count, its node/link borders themed for dark mode while the
+labels ride Highcharts' `contrast` default, and resolving the `modules/sankey`
+module), the brand palette, the
 light/dark theming (dark-mode chrome — including the tooltip and the heatmap
 colorAxis — vs. the shared palette), and the validation guards (including the
-category-x x-in-y rule, widened to heatmap, and bubble's required size column) —
+category-x x-in-y rule, widened to heatmap, bubble's required size column, and
+sankey's required, distinct target column) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
 to serialize — bubble and radar both pulling in the `highcharts-more` module,
-heatmap the `modules/heatmap` module, and treemap the `modules/treemap` module —
-rather than just assumed) and the sample
+heatmap the `modules/heatmap` module, treemap the `modules/treemap` module, and
+sankey the `modules/sankey` module — rather than just assumed; sankey's node
+tooltip is pinned in that serialized JS too, since a top-level `nodeFormat` is
+accepted by `Chart.from_options` and then silently dropped) and the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
-controls — including the bubble Size (Z) control, radar, heatmap, and treemap —
+controls — including the bubble Size (Z) control, radar, heatmap, treemap, and
+sankey's Target (to) control —
 revealing the generated config behind its toggle,
 the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting

@@ -27,6 +27,7 @@ BUBBLE_TYPES = ("bubble",)  # scatter (x, y) plus a size (z) dimension
 POLAR_TYPES = ("radar",)  # a polar (spider/web) line chart over the categories
 HEATMAP_TYPES = ("heatmap",)  # an x-category × y-category matrix colored by value
 TREEMAP_TYPES = ("treemap",)  # nested rectangles sized by value, like pie
+SANKEY_TYPES = ("sankey",)  # node-link flows: source -> target links sized by weight
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -35,6 +36,7 @@ SUPPORTED_TYPES = (
     + POLAR_TYPES
     + HEATMAP_TYPES
     + TREEMAP_TYPES
+    + SANKEY_TYPES
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
@@ -48,7 +50,9 @@ CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 # category-axis types plus heatmap (whose x_col is likewise a category axis, but
 # which stays out of CATEGORY_X_TYPES above so the shared series tests skip it).
 # Named once so the builder guard and its streamlit_app mirror share one constant
-# and can't drift apart.
+# and can't drift apart. Sankey is deliberately absent: its x_col is a node label,
+# not an axis, and its collision is source-vs-target — target_col isn't in y_cols
+# at all, so this rule can't express it (see the dedicated guard in build_options).
 X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
@@ -93,6 +97,17 @@ _HEATMAP_NULL = "#f1f5f9"
 # Above this many cells, per-cell value labels overprint into noise, so they're
 # only drawn on smaller grids.
 _HEATMAP_DATALABEL_MAX_CELLS = 50
+
+# A sankey labels each link with its weight, printing the value IN the mark as pie,
+# heatmap, and treemap do — so the Static-PNG mode, which has no hover tooltip,
+# still shows the numbers. The label must ride on each link POINT: highcharts-core
+# drops `plotOptions.sankey.dataLabels.nodeFormat` (as it drops `tooltip.nodeFormat`),
+# and the `format` that does survive there applies to nodes and links alike — so
+# setting it series-wide would label every link with the node format, and blank the
+# node names. Above this many links the weights overprint into noise, so they're
+# only drawn on smaller diagrams (the _HEATMAP_DATALABEL_MAX_CELLS rule).
+_SANKEY_DATALABEL_MAX_LINKS = 30
+_SANKEY_LINK_LABEL = {"enabled": True, "format": "{point.weight}"}
 
 
 def _themed(options: dict, *, dark: bool) -> dict:
@@ -155,6 +170,14 @@ def _themed(options: dict, *, dark: bool) -> dict:
             "style": {"color": t["muted"]},
         }
         options["plotOptions"]["heatmap"]["nullColor"] = t["grid"]
+    if options["chart"].get("type") == "sankey":
+        # Only the node/link borders need flipping: they default to light and would
+        # read as white outlines against the dark background, as pie's slice gaps do.
+        # The labels are deliberately left alone — Highcharts draws both the node
+        # names and the link weights in its default `contrast` color, computed
+        # against whatever each label sits on, so they stay legible in either theme
+        # (the treemap reasoning, not pie's).
+        options["plotOptions"]["sankey"]["borderColor"] = t["bg"]
     return options
 
 
@@ -205,6 +228,7 @@ def build_options(
     colors: list[str] | None = None,
     dark: bool = False,
     size_col: str | None = None,
+    target_col: str | None = None,
 ) -> dict:
     """Return a Highcharts options ``dict`` for the given DataFrame and columns.
 
@@ -234,17 +258,26 @@ def build_options(
       value), but each tile is colored categorically from the palette
       (``colorByPoint``) and laid out by the ``squarified`` algorithm. Missing
       values are dropped like pie's slices. Pulls in the ``modules/treemap`` module.
+    - ``sankey``: a node-link flow diagram. Unlike every other type, the data is
+      read as *edges of a graph* rather than as series or categories: each row is
+      one link, from the node named in ``x_col`` to the node named in
+      ``target_col``, whose width is the first ``y_cols`` column. A node that is
+      both a target and a source chains the flow into a second hop. Rows missing
+      any of the three are dropped, like pie's slices. Pulls in the
+      ``modules/sankey`` module.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
     tooltip) for dark mode; the series palette itself is shared across modes.
-    ``size_col`` names the marker-size column and is required for ``bubble``
-    (ignored by the other types).
+    ``size_col`` names the marker-size column and is required for ``bubble``;
+    ``target_col`` names the destination-node column and is required for
+    ``sankey``. Each is ignored by the other types.
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
-    a ``bubble`` chart with no ``size_col``, or (for the category-axis types —
-    cartesian, radar, and heatmap) an ``x_col`` that is also one of the
-    ``y_cols``.
+    a ``bubble`` chart with no ``size_col``, a ``sankey`` chart with no
+    ``target_col`` or whose ``target_col`` is its ``x_col``, or (for the
+    category-axis types — cartesian, radar, and heatmap) an ``x_col`` that is also
+    one of the ``y_cols``.
     """
     if chart_type not in SUPPORTED_TYPES:
         raise ValueError(
@@ -254,6 +287,15 @@ def build_options(
         raise ValueError("At least one y column is required.")
     if chart_type in BUBBLE_TYPES and not size_col:
         raise ValueError("A bubble chart requires a size (z) column via size_col.")
+    if chart_type in SANKEY_TYPES and not target_col:
+        raise ValueError("A sankey chart requires a target (to) column via target_col.")
+    if chart_type in SANKEY_TYPES and x_col == target_col:
+        # Source and target name the two ends of every link, so one column can't be
+        # both: each row would be a self-loop. (The weight column is free to repeat
+        # either — odd, but it still renders, as scatter's x-in-y does.)
+        raise ValueError(
+            f"x_col {x_col!r} cannot also be the target column for a sankey chart"
+        )
     if chart_type in X_IN_Y_GUARD_TYPES and x_col in y_cols:
         raise ValueError(
             f"x_col {x_col!r} cannot also be a y series for a {chart_type} chart"
@@ -347,6 +389,77 @@ def build_options(
                     }
                 },
                 "series": [{"name": value_col, "data": data}],
+            },
+            dark=dark,
+        )
+
+    if chart_type in SANKEY_TYPES:  # node-link flows sized by weight
+        assert target_col is not None  # guarded above for sankey
+        weight_col = y_cols[0]
+        # Links are {from, to, weight} DICTS. Not the [x, y, value] arrays heatmap
+        # builds: highcharts-core rejects the equivalent `keys`-plus-arrays sankey
+        # series outright (HighchartsValueError). The node names are stringified
+        # like pie's/treemap's, since highcharts-core's point model rejects a
+        # non-string name. A row missing any of the three can't be an edge — and a
+        # weightless link serializes SILENTLY, as an invisible zero-width one — so
+        # drop it, as pie drops a valueless slice. No EnforcedNull: unlike the
+        # heatmap grid, there's no cell to keep aligned.
+        # dict[str, object]: a link carries str/float values plus, below, a nested
+        # dataLabels dict.
+        links: list[dict[str, object]] = [
+            {"from": str(src), "to": str(dst), "weight": float(weight)}
+            for src, dst, weight in zip(
+                df[x_col], df[target_col], df[weight_col], strict=True
+            )
+            if not pd.isna(src) and not pd.isna(dst) and not pd.isna(weight)
+        ]
+        if len(links) <= _SANKEY_DATALABEL_MAX_LINKS:
+            for link in links:
+                # dict() copies the module constant so nothing downstream can mutate
+                # it, as _HEATMAP_GRADIENT is copied for _themed.
+                link["dataLabels"] = dict(_SANKEY_LINK_LABEL)
+        return _themed(
+            {
+                "chart": {"type": "sankey"},
+                # Cycled across the nodes (sankey colors its links from the node
+                # they leave), so this is a genuinely categorical use of the palette
+                # — like pie/treemap, unlike heatmap's colors-for-consistency.
+                "colors": colors,
+                "title": {"text": title},
+                # The LINK tooltip: name both ends and the flow. The two column
+                # names are user/CSV-supplied, so they go through _tooltip_label as
+                # bubble's do; the {point.weight} token must stay a literal, hence
+                # the plain (non-f) second segment. _themed() merges dark chrome
+                # onto this, as it does for the pie and bubble tooltips.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": (
+                        f"{_tooltip_label(x_col)} → {_tooltip_label(target_col)}: "
+                        "<b>{point.weight}</b>"
+                    ),
+                },
+                # Each node is labelled on the chart, so a categorical legend would
+                # only repeat those names (the treemap reasoning).
+                "legend": {"enabled": False},
+                "plotOptions": {
+                    "sankey": {
+                        # The NODE tooltip (total throughput of a hovered node) MUST
+                        # live here, not on the tooltip above: highcharts-core's
+                        # Tooltip model has no nodeFormat, so a top-level one is
+                        # accepted by from_options and then silently dropped from
+                        # the emitted JS — the treemap "value not y" trap again.
+                        "tooltip": {"nodeFormat": "{point.name}: <b>{point.sum}</b>"},
+                        # Labels each NODE with its name, via Highcharts' own default
+                        # nodeFormat. We can't name that default explicitly (this
+                        # dict's nodeFormat is dropped too) and a `format` here would
+                        # apply to the links as well, blanking the node names — so
+                        # the link weights are labelled per-link instead, above. No
+                        # color: Highcharts' default `contrast` keeps both the names
+                        # and the weights legible in light and dark alike.
+                        "dataLabels": {"enabled": True},
+                    }
+                },
+                "series": [{"name": weight_col, "data": links}],
             },
             dark=dark,
         )
@@ -552,10 +665,18 @@ def make_chart(
     title: str | None = None,
     dark: bool = False,
     size_col: str | None = None,
+    target_col: str | None = None,
 ) -> Chart:
     """Build and return a highcharts-core ``Chart`` for the given columns."""
     options = build_options(
-        df, chart_type, x_col, list(y_cols), title=title, dark=dark, size_col=size_col
+        df,
+        chart_type,
+        x_col,
+        list(y_cols),
+        title=title,
+        dark=dark,
+        size_col=size_col,
+        target_col=target_col,
     )
     chart = Chart.from_options(options)
     chart.container = container_id
@@ -573,6 +694,7 @@ def build_chart_html(
     title: str | None = None,
     dark: bool = False,
     size_col: str | None = None,
+    target_col: str | None = None,
 ) -> str:
     """Build a full, self-contained HTML document that renders the chart.
 
@@ -590,6 +712,7 @@ def build_chart_html(
         title=title,
         dark=dark,
         size_col=size_col,
+        target_col=target_col,
     )
 
     script_tags = chart.get_script_tags(as_str=True)
@@ -625,6 +748,7 @@ def build_chart_png(
     timeout: int = 30,
     dark: bool = False,
     size_col: str | None = None,
+    target_col: str | None = None,
 ) -> bytes:
     """Render the chart to PNG bytes via the Highcharts export server.
 
@@ -636,7 +760,14 @@ def build_chart_png(
     ``download_chart`` to self-host). ``scale=2`` yields a crisper image.
     """
     chart = make_chart(
-        df, chart_type, x_col, y_cols, title=title, dark=dark, size_col=size_col
+        df,
+        chart_type,
+        x_col,
+        y_cols,
+        title=title,
+        dark=dark,
+        size_col=size_col,
+        target_col=target_col,
     )
     if height is not None:
         # highcharts-core types `options` and `options.chart` as Optional, but

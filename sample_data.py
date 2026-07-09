@@ -167,6 +167,45 @@ def _company_market_cap() -> pd.DataFrame:
     )
 
 
+def _energy_flow() -> pd.DataFrame:
+    """Primary energy sources feeding electricity generation, which then splits to
+    end-use sectors — the multi-level flow a sankey is built for: each link's width
+    shows how much energy moves from one stage to the next, and the two hops
+    (fuel → Electricity → sector) trace the whole system in one diagram.
+    Tailored to sankey: a source and a target column of node *labels* plus a numeric
+    weight, balanced so the 150 units generated are the 150 consumed. Unlike every
+    other sample — each of which has one row per unique x value — the source labels
+    REPEAT, and ``Electricity`` is both a target and a source. That is the from/to
+    link shape sankey reads, and it is what makes the second hop appear."""
+    return pd.DataFrame(
+        {
+            "source": [
+                "Coal",
+                "Natural Gas",
+                "Nuclear",
+                "Solar",
+                "Wind",
+                "Hydro",
+                "Electricity",
+                "Electricity",
+                "Electricity",
+            ],
+            "target": [
+                "Electricity",
+                "Electricity",
+                "Electricity",
+                "Electricity",
+                "Electricity",
+                "Electricity",
+                "Residential",
+                "Industry",
+                "Commercial",
+            ],
+            "terawatt_hours": [42, 38, 20, 14, 26, 10, 60, 55, 35],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -177,4 +216,5 @@ SAMPLES = {
     "Product ratings (radar)": _product_ratings,
     "Website activity by weekday (heatmap)": _weekly_activity,
     "Company market cap (treemap)": _company_market_cap,
+    "Energy flow (sankey)": _energy_flow,
 }

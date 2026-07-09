@@ -63,7 +63,7 @@ def load_csv(file) -> pd.DataFrame:
 
 @st.cache_data(show_spinner="Rendering Highcharts…", max_entries=128)
 def cached_chart_html(
-    df, chart_type, x_col, y_cols, height, title, dark, size_col
+    df, chart_type, x_col, y_cols, height, title, dark, size_col, target_col
 ) -> str:
     return build_chart_html(
         df,
@@ -74,6 +74,7 @@ def cached_chart_html(
         title=title,
         dark=dark,
         size_col=size_col,
+        target_col=target_col,
     )
 
 
@@ -81,7 +82,7 @@ def cached_chart_html(
     show_spinner="Rendering PNG via the Highcharts export server…", max_entries=64
 )
 def cached_chart_png(
-    df, chart_type, x_col, y_cols, height, title, dark, size_col
+    df, chart_type, x_col, y_cols, height, title, dark, size_col, target_col
 ) -> bytes:
     return build_chart_png(
         df,
@@ -92,15 +93,25 @@ def cached_chart_png(
         title=title,
         dark=dark,
         size_col=size_col,
+        target_col=target_col,
     )
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
-def cached_chart_js(df, chart_type, x_col, y_cols, title, dark, size_col) -> str:
+def cached_chart_js(
+    df, chart_type, x_col, y_cols, title, dark, size_col, target_col
+) -> str:
     # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
     # literal string for a built chart.
     return make_chart(  # ty: ignore[invalid-return-type]
-        df, chart_type, x_col, list(y_cols), title=title, dark=dark, size_col=size_col
+        df,
+        chart_type,
+        x_col,
+        list(y_cols),
+        title=title,
+        dark=dark,
+        size_col=size_col,
+        target_col=target_col,
     ).to_js_literal()
 
 
@@ -161,6 +172,9 @@ with st.sidebar:
             "marker's area\n"
             "- **radar** — a category X axis with one or more numeric Y series, "
             "drawn on polar (spider/web) axes\n"
+            "- **sankey** — a Source and a Target column of node names plus a "
+            "numeric flow value; each link's width shows how much moves from one "
+            "node to the next\n"
             "- **heatmap** — a category X axis and one or more numeric Y columns "
             "form a grid (each selected column becomes a row); each cell's color "
             "shows its value\n"
@@ -174,6 +188,10 @@ with st.sidebar:
     elif chart_type == "treemap":
         # Single-value shape like pie: one label column + one value column.
         x_label, y_label, multi = "Tile labels", "Tile values", False
+    elif chart_type == "sankey":
+        # Node-link flow: two label columns naming a link's ends (the X selectbox
+        # plus the Target one below) and one numeric column weighting it.
+        x_label, y_label, multi = "Source (from)", "Flow value (weight)", False
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     elif chart_type == "heatmap":
@@ -188,6 +206,21 @@ with st.sidebar:
         x_label, y_label, multi = "Category (X) axis", "Series (Y) — one or more", True
 
     x_col = st.selectbox(x_label, df.columns)
+
+    # Sankey's second node column, sitting next to Source so the two ends of a link
+    # read as a pair. Drawn from every column, not numeric_cols like bubble's
+    # Size (Z): a node name is a label. Only shown for sankey (None otherwise, and
+    # ignored by the other builders). The index is a CONSTANT for the same reason
+    # the Y default below is: these widgets are keyless, so Streamlit folds it into
+    # their identity — the tempting "the column after Source" default would re-mint
+    # this widget and silently reset the user's Target every time they changed
+    # Source. min() clamps a single-column frame. Source == Target is caught by the
+    # guard in the main panel instead.
+    target_col = None
+    if chart_type == "sankey":
+        target_col = st.selectbox(
+            "Target (to)", df.columns, index=min(1, len(df.columns) - 1)
+        )
 
     if multi:
         # Pills keep every series choice inline and compact, but past
@@ -268,6 +301,14 @@ with st.container(horizontal=True):
         # here (treemap uses the single-value controls), so [0] is always present.
         tiles = int(df[y_cols[0]].notna().sum())
         st.metric("Tiles", f"{tiles:,}", border=True)
+    elif chart_type == "sankey":
+        # Sankey is one series of links, so "Series plotted" would read a bare 1
+        # (treemap's problem). Count the flows instead — the rows that become links.
+        # The builder drops a row missing ANY of the three columns, so count the
+        # rows complete in all three (duplicates in the selection are harmless, and
+        # sankey's single-value controls guarantee y_cols[0] and target_col exist).
+        flows = int(df[[x_col, target_col, y_cols[0]]].notna().all(axis=1).sum())
+        st.metric("Flows", f"{flows:,}", border=True)
     else:
         st.metric("Series plotted", len(y_cols), border=True)
 
@@ -306,6 +347,15 @@ with left.container(border=True, height="stretch"):
             icon=":material/warning:",
         )
         st.stop()
+    # Sankey's own collision: a link's two ends. Not the x-in-y rule above — the
+    # Target column isn't among the Y series at all (see X_IN_Y_GUARD_TYPES).
+    if chart_type == "sankey" and x_col == target_col:
+        st.warning(
+            "Source and Target must be different columns — every link would loop "
+            "back to its own node.",
+            icon=":material/warning:",
+        )
+        st.stop()
 
     badge_label, badge_icon, badge_color = MODE_BADGES[render_mode]
     with st.container(horizontal=True):
@@ -328,7 +378,15 @@ with left.container(border=True, height="stretch"):
         # Server-side render: no Highcharts JS runs in the browser.
         try:
             png = cached_chart_png(
-                df, chart_type, x_col, tuple(y_cols), height, title, dark, size_col
+                df,
+                chart_type,
+                x_col,
+                tuple(y_cols),
+                height,
+                title,
+                dark,
+                size_col,
+                target_col,
             )
         except Exception as exc:  # build error or export-server failure
             st.error(
@@ -352,7 +410,15 @@ with left.container(border=True, height="stretch"):
         )
     else:
         html = cached_chart_html(
-            df, chart_type, x_col, tuple(y_cols), height, title, dark, size_col
+            df,
+            chart_type,
+            x_col,
+            tuple(y_cols),
+            height,
+            title,
+            dark,
+            size_col,
+            target_col,
         )
         # The HTML is embedded in a sandboxed iframe with a FIXED height — it
         # does not auto-grow to its content, so size it to the chart.
@@ -372,6 +438,6 @@ with left.container(border=True, height="stretch"):
     # the config both cheap and observable to the headless tests.
     if st.toggle(":material/code: Show the generated Highcharts config (JavaScript)"):
         chart_js = cached_chart_js(
-            df, chart_type, x_col, tuple(y_cols), title, dark, size_col
+            df, chart_type, x_col, tuple(y_cols), title, dark, size_col, target_col
         )
         st.code(chart_js, language="javascript")

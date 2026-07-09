@@ -15,10 +15,15 @@ Layers:
   ``EnforcedNull``, resolving its own ``modules/heatmap.js``), treemap's
   value-sized tiles (``{name, value}`` leaves colored categorically via
   ``colorByPoint``, missing values dropped like pie, resolving its own
-  ``modules/treemap.js``), the brand-palette
+  ``modules/treemap.js``), sankey's node-link flows (``{from, to, weight}`` links
+  over two node columns, rows missing any of the three dropped like pie's slices,
+  its node tooltip and its per-link weight labels each pinned to the one place
+  highcharts-core doesn't silently drop them, those labels gated on link count,
+  resolving its own ``modules/sankey.js``), the brand-palette
   (``DEFAULT_COLORS`` / ``colors`` override), and the validation guards
   (unsupported type, empty ``y_cols``, the category-x x-in-y rule widened to
-  heatmap, and the bubble size-column requirement).
+  heatmap, the bubble size-column requirement, and sankey's required, distinct
+  target column).
 - light/dark theming: dark mode paints the chart background (light leaves it
   unset), the chart chrome (axes/text/gridlines, pie labels, and the tooltip)
   flips while the ``DEFAULT_COLORS`` palette stays shared across modes, and
@@ -27,7 +32,8 @@ Layers:
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type (including bubble, which reveals a
-  Size (Z) control, radar, heatmap, and treemap), title, and series, revealing
+  Size (Z) control, radar, heatmap, treemap, and sankey, which reveals a
+  Target (to) control), title, and series, revealing
   the generated Highcharts config
   behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
   the render-mode selector's two modes (interactive iframe / static PNG), plus
@@ -57,8 +63,15 @@ from highcharts_builder import (  # noqa: E402
 
 @pytest.fixture
 def labeled_frame() -> pd.DataFrame:
-    """A label column plus a numeric column — valid input for every chart type."""
-    return pd.DataFrame({"label": ["a", "b", "c"], "value": [1.0, 2.0, 3.0]})
+    """A label column plus a numeric column — valid input for every chart type.
+
+    The second label column ("target") is there for sankey alone, whose links need a
+    node column at each end. Every other type names the columns it reads, so the
+    extra one is inert (it isn't numeric, so it can't perturb a y-column sweep).
+    """
+    return pd.DataFrame(
+        {"label": ["a", "b", "c"], "target": ["x", "y", "z"], "value": [1.0, 2.0, 3.0]}
+    )
 
 
 def _size_for(chart_type: str) -> str | None:
@@ -67,6 +80,16 @@ def _size_for(chart_type: str) -> str | None:
     so it's None. The shared ``labeled_frame`` has "value" as its only numeric
     column, so it doubles as the size."""
     return "value" if chart_type == "bubble" else None
+
+
+def _target_for(chart_type: str) -> str | None:
+    """The target column those same sweeps pass for the sankey case: sankey requires
+    one (the far end of every link); other types ignore it, so it's None. The
+    ``_size_for`` idea, for the other type with a required companion column — the
+    sweeps assert invariants that must hold for *every* type (it builds, it carries
+    the palette, dark mode paints the background), so a type that needs an extra
+    column adapts its input rather than dropping out."""
+    return "target" if chart_type == "sankey" else None
 
 
 # Radar is the one "meta" type: Highcharts has no radar series type, so it renders
@@ -87,7 +110,12 @@ def _hc_type(chart_type: str) -> str:
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_supported_type_builds(labeled_frame, chart_type):
     opts = build_options(
-        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+        labeled_frame,
+        chart_type,
+        "label",
+        ["value"],
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
     )
     assert opts["chart"]["type"] == _hc_type(chart_type)
     assert opts["series"]  # at least one series/data set was produced
@@ -109,7 +137,12 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
     from highcharts_builder import make_chart
 
     js = make_chart(
-        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+        labeled_frame,
+        chart_type,
+        "label",
+        ["value"],
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -117,7 +150,12 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_default_title_per_type(labeled_frame, chart_type):
     opts = build_options(
-        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+        labeled_frame,
+        chart_type,
+        "label",
+        ["value"],
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
     )
     assert opts["title"]["text"] == f"{chart_type.title()} chart"
 
@@ -131,7 +169,12 @@ def test_explicit_title_overrides_default(labeled_frame):
 def test_default_palette_applied_per_type(labeled_frame, chart_type):
     # Every chart type carries the brand palette so all render modes share a look.
     opts = build_options(
-        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+        labeled_frame,
+        chart_type,
+        "label",
+        ["value"],
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -159,6 +202,7 @@ def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
         ["value"],
         dark=True,
         size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
     )
     assert opts["chart"]["backgroundColor"] == "#0f172a"
 
@@ -168,7 +212,12 @@ def test_light_mode_leaves_chart_background_unset(labeled_frame, chart_type):
     # Light mode is a no-op: no backgroundColor is injected, so the output is
     # exactly what it was before dark mode existed.
     opts = build_options(
-        labeled_frame, chart_type, "label", ["value"], size_col=_size_for(chart_type)
+        labeled_frame,
+        chart_type,
+        "label",
+        ["value"],
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
     )
     assert "backgroundColor" not in opts["chart"]
 
@@ -182,6 +231,7 @@ def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
         ["value"],
         dark=True,
         size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -222,6 +272,7 @@ def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
         ["value"],
         dark=True,
         size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
     )
     assert opts["tooltip"]["backgroundColor"] == "#0f172a"
     assert opts["tooltip"]["borderColor"] == "#475569"
@@ -825,6 +876,256 @@ def test_single_value_numeric_labels_coerce_to_strings(chart_type):
 
 
 # --------------------------------------------------------------------------- #
+# Sankey (node-link flows: source -> target links sized by weight)
+# --------------------------------------------------------------------------- #
+def _links(opts) -> list[dict]:
+    """The sankey links with their per-link ``dataLabels`` stripped, so the shape
+    tests read as the plain edge list. Those labels are pinned separately by
+    test_sankey_labels_its_nodes_and_links, and their absence on a large diagram by
+    test_sankey_many_links_omit_the_weight_labels."""
+    return [
+        {key: value for key, value in link.items() if key != "dataLabels"}
+        for link in opts["series"][0]["data"]
+    ]
+
+
+def test_sankey_builds_links_and_skips_missing():
+    # Sankey is the one type whose data is a *graph*, not a table: every row is a
+    # link, keyed {from, to, weight}. Not the [x, y, value] arrays heatmap builds
+    # (highcharts-core rejects the equivalent array-form sankey series outright),
+    # and not pie's "y". A row with a missing weight can't size a link — and
+    # serializes silently, as an invisible zero-width one — so it's dropped, as a
+    # valueless pie slice is. No EnforcedNull: unlike the heatmap grid, there's no
+    # cell here to keep aligned.
+    df = pd.DataFrame(
+        {
+            "src": ["Coal", "Gas", "Wind"],
+            "dst": ["Power", "Power", "Power"],
+            "w": [42.0, float("nan"), 26.0],
+        }
+    )
+    opts = build_options(df, "sankey", "src", ["w"], target_col="dst")
+    assert opts["chart"]["type"] == "sankey"
+    assert opts["series"][0]["name"] == "w"
+    # The NaN-weighted link (Gas) is dropped; links use from/to/weight.
+    assert _links(opts) == [
+        {"from": "Coal", "to": "Power", "weight": 42.0},
+        {"from": "Wind", "to": "Power", "weight": 26.0},
+    ]
+    # Nodes are colored categorically from the shared palette (like pie/treemap),
+    # NOT by a colorAxis — so this is not a value-colored type (unlike heatmap).
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    assert "colorAxis" not in opts
+    # A flow diagram has no axes at all.
+    assert "xAxis" not in opts and "yAxis" not in opts
+
+
+def test_sankey_drops_rows_missing_either_node():
+    # Not only a missing weight: a link with no source, or no target, isn't an edge
+    # either — all three columns are required per row.
+    df = pd.DataFrame(
+        {"src": ["A", None, "C"], "dst": ["X", "Y", None], "w": [1.0, 2.0, 3.0]}
+    )
+    opts = build_options(df, "sankey", "src", ["w"], target_col="dst")
+    assert _links(opts) == [{"from": "A", "to": "X", "weight": 1.0}]
+
+
+def test_sankey_uses_only_first_y_col():
+    # Single-value like pie/treemap: only the first selected column weights the
+    # links (the app gives sankey a single-select Y for exactly this reason).
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0], "w2": [9.0]})
+    opts = build_options(df, "sankey", "src", ["w", "w2"], target_col="dst")
+    assert opts["series"][0]["name"] == "w"
+    assert [link["weight"] for link in opts["series"][0]["data"]] == [1.0]
+
+
+def test_sankey_requires_a_target_column():
+    # A sankey without its target column has only one end per link, so the target is
+    # mandatory — a ValueError, not a silent fallback (as bubble's size_col is).
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0]})
+    with pytest.raises(ValueError):
+        build_options(df, "sankey", "src", ["w"])  # no target_col
+
+
+def test_sankey_rejects_source_as_target():
+    # One column can't name both ends of a link: every row would be a self-loop.
+    # This is sankey's OWN guard, not the category-x x-in-y rule — target_col is
+    # never among y_cols, so X_IN_Y_GUARD_TYPES structurally can't express it, which
+    # is why sankey is absent from that constant.
+    df = pd.DataFrame({"src": ["A"], "w": [1.0]})
+    with pytest.raises(ValueError):
+        build_options(df, "sankey", "src", ["w"], target_col="src")
+
+
+def test_sankey_allows_the_weight_to_repeat_a_node_column():
+    # The guard is source-vs-target ONLY. Weighting a link by the same column that
+    # names one of its nodes is odd but well-defined, so it builds — the same
+    # deliberate restraint as test_scatter_allows_x_in_y. Also pins that a numeric
+    # node column is stringified into a node name.
+    df = pd.DataFrame({"src": ["A", "B"], "w": [1.0, 2.0]})
+    opts = build_options(df, "sankey", "src", ["w"], target_col="w")
+    assert _links(opts) == [
+        {"from": "A", "to": "1.0", "weight": 1.0},
+        {"from": "B", "to": "2.0", "weight": 2.0},
+    ]
+
+
+def test_sankey_node_tooltip_lives_in_plot_options_not_the_tooltip():
+    # The node-hover format MUST sit under plotOptions.sankey.tooltip: highcharts-
+    # core's Tooltip model has no nodeFormat, so a top-level one is accepted by
+    # Chart.from_options and then SILENTLY DROPPED from the emitted JS — the same
+    # class of trap as treemap's "value" vs "y" leaf key. Only the serialized JS
+    # proves it arrived, so assert on that too, not just the options dict.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0]})
+    opts = build_options(df, "sankey", "src", ["w"], target_col="dst")
+    assert "nodeFormat" not in opts["tooltip"]  # would vanish if it were here
+    assert (
+        opts["plotOptions"]["sankey"]["tooltip"]["nodeFormat"]
+        == "{point.name}: <b>{point.sum}</b>"
+    )
+    js = make_chart(df, "sankey", "src", ["w"], target_col="dst").to_js_literal()
+    assert js and "nodeFormat" in js and "point.sum" in js
+
+
+def test_sankey_serializes_and_pulls_in_the_sankey_module():
+    # End to end: the {from, to, weight} link shape must serialize AND resolve
+    # modules/sankey.js — sankey's own module, distinct from bubble/radar's
+    # highcharts-more; without it the browser renders the chart blank. The link keys
+    # in particular must reach the JS: highcharts-core builds a typed point model
+    # and silently discards any key it doesn't recognize.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"src": ["A", "B"], "dst": ["C", "C"], "w": [1.0, 2.0]})
+    chart = make_chart(df, "sankey", "src", ["w"], target_col="dst")
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'sankey'" in js
+    assert "from: 'A'" in js and "to: 'C'" in js and "weight: 1.0" in js
+    # The per-link weight label must reach the JS too — a series-level dataLabels
+    # format is the one thing that WOULD survive serialization while rendering the
+    # wrong chart (it labels the links with the node format and blanks the names),
+    # so the options-dict assertions alone can't prove this arrived intact.
+    assert "format: '{point.weight}'" in js
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/sankey.js" in tags
+    assert "highcharts-more" not in tags  # sankey's own module, not bubble/radar's
+
+
+def test_sankey_labels_its_nodes_and_links():
+    # Nodes are named and links carry their weight — the value printed IN the mark,
+    # as pie/heatmap/treemap print theirs, so the Static-PNG mode (no hover) still
+    # shows the numbers. Getting BOTH takes two separate places, and the reason is a
+    # silent drop: highcharts-core discards plotOptions.sankey.dataLabels.nodeFormat,
+    # and the `format` that does survive there applies to nodes AND links, so setting
+    # it series-wide would label every link with the node format and blank the node
+    # names. Hence: an empty series-level dataLabels (Highcharts' own default
+    # nodeFormat names the nodes) plus a per-link label carrying the weight. No color
+    # is set anywhere — Highcharts' `contrast` default handles both themes.
+    df = pd.DataFrame({"src": ["A", "B"], "dst": ["C", "C"], "w": [1.0, 2.0]})
+    opts = build_options(df, "sankey", "src", ["w"], target_col="dst")
+    series_labels = opts["plotOptions"]["sankey"]["dataLabels"]
+    assert series_labels == {"enabled": True}  # no `format`: it would blank the names
+    for link in opts["series"][0]["data"]:
+        assert link["dataLabels"] == {"enabled": True, "format": "{point.weight}"}
+    # Each link's label dict is its own object, so nothing can mutate the module
+    # constant through one of them (the _HEATMAP_GRADIENT copy rule).
+    first, second = (link["dataLabels"] for link in opts["series"][0]["data"])
+    assert first is not second
+
+
+def test_sankey_many_links_omit_the_weight_labels():
+    # Per-link weight labels help on a small diagram but overprint into noise on a
+    # big one, so they're gated on the link count: past the threshold, none are
+    # attached. The sankey counterpart of test_heatmap_large_grid_omits_data_labels.
+    from highcharts_builder import _SANKEY_DATALABEL_MAX_LINKS
+
+    rows = _SANKEY_DATALABEL_MAX_LINKS + 1
+    df = pd.DataFrame(
+        {
+            "src": [f"s{i}" for i in range(rows)],
+            "dst": ["hub"] * rows,
+            "w": [float(i + 1) for i in range(rows)],
+        }
+    )
+    links = build_options(df, "sankey", "src", ["w"], target_col="dst")["series"][0][
+        "data"
+    ]
+    assert len(links) == rows
+    assert all("dataLabels" not in link for link in links)
+    # The node names still render — those come from the series-level dataLabels.
+    assert build_options(df, "sankey", "src", ["w"], target_col="dst")["plotOptions"][
+        "sankey"
+    ]["dataLabels"] == {"enabled": True}
+
+
+def test_sankey_light_mode_shape():
+    # Mirrors test_treemap_light_mode_shape: pin the light-mode choices that nothing
+    # else guards — the link tooltip naming both ends (headerFormat blanked so a
+    # hovered link isn't a bare number) and the disabled legend (each node is
+    # labelled on the chart, so a legend would only repeat them).
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0]})
+    opts = build_options(df, "sankey", "src", ["w"], target_col="dst")
+    assert opts["legend"]["enabled"] is False
+    assert opts["tooltip"]["headerFormat"] == ""
+    assert opts["tooltip"]["pointFormat"] == "src → dst: <b>{point.weight}</b>"
+    # Light mode injects no dark chrome anywhere (a no-op, as elsewhere).
+    assert "backgroundColor" not in opts["tooltip"]
+    assert "borderColor" not in opts["plotOptions"]["sankey"]
+
+
+def test_sankey_dark_mode_themes_borders_and_skips_axes():
+    # Only the borders flip: they default to light and would read as white outlines
+    # against the dark background, exactly as pie's slice gaps do. The node and link
+    # LABELS are deliberately left alone — Highcharts draws them in its `contrast`
+    # color, computed against whatever each sits on, so they stay legible in both
+    # themes without a flip (the treemap reasoning, not pie's).
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0]})
+    opts = build_options(df, "sankey", "src", ["w"], target_col="dst", dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["plotOptions"]["sankey"]["borderColor"] == "#0f172a"
+    assert "color" not in opts["plotOptions"]["sankey"]["dataLabels"]
+    assert all("color" not in link["dataLabels"] for link in opts["series"][0]["data"])
+    # The dark tooltip merge keeps the link pointFormat (as the pie path relies on).
+    assert opts["tooltip"]["backgroundColor"] == "#0f172a"
+    assert "{point.weight}" in opts["tooltip"]["pointFormat"]
+    # Sankey has no axes, so the axis-theming loop must simply skip it (not crash).
+    assert "xAxis" not in opts
+
+
+def test_sankey_tooltip_sanitizes_user_column_names():
+    # Both node column names land in a Highcharts format string as literal text, so
+    # — like bubble's x/size names — they're brace-stripped (Highcharts would parse
+    # `{...}` as a value token) and HTML-escaped (tooltips render as HTML).
+    df = pd.DataFrame({"from {a}": ["A"], "<b>to</b>": ["B"], "w": [1.0]})
+    fmt = build_options(df, "sankey", "from {a}", ["w"], target_col="<b>to</b>")[
+        "tooltip"
+    ]["pointFormat"]
+    # Braces stripped, so Highcharts won't tokenize `{a}` away.
+    assert "{a}" not in fmt
+    assert "from a" in fmt
+    # HTML in the target column name is escaped, not emitted as live markup.
+    assert "<b>to</b>" not in fmt
+    assert "&lt;b&gt;to&lt;/b&gt;" in fmt
+    # The genuine Highcharts token is untouched.
+    assert "{point.weight}" in fmt
+
+
+def test_sankey_numeric_node_labels_coerce_to_strings():
+    # Both node columns are stringified: highcharts-core's point model rejects a
+    # non-string node name, so a user picking numeric ids would otherwise get a
+    # blank/erroring chart. The pie/treemap coercion test
+    # (test_single_value_numeric_labels_coerce_to_strings) for the one type with
+    # *two* label columns — the shared labeled_frame sweeps use string nodes only.
+    df = pd.DataFrame({"src": [1, 2], "dst": [10, 20], "w": [1.0, 2.0]})
+    opts = build_options(df, "sankey", "src", ["w"], target_col="dst")
+    assert _links(opts) == [
+        {"from": "1", "to": "10", "weight": 1.0},
+        {"from": "2", "to": "20", "weight": 2.0},
+    ]
+
+
+# --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
 def test_sample_datasets_are_plottable_and_fresh():
@@ -917,6 +1218,31 @@ def test_company_market_cap_sample_builds_a_treemap_chart():
     assert "value" in opts["series"][0]["data"][0]
 
 
+def test_energy_flow_sample_builds_a_sankey_chart():
+    # Ties the new sankey sample to its intended type end to end: two node columns
+    # plus a numeric weight produce one link per row. Unlike every other sample, its
+    # source values REPEAT, and "Electricity" is both a link target and a link
+    # source — that is what makes the second hop appear rather than a bipartite fan.
+    from sample_data import _energy_flow
+
+    df = _energy_flow()
+    opts = build_options(
+        df, "sankey", "source", ["terawatt_hours"], target_col="target"
+    )
+    assert opts["chart"]["type"] == "sankey"
+    assert opts["series"][0]["name"] == "terawatt_hours"
+    links = _links(opts)
+    assert len(links) == len(df)
+    assert links[0] == {"from": "Coal", "to": "Electricity", "weight": 42.0}
+    sources = {link["from"] for link in links}
+    targets = {link["to"] for link in links}
+    assert "Electricity" in sources & targets  # the two-hop node
+    # The flow balances: everything generated is consumed.
+    generated = sum(link["weight"] for link in links if link["to"] == "Electricity")
+    consumed = sum(link["weight"] for link in links if link["from"] == "Electricity")
+    assert generated == consumed == 150.0
+
+
 # --------------------------------------------------------------------------- #
 # Full app, headless (Streamlit AppTest)
 #
@@ -930,8 +1256,12 @@ def test_company_market_cap_sample_builds_a_treemap_chart():
 # Sidebar widgets are addressed by position: selectbox [0] Dataset, [1] Chart
 # type, [2] X axis; segmented_control [0] Source, [1] Render mode; pills [0] the
 # Y series (a wide CSV upload swaps these pills for a multiselect); toggle [0] the
-# generated-config reveal. Everything here stays on the network-free interactive
-# path (the Static PNG mode would call the export server).
+# generated-config reveal. Those indices hold for every type, because the two
+# type-specific extra controls are created *after* the X selectbox: bubble's
+# "Size (Z)" and sankey's "Target (to)". Both are addressed by LABEL rather than
+# index, since they shift the widgets that follow them. Everything here stays on
+# the network-free interactive path (the Static PNG mode would call the export
+# server).
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def app():
@@ -1014,6 +1344,69 @@ def test_app_switch_to_treemap_regenerates_config(app):
     _reveal_config(app)
     assert not app.exception
     assert "type: 'treemap'" in app.code[0].value
+
+
+def test_app_switch_to_sankey_shows_target_control_and_regenerates_config(app):
+    # Sankey is the second type with a required extra column (after bubble): it
+    # reveals a "Target (to)" selectbox that no other type shows, and drives the
+    # config through the target_col plumbing. Addressed by LABEL, not index — unlike
+    # bubble's Size (Z), the Target control sits between the X and the single-select
+    # Y widgets, so the positional indices past [2] shift. Stays network-free.
+    assert not any(sb.label == "Target (to)" for sb in app.selectbox)  # absent
+    app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    assert not app.exception
+    assert any(sb.label == "Target (to)" for sb in app.selectbox)  # now present
+    # Single-select Y (the weight), like pie/treemap — not the multi-select pills.
+    assert any(sb.label == "Flow value (weight)" for sb in app.selectbox)
+    assert not app.pills
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'sankey'" in app.code[0].value
+
+
+def test_app_sankey_target_survives_a_source_change(app):
+    # The keyless-widget trap the Target selectbox's `index` guards against. These
+    # widgets carry no key, so Streamlit folds `index` into their identity: a default
+    # derived from x_col (the tempting "the column after Source") would re-mint the
+    # widget whenever Source changed, silently discarding the user's Target. Pick a
+    # Target, change Source, and assert the Target survives. A dynamic index makes
+    # this fail — nothing else in the suite would notice.
+    app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    target = next(sb for sb in app.selectbox if sb.label == "Target (to)")
+    target.set_value("cost").run()  # the third column, not the default
+    assert not app.exception
+    app.selectbox[2].set_value("revenue").run()  # Source (from): month -> revenue
+    assert not app.exception
+    target = next(sb for sb in app.selectbox if sb.label == "Target (to)")
+    assert target.value == "cost"  # not reset to the default
+
+
+def test_app_sankey_source_equals_target_shows_guard_warning(app):
+    # Sankey's own guard, NOT the category-x x-in-y rule (which the Target column
+    # can't trip — it's never among the Y series): naming one column as both ends of
+    # a link would make every link a self-loop. The default Source is the first
+    # column, so pointing Target at it collides.
+    app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    target = next(sb for sb in app.selectbox if sb.label == "Target (to)")
+    target.set_value("month").run()  # == the default Source column
+    assert not app.exception
+    assert app.warning
+    assert "Source and Target must be different" in app.warning[0].value
+
+
+def test_app_sankey_kpi_shows_flows(app):
+    # Sankey is one series of links, so the KPI swaps "Series plotted" (which would
+    # read a bare 1) for "Flows" = the rows that become links — mirroring heatmap's
+    # "Cells" and treemap's "Tiles". The default dataset has no missing values, so
+    # every row is a flow.
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    assert metrics["Flows"] == f"{len(default_df):,}"
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):
@@ -1149,6 +1542,7 @@ def test_app_chart_type_selector_has_help(app):
     assert "radar" in help_text
     assert "heatmap" in help_text
     assert "treemap" in help_text
+    assert "sankey" in help_text
     # Every cartesian type is named in the prose; loop so a future addition to
     # CARTESIAN_TYPES that's forgotten in the help text actually fails here.
     for chart_type in CARTESIAN_TYPES:

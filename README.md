@@ -54,7 +54,8 @@ light/dark theme, which you can toggle from the settings menu.
   background, text, axes, and tooltip flip to match the mode, while each series
   keeps its palette color.
 - An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
-  metric — series plotted, or cells for a heatmap and tiles for a treemap) above
+  metric — series plotted, or cells for a heatmap, tiles for a treemap, and flows
+  for a sankey) above
   the chart
   — with the chart type shown as a badge above the chart rather than a metric in
   the row — a side-by-side source-data preview, and a toggle that reveals the
@@ -64,8 +65,10 @@ light/dark theme, which you can toggle from the settings menu.
   `bar`, `pie`, `scatter`, `bubble` (scatter plus a size column that drives
   each marker's area), `radar` (a polar spider/web line chart over a
   category axis), `heatmap` (a category × category grid whose cell colors,
-  on a sequential color axis, show the values), and `treemap` (nested
-  rectangles whose area, sized by a value column, shows each label's share).
+  on a sequential color axis, show the values), `treemap` (nested
+  rectangles whose area, sized by a value column, shows each label's share),
+  and `sankey` (a flow diagram: each row is a link between two node columns,
+  whose width is a value column).
 
 ## Files
 
@@ -94,12 +97,14 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
 
 - **`tests/test_smoke.py`** — the pure builder (every chart type, the
   missing-data and scatter/bubble edge cases, radar's polar-line shape, heatmap's
-  colorAxis value matrix, treemap's value-sized tiles, the brand palette, the
+  colorAxis value matrix, treemap's value-sized tiles, sankey's node-link flows,
+  the brand palette, the
   light/dark theming including the dark-mode tooltip and the heatmap colorAxis, and
   the validation guards — plus an end-to-end pass driving every supported type
   through the real `Chart.from_options` → `to_js_literal` pipeline) and the sample
   datasets, plus a headless `AppTest` pass that drives the full app (switching
-  controls including the bubble Size (Z) selector, radar, heatmap, and treemap, the
+  controls including the bubble Size (Z) and sankey Target (to) selectors, radar,
+  heatmap, and treemap, the
   config toggle, the KPI row, the wide-CSV `st.multiselect` fallback, both render
   modes, and the guard messages).
 - **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see
