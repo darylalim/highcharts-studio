@@ -28,6 +28,7 @@ POLAR_TYPES = ("radar",)  # a polar (spider/web) line chart over the categories
 HEATMAP_TYPES = ("heatmap",)  # an x-category × y-category matrix colored by value
 TREEMAP_TYPES = ("treemap",)  # nested rectangles sized by value, like pie
 SANKEY_TYPES = ("sankey",)  # node-link flows: source -> target links sized by weight
+BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw rows
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -37,6 +38,7 @@ SUPPORTED_TYPES = (
     + HEATMAP_TYPES
     + TREEMAP_TYPES
     + SANKEY_TYPES
+    + BOXPLOT_TYPES
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
@@ -47,13 +49,16 @@ SUPPORTED_TYPES = (
 CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 
 # The full set the x-in-y guard rejects (x_col can't also be a y series): the
-# category-axis types plus heatmap (whose x_col is likewise a category axis, but
-# which stays out of CATEGORY_X_TYPES above so the shared series tests skip it).
+# category-axis types plus heatmap and boxplot, whose x_col is likewise a category
+# axis (heatmap's values label the columns; boxplot's name the boxes) but which stay
+# out of CATEGORY_X_TYPES above so the shared series tests skip them — neither uses
+# the cartesian per-point series build. Grouping boxplot's observation column by
+# itself would give every box exactly one observation, equal to its own label.
 # Named once so the builder guard and its streamlit_app mirror share one constant
 # and can't drift apart. Sankey is deliberately absent: its x_col is a node label,
 # not an axis, and its collision is source-vs-target — target_col isn't in y_cols
 # at all, so this rule can't express it (see the dedicated guard in build_options).
-X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES
+X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES + BOXPLOT_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
 # and static PNG) share one look that matches the Streamlit theme in
@@ -108,6 +113,41 @@ _HEATMAP_DATALABEL_MAX_CELLS = 50
 # only drawn on smaller diagrams (the _HEATMAP_DATALABEL_MAX_CELLS rule).
 _SANKEY_DATALABEL_MAX_LINKS = 30
 _SANKEY_LINK_LABEL = {"enabled": True, "format": "{point.weight}"}
+
+# Tukey's constant: a boxplot's whiskers reach the most extreme observation still within
+# 1.5 x IQR of the box, and anything past that is drawn as an individual outlier. Named
+# rather than inlined because both fences read it, and because the number IS the
+# convention — changing it changes which points count as outliers at all.
+_BOXPLOT_WHISKER_MULTIPLIER = 1.5
+# Those outliers ride over the boxes as a second, linked scatter series. They take a
+# FIXED brand hue — the red — read straight from DEFAULT_COLORS rather than indexed out
+# of the *overridable* `colors` list, so a caller's short custom palette can't IndexError.
+# Red reads against the boxes' white interior and the dark chart background alike, so
+# (like the shared series palette) it needs no dark-mode flip.
+_BOXPLOT_OUTLIER_COLOR = DEFAULT_COLORS[3]
+
+# Highcharts >= 13 expresses its own default colors as CSS custom properties wrapped in
+# `light-dark(...)` — e.g. `--highcharts-background-color: light-dark(#ffffff, #141414)`.
+# So every color we do NOT set explicitly resolves against the *browser's*
+# `prefers-color-scheme`, not against the app's theme. Two consequences, one rule:
+#
+# 1. `_themed` is deliberately a no-op in light mode, leaving those defaults in place —
+#    so on a dark-OS browser a LIGHT-mode chart paints itself dark (background #141414,
+#    pale text) inside the light app shell.
+# 2. `boxplot` is the one type whose MARK fill comes from such a variable
+#    (`plotOptions.boxplot.fillColor`, which highcharts-core cannot express at all — see
+#    the boxplot branch), so its boxes would be filled differently per browser.
+#
+# The export server already rasterizes with the LIGHT resolution, so pinning the chart's
+# own root to `only light` makes the iframe agree with the PNG in both themes and leaves
+# `_themed` as the single source of truth for dark mode. It must target `.highcharts-root`
+# (the `<svg>`), because Highcharts sets `color-scheme` on that element — a rule on `html`
+# is simply overridden by it. Note this reaches the iframe only: the export server renders
+# the extracted SVG server-side, where no CSS of ours applies (and neither `chart.style`
+# nor `ExportServer.global_options` is an escape hatch — the former is applied with
+# `elem.style[key]`, which ignores custom properties, and the latter is coerced through
+# the same model that drops `fillColor`).
+_LIGHT_COLOR_SCHEME_CSS = ".highcharts-root{color-scheme:only light}"
 
 
 def _themed(options: dict, *, dark: bool) -> dict:
@@ -188,6 +228,73 @@ def _num(value):
     return float(value)
 
 
+def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
+    """Reduce one category's raw observations to a Tukey box, plus its outliers.
+
+    Returns ``([low, q1, median, q3, high], outliers)`` — a positional 5-array, which is
+    the shape Highcharts matches to ``xAxis.categories`` BY POSITION. A *named* dict
+    point is the trap here: highcharts-core collapses ``{"name": n, "low": ...}`` to
+    ``[n, low, q1, median, q3, high]``, sliding the label into the leading **x** slot
+    where it silently misreads against the categories. A group whose observations are
+    all missing returns ``(EnforcedNull, [])``, so the caller keeps its slot on the axis
+    — heatmap's keep-the-grid-aligned rule, not pie's drop-the-row one — and it is
+    ``EnforcedNull``, never Python ``None``, exactly as ``_num`` returns.
+
+    Observations are first cast to ``float64`` — so a non-numeric column raises
+    ``ValueError`` here, as ``float(value)`` does in the other branches, rather than an
+    opaque dtype error from ``.quantile()`` — and then reduced to the FINITE ones. NaN is
+    the familiar missing value; an infinity is dropped too, because it cannot size a
+    whisker and it poisons the whole box: ``inf`` quantiles give ``iqr = inf - inf = nan``,
+    which makes both fences ``nan`` and every comparison below false. Dropping it is the
+    same rule pie applies to a valueless slice; a group with nothing finite left is simply
+    an empty group.
+
+    The whiskers are Tukey's, computed the way ``matplotlib.cbook.boxplot_stats`` (and
+    so seaborn) computes them, since that is the boxplot a reader will compare this one
+    against:
+
+    - ``q1``/``median``/``q3`` come from pandas' default LINEAR interpolation — the
+      type-7 quantiles matplotlib, seaborn and R default to. The method is load-bearing
+      rather than incidental: it moves the quartiles, hence the fences, hence which
+      points read as outliers at all.
+    - The fences sit 1.5 x IQR outside the box. ``low``/``high`` are the most extreme
+      ACTUAL observations still inside them — never the fence values themselves — and a
+      point is an outlier iff it lies STRICTLY beyond a fence.
+    - Membership at the fence is INCLUSIVE (``>=``/``<=``) and the outlier test is its
+      strict complement. That is what makes ``iqr == 0`` behave: for a group of one, or
+      one whose values are all identical, both fences collapse onto ``q1 == q3``, every
+      observation sits exactly ON them, and none is flagged — the box is a legitimate
+      flat line rather than a cloud of spurious outliers. (A zero-IQR group that really
+      does have tails, with over half its mass on one value, still flags them.)
+    - ``low`` is finally clamped to at most ``q1``, and ``high`` to at least ``q3``. On a
+      small, sharply skewed group the interpolated ``q1`` can fall BELOW every non-outlier
+      observation — ``[0, 100, 101, 102]`` gives ``q1 = 75`` while the lowest in-fence
+      point is ``100`` — which would draw a whisker floating inside its own box. The
+      clamp is matplotlib's (``if np.min(wisklo) > q1: whislo = q1``) and makes
+      ``low <= q1 <= median <= q3 <= high`` hold for every input. It fires on BOTH ends:
+      the mirror case, a group skewed the other way (``[0, 1, 2, 102]`` gives ``q3 = 27``
+      while the highest in-fence point is ``2``), is what ``high``'s clamp catches.
+    """
+    numeric = values.astype("float64")
+    clean = numeric[numeric.abs() != float("inf")].dropna()
+    if clean.empty:
+        return EnforcedNull, []
+    q1 = float(clean.quantile(0.25))
+    median = float(clean.quantile(0.5))
+    q3 = float(clean.quantile(0.75))
+    iqr = q3 - q1
+    lower_fence = q1 - _BOXPLOT_WHISKER_MULTIPLIER * iqr
+    upper_fence = q3 + _BOXPLOT_WHISKER_MULTIPLIER * iqr
+    # `inside` can never be empty, now that `clean` is finite: the fences bracket
+    # lower_fence <= q1 <= median <= q3 <= upper_fence, so the middle half of the data
+    # always lands within them. (Leave an infinity in and that stops being true: the
+    # fences go nan, every comparison below is false, and .min()/.max() return nan.)
+    inside = clean[(clean >= lower_fence) & (clean <= upper_fence)]
+    outside = clean[(clean < lower_fence) | (clean > upper_fence)]
+    box = [min(float(inside.min()), q1), q1, median, q3, max(float(inside.max()), q3)]
+    return box, [float(value) for value in outside]
+
+
 def _category_labels(df: pd.DataFrame, x_col: str) -> list[str]:
     """Coerce an x column to string category *labels* (Highcharts categories are
     labels, not values). Shared by the scatter/bubble non-numeric-x, heatmap, and
@@ -265,6 +372,15 @@ def build_options(
       both a target and a source chains the flow into a second hop. Rows missing
       any of the three are dropped, like pie's slices. Pulls in the
       ``modules/sankey`` module.
+    - ``boxplot``: per-category Tukey distributions. The one type that AGGREGATES —
+      every other maps rows 1:1 onto marks, but a box summarizes many rows. The data
+      is long/tidy (``x_col``'s values REPEAT, one row per observation) and each
+      distinct ``x_col`` value becomes one box over that group's raw ``y_cols[0]``
+      numbers, as ``[low, q1, median, q3, high]``. Observations beyond the 1.5 x IQR
+      fences are drawn individually, as a second linked scatter series that is emitted
+      only when some exist. A group whose observations are all missing keeps its axis
+      slot as an ``EnforcedNull`` box. Shares bubble's and radar's ``highcharts-more``
+      module.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
@@ -276,8 +392,8 @@ def build_options(
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
     a ``bubble`` chart with no ``size_col``, a ``sankey`` chart with no
     ``target_col`` or whose ``target_col`` is its ``x_col``, or (for the
-    category-axis types — cartesian, radar, and heatmap) an ``x_col`` that is also
-    one of the ``y_cols``.
+    category-axis types — cartesian, radar, heatmap, and boxplot) an ``x_col`` that
+    is also one of the ``y_cols``.
     """
     if chart_type not in SUPPORTED_TYPES:
         raise ValueError(
@@ -610,6 +726,109 @@ def build_options(
             dark=dark,
         )
 
+    if chart_type in BOXPLOT_TYPES:  # per-category Tukey distributions
+        # The one branch that AGGREGATES: every other type maps rows 1:1 onto marks, but
+        # a box summarizes many rows. So the frame is read long/tidy — x_col REPEATS, one
+        # row per observation — and each of its distinct values becomes one box over the
+        # raw numbers in y_cols[0] (a single value column, like pie/treemap/sankey).
+        #
+        # groupby(sort=False) keeps first-appearance order, the row fidelity every other
+        # category-x type has (_category_labels never sorts either). Its default
+        # dropna=True drops a row whose x_col KEY is missing: that row names no category,
+        # so there is no slot to keep. A group whose observations are all missing is the
+        # other case, and it DOES keep its slot, as an EnforcedNull box (see _box_stats),
+        # so nothing downstream shifts along the axis.
+        value_col = y_cols[0]
+        categories = []
+        boxes: list[object] = []  # a positional 5-array (or EnforcedNull) per category
+        outliers: list[
+            list[float]
+        ] = []  # [category_index, value] pairs, for the scatter
+        for index, (name, observations) in enumerate(df.groupby(x_col, sort=False)):
+            # str(): highcharts-core rejects a non-string category (CannotCoerceError),
+            # so a numeric grouping column must be stringified, as it is everywhere else.
+            categories.append(str(name))
+            box, group_outliers = _box_stats(observations[value_col])
+            boxes.append(box)
+            outliers.extend([index, value] for value in group_outliers)
+        series: list[dict[str, object]] = [{"name": value_col, "data": boxes}]
+        if outliers:
+            # Only when there ARE outliers — an empty linked series would be dead config,
+            # the restraint heatmap and sankey show in gating their labels on count.
+            # ":previous" binds this to the box series above, so the two read (and toggle)
+            # as one dataset. Its marker fillColor survives serialization where the BOX
+            # fill does not — see plotOptions below.
+            series.append(
+                {
+                    "type": "scatter",
+                    "name": f"{value_col} outliers",
+                    "linkedTo": ":previous",
+                    "marker": {"fillColor": _BOXPLOT_OUTLIER_COLOR, "lineWidth": 0},
+                    "data": outliers,
+                }
+            )
+        return _themed(
+            {
+                "chart": {"type": "boxplot"},
+                # colorByPoint draws each box from this palette, so — like pie, treemap
+                # and sankey, and unlike heatmap — the colors here are genuinely used,
+                # not merely carried for cross-type consistency.
+                "colors": colors,
+                "title": {"text": title},
+                "xAxis": {"categories": categories, "title": {"text": x_col}},
+                "yAxis": {"title": {"text": value_col}},
+                # One box series (plus, at most, its linked outlier layer), so a legend
+                # would only repeat the single column name already on the y-axis — off,
+                # as treemap's and sankey's are.
+                "legend": {"enabled": False},
+                "plotOptions": {
+                    "boxplot": {
+                        # Each box takes a distinct palette hue for its border, whiskers,
+                        # stem and median. Those hues read against the box's white
+                        # interior in BOTH themes, which is why boxplot is the one
+                        # mark-styling type with NO hook in _themed: nothing is left to
+                        # flip.
+                        #
+                        # And the interior is white in both themes not by choice but
+                        # because it cannot be set at all. `fillColor` (and `stemColor`)
+                        # are ACCEPTED by Chart.from_options — _get_kwargs_from_dict reads
+                        # them and even sets them on the object — then silently dropped by
+                        # _to_untrimmed_dict, since BoxPlotOptions models no such
+                        # property. Setting either here would look like it worked and
+                        # change nothing in the emitted JS (the trap sankey's top-level
+                        # tooltip.nodeFormat sets), and there is no side door: the export
+                        # server's `global_options` is coerced through the very same
+                        # model. So the fill falls back to Highcharts' own default,
+                        # `var(--highcharts-background-color)` — which resolves to white
+                        # on the export server, and which _LIGHT_COLOR_SCHEME_CSS pins to
+                        # white in the iframe so the two render modes agree.
+                        "colorByPoint": True,
+                        # The box tooltip lives HERE, not at the top level, for two
+                        # reasons. It scopes this format to the boxes, leaving the linked
+                        # outlier scatter on Highcharts' own point tooltip (so no
+                        # per-series override is needed); and it lets us rename the caps.
+                        # Highcharts' default boxplot tooltip calls point.low/point.high
+                        # "Minimum"/"Maximum", which is false the moment an outlier is
+                        # drawn as its own point — 890 is the maximum, 120 is the whisker.
+                        # The dark-mode tooltip CHROME still comes from the top-level
+                        # tooltip that _themed writes; Highcharts merges the two.
+                        "tooltip": {
+                            "headerFormat": "<b>{point.key}</b><br/>",
+                            "pointFormat": (
+                                "Upper whisker: <b>{point.high}</b><br/>"
+                                "Q3: <b>{point.q3}</b><br/>"
+                                "Median: <b>{point.median}</b><br/>"
+                                "Q1: <b>{point.q1}</b><br/>"
+                                "Lower whisker: <b>{point.low}</b>"
+                            ),
+                        },
+                    }
+                },
+                "series": series,
+            },
+            dark=dark,
+        )
+
     # cartesian (line/spline/area/areaspline/column/bar) and radar share the same
     # category-x data shape: x_col labels the axis and each y column is a series.
     categories = _category_labels(df, x_col)
@@ -702,6 +921,10 @@ def build_chart_html(
     (resolved by ``get_script_tags`` — e.g. ``highcharts-more`` for a bubble
     chart) plus the ``Highcharts.chart(...)`` call emitted by ``to_js_literal``.
     Pass the result to ``st.iframe(html, height=...)``.
+
+    The document also pins the chart's color scheme (``_LIGHT_COLOR_SCHEME_CSS``) so
+    Highcharts' own ``light-dark()`` defaults can't follow the viewer's browser instead
+    of the ``dark`` flag.
     """
     chart = make_chart(
         df,
@@ -726,7 +949,7 @@ def build_chart_html(
 <head>
   <meta charset="utf-8"/>
   {script_tags}
-  <style>html,body{{margin:0;background:{body_bg};font-family:-apple-system,Segoe UI,Roboto,sans-serif}}</style>
+  <style>{_LIGHT_COLOR_SCHEME_CSS}html,body{{margin:0;background:{body_bg};font-family:-apple-system,Segoe UI,Roboto,sans-serif}}</style>
 </head>
 <body>
   <div id="{container_id}" style="width:100%;height:{height}px;"></div>

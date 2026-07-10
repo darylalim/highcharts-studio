@@ -206,6 +206,32 @@ def _energy_flow() -> pd.DataFrame:
     )
 
 
+def _response_times() -> pd.DataFrame:
+    """Per-service API response times in milliseconds — the per-category *distribution*
+    a boxplot is built for: each service's spread of raw observations becomes one box,
+    so the reader sees center AND spread at once, and a genuine tail latency reads as an
+    outlier dot instead of quietly dragging a mean upward. Tailored to the long/tidy
+    boxplot shape, the only one in this file: a category column (``service``) whose
+    values REPEAT — one row per observation, ~15 per service — plus one numeric column
+    of raw measurements (``response_ms``). ``search`` is right-skewed around a single
+    890 ms tail spike, the lone Tukey outlier across the whole frame, so the linked
+    outlier series has exactly one point to draw. The boxes appear in first-appearance
+    order (auth, search, checkout, profile), which is also roughly increasing latency.
+    """
+    services = ["auth"] * 15 + ["search"] * 15 + ["checkout"] * 15 + ["profile"] * 15
+    response_ms = [
+        # auth — fast and tight
+        42, 45, 38, 51, 47, 55, 44, 49, 60, 41, 48, 52, 46, 58, 50,
+        # search — right-skewed, with the one 890 ms spike that becomes the outlier
+        88, 95, 102, 91, 110, 85, 120, 99, 105, 890, 93, 108, 97, 115, 101,
+        # checkout — slower and wider, but no tail
+        150, 165, 148, 172, 159, 180, 155, 168, 175, 161, 152, 170, 158, 166, 163,
+        # profile — slowest, and the widest box
+        210, 225, 198, 240, 215, 230, 205, 220, 235, 212, 208, 228, 218, 222, 216,
+    ]  # fmt: skip
+    return pd.DataFrame({"service": services, "response_ms": response_ms})
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -217,4 +243,5 @@ SAMPLES = {
     "Website activity by weekday (heatmap)": _weekly_activity,
     "Company market cap (treemap)": _company_market_cap,
     "Energy flow (sankey)": _energy_flow,
+    "Service response times (boxplot)": _response_times,
 }

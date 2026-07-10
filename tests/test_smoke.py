@@ -19,21 +19,31 @@ Layers:
   over two node columns, rows missing any of the three dropped like pie's slices,
   its node tooltip and its per-link weight labels each pinned to the one place
   highcharts-core doesn't silently drop them, those labels gated on link count,
-  resolving its own ``modules/sankey.js``), the brand-palette
+  resolving its own ``modules/sankey.js``), boxplot's per-category Tukey
+  distributions (the one AGGREGATING builder: raw observations grouped by a
+  repeating ``x_col`` into positional ``[low, q1, median, q3, high]`` 5-arrays,
+  outliers split off into a linked scatter series emitted only when they exist,
+  the ``iqr == 0`` degeneracies that the inclusive fence saves, the matplotlib
+  whisker clamp, an all-missing group kept as an ``EnforcedNull`` box, and the
+  ``fillColor``/``stemColor`` silent drop that leaves its box interior unsettable —
+  sharing bubble's and radar's ``highcharts-more``), the brand-palette
   (``DEFAULT_COLORS`` / ``colors`` override), and the validation guards
   (unsupported type, empty ``y_cols``, the category-x x-in-y rule widened to
-  heatmap, the bubble size-column requirement, and sankey's required, distinct
-  target column).
+  heatmap and boxplot, the bubble size-column requirement, and sankey's required,
+  distinct target column).
 - light/dark theming: dark mode paints the chart background (light leaves it
   unset), the chart chrome (axes/text/gridlines, pie labels, and the tooltip)
-  flips while the ``DEFAULT_COLORS`` palette stays shared across modes, and
-  ``build_chart_html`` gives the iframe body a background that tracks the mode.
+  flips while the ``DEFAULT_COLORS`` palette stays shared across modes,
+  ``build_chart_html`` gives the iframe body a background that tracks the mode,
+  and it pins the chart's ``color-scheme`` so Highcharts' own ``light-dark()``
+  defaults resolve to the export server's values rather than the viewer's browser.
 - ``sample_data`` unit tests: every built-in dataset is plottable (fresh,
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type (including bubble, which reveals a
-  Size (Z) control, radar, heatmap, treemap, and sankey, which reveals a
-  Target (to) control), title, and series, revealing
+  Size (Z) control, radar, heatmap, treemap, sankey, which reveals a
+  Target (to) control, and boxplot, which reveals a single-select Y and no extra
+  control at all), title, and series, revealing
   the generated Highcharts config
   behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
   the render-mode selector's two modes (interactive iframe / static PNG), plus
@@ -311,6 +321,27 @@ def test_build_chart_html_body_background_tracks_mode():
     df = pd.DataFrame({"x": ["a", "b"], "y": [1, 2]})
     assert "background:#0f172a" in build_chart_html(df, "line", "x", ["y"], dark=True)
     assert "background:#ffffff" in build_chart_html(df, "line", "x", ["y"])
+
+
+@pytest.mark.parametrize("dark", [False, True])
+@pytest.mark.parametrize("chart_type", ["line", "boxplot"])
+def test_build_chart_html_pins_the_chart_color_scheme(chart_type, dark):
+    # Highcharts >= 13 defines its defaults as `light-dark()` CSS variables, so every
+    # color we don't set explicitly would resolve against the VIEWER'S BROWSER rather
+    # than our `dark` flag. Two real failures followed: a light-mode chart painted itself
+    # dark (#141414 background, pale text) on a dark-OS browser, and a boxplot's box fill
+    # — the one mark color highcharts-core cannot express — differed between the iframe
+    # and the export-server PNG. Pinning the chart root to `only light` makes the iframe
+    # resolve those defaults exactly as the export server does, in BOTH modes, leaving
+    # `_themed` the single source of truth for dark mode.
+    #
+    # The selector must be `.highcharts-root` (the <svg>): Highcharts sets `color-scheme`
+    # on that element, so a rule on `html` is overridden by it.
+    df = pd.DataFrame({"g": ["a", "a", "b", "b"], "v": [1.0, 2.0, 3.0, 4.0]})
+    html = build_chart_html(df, chart_type, "g", ["v"], dark=dark)
+    assert ".highcharts-root{color-scheme:only light}" in html
+    # It is pinned regardless of mode — dark mode is expressed in the options, not here.
+    assert "color-scheme:only dark" not in html
 
 
 def test_theme_colors_stay_in_sync_with_config():
@@ -1126,6 +1157,338 @@ def test_sankey_numeric_node_labels_coerce_to_strings():
 
 
 # --------------------------------------------------------------------------- #
+# Boxplot (per-category Tukey distributions, aggregated from raw observations)
+# --------------------------------------------------------------------------- #
+def _boxes(opts) -> list:
+    """The box series' data: one positional ``[low, q1, median, q3, high]`` 5-array (or
+    ``EnforcedNull``) per category."""
+    return opts["series"][0]["data"]
+
+
+def test_boxplot_builds_boxes_over_categories():
+    # Boxplot is the one type whose builder AGGREGATES: the frame is long/tidy (x_col
+    # REPEATS, one row per observation) and each distinct x_col value becomes ONE box
+    # over that group's raw y_cols[0] numbers. Points are positional 5-arrays matched to
+    # xAxis.categories BY POSITION — not the {name, low, ...} dict form, which
+    # highcharts-core collapses with the name in the leading x slot.
+    df = pd.DataFrame(
+        {"svc": ["a", "a", "a", "b", "b", "b"], "ms": [1.0, 2.0, 3.0, 5.0, 6.0, 7.0]}
+    )
+    opts = build_options(df, "boxplot", "svc", ["ms"])
+    assert opts["chart"]["type"] == "boxplot"
+    assert opts["xAxis"]["categories"] == ["a", "b"]
+    assert opts["xAxis"]["title"]["text"] == "svc"
+    assert opts["yAxis"]["title"]["text"] == "ms"
+    assert opts["series"][0]["name"] == "ms"
+    # [low, q1, median, q3, high] — pandas' default linear quantiles.
+    assert _boxes(opts) == [
+        [1.0, 1.5, 2.0, 2.5, 3.0],
+        [5.0, 5.5, 6.0, 6.5, 7.0],
+    ]
+    # Boxes are colored categorically from the shared palette (like pie/treemap/sankey),
+    # NOT by a colorAxis — so this is not a value-colored type (unlike heatmap).
+    assert opts["plotOptions"]["boxplot"]["colorByPoint"] is True
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    assert "colorAxis" not in opts
+
+
+def test_boxplot_tukey_outliers_become_a_linked_scatter_series():
+    # Observations strictly beyond the 1.5 x IQR fences are drawn individually, as a
+    # SECOND series linked to the boxes. The whiskers stop at the most extreme point
+    # still inside the fence (13.0), never at the fence value itself.
+    df = pd.DataFrame({"g": ["a"] * 5, "v": [10.0, 11.0, 12.0, 13.0, 100.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert _boxes(opts) == [
+        [10.0, 11.0, 12.0, 13.0, 13.0]
+    ]  # high is the whisker, not 100
+    outliers = opts["series"][1]
+    assert outliers["type"] == "scatter"
+    assert outliers["linkedTo"] == ":previous"
+    assert outliers["data"] == [[0, 100.0]]  # [category_index, value]
+    # A fixed brand hue, read from DEFAULT_COLORS rather than the overridable `colors`
+    # list (a short custom palette would IndexError), and never dark-flipped.
+    assert outliers["marker"]["fillColor"] == DEFAULT_COLORS[3]
+
+
+def test_boxplot_without_outliers_emits_a_single_series():
+    # The linked scatter is emitted ONLY when there are outliers — an empty one would be
+    # dead config (the restraint heatmap/sankey show in gating their labels on count).
+    df = pd.DataFrame({"g": ["a"] * 4, "v": [10.0, 11.0, 12.0, 13.0]})
+    assert len(build_options(df, "boxplot", "g", ["v"])["series"]) == 1
+
+
+def test_boxplot_single_observation_group_is_a_flat_box():
+    # n == 1: every quantile is that value, so iqr == 0 and the box is a flat line. This
+    # is not a corner case to tolerate but the one the SUPPORTED_TYPES sweeps hit —
+    # `labeled_frame` gives boxplot three groups of exactly one observation.
+    df = pd.DataFrame({"g": ["a", "b"], "v": [7.0, 9.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert _boxes(opts) == [[7.0] * 5, [9.0] * 5]
+    assert len(opts["series"]) == 1  # a flat box is not an outlier
+
+
+def test_boxplot_two_observation_group_has_no_false_outliers():
+    df = pd.DataFrame({"g": ["a", "a"], "v": [3.0, 9.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert _boxes(opts) == [[3.0, 4.5, 6.0, 7.5, 9.0]]
+    assert len(opts["series"]) == 1
+
+
+def test_boxplot_identical_observations_have_zero_iqr_and_no_outliers():
+    # THE degenerate case. All values equal -> q1 == q3 -> iqr == 0 -> both fences
+    # collapse onto that value. Because fence membership is INCLUSIVE (>=/<=), every
+    # observation sits ON the fence and none is flagged. A strict (>/<) test would
+    # classify the entire group as outliers — and would fail the sweeps above, which
+    # feed boxplot single-observation groups.
+    df = pd.DataFrame({"g": ["a"] * 4, "v": [5.0, 5.0, 5.0, 5.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert _boxes(opts) == [[5.0] * 5]
+    assert len(opts["series"]) == 1
+
+
+def test_boxplot_zero_iqr_with_genuine_tails_still_flags_them():
+    # The other half of the iqr == 0 story: over half the mass on one value collapses the
+    # fences, but the real tails ARE strictly beyond them, so they are correctly flagged.
+    # The inclusive fence spares the 5s; it does not spare the 1 and the 9.
+    df = pd.DataFrame({"g": ["a"] * 10, "v": [1.0] + [5.0] * 8 + [9.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert _boxes(opts) == [[5.0] * 5]
+    assert opts["series"][1]["data"] == [[0, 1.0], [0, 9.0]]
+
+
+def test_boxplot_whisker_includes_a_value_exactly_on_the_fence():
+    # q1 == 4, q3 == 8, iqr == 4, so the lower fence lands exactly on -2. Inclusive
+    # membership keeps it as the whisker end rather than exiling it as an outlier.
+    df = pd.DataFrame({"g": ["a"] * 5, "v": [-2.0, 4.0, 6.0, 8.0, 10.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert _boxes(opts) == [[-2.0, 4.0, 6.0, 8.0, 10.0]]
+    assert len(opts["series"]) == 1
+
+
+def test_boxplot_whiskers_are_clamped_to_the_quartiles():
+    # On a small, sharply skewed group the interpolated q1 can fall BELOW every
+    # non-outlier observation: here q1 == 75 while the lowest in-fence point is 100. Left
+    # alone, `low` would be 100 and the box's lower edge (75) would sit beneath its own
+    # whisker. matplotlib clamps (`if np.min(wisklo) > q1: whislo = q1`) and so do we, so
+    # low <= q1 <= median <= q3 <= high holds for every input. The 0 is still an outlier.
+    df = pd.DataFrame({"g": ["a"] * 4, "v": [0.0, 100.0, 101.0, 102.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    low, q1, median, q3, high = _boxes(opts)[0]
+    assert low == q1 == 75.0  # clamped, not 100.0
+    assert [median, q3, high] == [100.5, 101.25, 102.0]
+    assert low <= q1 <= median <= q3 <= high
+    assert opts["series"][1]["data"] == [[0, 0.0]]
+
+
+def test_boxplot_high_whisker_is_clamped_to_the_upper_quartile():
+    # The mirror of the test above, and the reason the clamp is two-sided. Skew the group
+    # the OTHER way and the interpolated q3 (27.0) rises above every non-outlier
+    # observation (the largest is 2.0), so `high` must be clamped UP to q3 or the box's
+    # upper edge would sit above its own whisker. Without this test the `max(..., q3)`
+    # term is unexercised — the whole boxplot suite passes with it deleted.
+    df = pd.DataFrame({"g": ["a"] * 4, "v": [0.0, 1.0, 2.0, 102.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    low, q1, median, q3, high = _boxes(opts)[0]
+    assert high == q3 == 27.0  # clamped up, not the in-fence maximum of 2.0
+    assert [low, q1, median] == [0.0, 0.75, 1.5]
+    assert low <= q1 <= median <= q3 <= high
+    assert opts["series"][1]["data"] == [[0, 102.0]]
+
+
+def test_boxplot_non_finite_observations_are_dropped():
+    # An infinity can't size a whisker, and left in it poisons the WHOLE box: the
+    # quantiles go infinite, so iqr = inf - inf = nan, both fences are nan, every fence
+    # comparison is false, and the five numbers all come back nan. Aggregation is what
+    # makes this bite — a lone inf only spoils its own point in the pointwise branches.
+    # So the non-finite values are dropped up front, exactly as NaN is.
+    inf = float("inf")
+    df = pd.DataFrame({"g": ["a"] * 4, "v": [1.0, 2.0, 3.0, inf]})
+    assert _boxes(build_options(df, "boxplot", "g", ["v"]))[0] == [
+        1.0,
+        1.5,
+        2.0,
+        2.5,
+        3.0,
+    ]
+    # Dropped, not flagged as an outlier — it can't be drawn at any coordinate.
+    assert len(build_options(df, "boxplot", "g", ["v"])["series"]) == 1
+    # Nothing finite left is just an empty group: keep the slot, like an all-NaN one.
+    both = pd.DataFrame({"g": ["a", "a", "b", "b"], "v": [-inf, inf, 5.0, 7.0]})
+    boxes = _boxes(build_options(both, "boxplot", "g", ["v"]))
+    assert boxes[0] is EnforcedNull
+    assert boxes[1] == [5.0, 5.5, 6.0, 6.5, 7.0]
+
+
+def test_boxplot_rejects_a_non_numeric_value_column():
+    # The observations are cast to float64 before aggregating, so a text column raises
+    # ValueError — the same contract the pointwise branches get for free from `float(v)`
+    # (column/pie/scatter/treemap all raise it). Without the cast, `.quantile()` surfaces
+    # an opaque dtype error from pandas' engine instead.
+    df = pd.DataFrame({"g": ["a", "a"], "v": ["x", "y"]})
+    with pytest.raises(ValueError):
+        build_options(df, "boxplot", "g", ["v"])
+    # A bool column still works, and means 1.0/0.0 — as `float(True)` does elsewhere.
+    flags = pd.DataFrame({"g": ["a", "a"], "v": [True, False]})
+    assert _boxes(build_options(flags, "boxplot", "g", ["v"]))[0] == [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+    ]
+
+
+def test_boxplot_all_missing_group_keeps_its_slot_as_enforced_null():
+    # A group with no observations can't be summarized, but its category still exists, so
+    # the slot is KEPT as EnforcedNull (heatmap's keep-the-axis-aligned rule, not pie's
+    # drop-the-row one) — dropping it would slide every later box one place left. The
+    # whole POINT is EnforcedNull; highcharts-core expands it to five nulls in the JS.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"g": ["a", "a", "b", "b"], "v": [1.0, 2.0, float("nan"), None]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert opts["xAxis"]["categories"] == ["a", "b"]  # both slots kept
+    boxes = _boxes(opts)
+    assert boxes[0] == [1.0, 1.25, 1.5, 1.75, 2.0]
+    assert boxes[1] is EnforcedNull  # missing box, not Python None or dropped
+    js = make_chart(df, "boxplot", "g", ["v"]).to_js_literal()
+    # A null closing the point array proves the EnforcedNull reached the data (Python
+    # None would have been silently dropped) — as the heatmap null-cell test does.
+    assert js and "null]" in js
+
+
+def test_boxplot_missing_category_key_forms_no_group():
+    # The other missing-data axis: a row whose x_col is NaN names no category at all, so
+    # pandas' groupby(dropna=True) drops it. There is no slot to keep — unlike the
+    # all-missing-observations group above, whose category the other rows still name.
+    df = pd.DataFrame({"g": ["a", None, "b"], "v": [1.0, 2.0, 3.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert opts["xAxis"]["categories"] == ["a", "b"]
+    assert len(_boxes(opts)) == 2
+
+
+def test_boxplot_group_order_is_first_appearance():
+    # groupby(sort=False): the boxes keep the frame's row order, the same fidelity every
+    # other category-x type has (_category_labels never sorts). Sorted order would silently
+    # reorder a user's meaningful sequence (Mon..Sun, or a funnel's stages).
+    df = pd.DataFrame({"g": ["c", "a", "b", "a"], "v": [1.0, 2.0, 3.0, 4.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert opts["xAxis"]["categories"] == ["c", "a", "b"]
+
+
+def test_boxplot_numeric_category_labels_coerce_to_strings():
+    # The category-axis coercion, for the one type whose categories come from groupby keys
+    # rather than _category_labels: highcharts-core rejects a non-string category
+    # (CannotCoerceError on render), so a numeric grouping column must be stringified.
+    df = pd.DataFrame({"yr": [2001, 2001, 2002], "v": [1.0, 2.0, 3.0]})
+    assert build_options(df, "boxplot", "yr", ["v"])["xAxis"]["categories"] == [
+        "2001",
+        "2002",
+    ]
+
+
+def test_boxplot_uses_only_first_y_col():
+    # Single-value like pie/treemap/sankey: only the first selected column is the
+    # observations column (the app gives boxplot a single-select Y for exactly this).
+    df = pd.DataFrame({"g": ["a", "a"], "v": [1.0, 3.0], "v2": [9.0, 9.0]})
+    opts = build_options(df, "boxplot", "g", ["v", "v2"])
+    assert opts["series"][0]["name"] == "v"
+    assert _boxes(opts) == [[1.0, 1.5, 2.0, 2.5, 3.0]]
+
+
+def test_boxplot_rejects_x_in_y():
+    # The X column groups the observations, so it can't also BE them: every box would hold
+    # one observation equal to its own label. The category-x rule, widened to boxplot.
+    df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+    with pytest.raises(ValueError):
+        build_options(df, "boxplot", "a", ["a"])
+
+
+def test_boxplot_fill_color_is_accepted_then_silently_dropped():
+    # THE boxplot trap, and the reason its box interior can't be themed at all. Both
+    # `fillColor` and `stemColor` are read by BoxPlotOptions._get_kwargs_from_dict and
+    # then never emitted by _to_untrimmed_dict, because the model has no such property —
+    # so Chart.from_options ACCEPTS them and the JS silently lacks them. The same class of
+    # trap as sankey's top-level tooltip.nodeFormat and treemap's "y"-instead-of-"value".
+    # Only the serialized JS can prove it, so assert there. The fill therefore falls back
+    # to Highcharts' `var(--highcharts-background-color)`, pinned to white by
+    # _LIGHT_COLOR_SCHEME_CSS (see test_build_chart_html_pins_the_chart_color_scheme).
+    # If a future highcharts-core starts honoring fillColor, this fails — and _themed
+    # should then grow a boxplot hook that paints the interior with the theme.
+    from highcharts_core.chart import Chart
+
+    df = pd.DataFrame({"g": ["a", "a"], "v": [1.0, 2.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    # We don't set it — precisely because it wouldn't work.
+    assert "fillColor" not in opts["plotOptions"]["boxplot"]
+    assert "stemColor" not in opts["plotOptions"]["boxplot"]
+    opts["plotOptions"]["boxplot"]["fillColor"] = "#123456"
+    opts["plotOptions"]["boxplot"]["stemColor"] = "#654321"
+    js = Chart.from_options(opts).to_js_literal()
+    assert js and "type: 'boxplot'" in js  # it built and serialized...
+    assert "123456" not in js  # ...and swallowed both colors whole
+    assert "654321" not in js
+
+
+def test_boxplot_serializes_and_pulls_in_the_more_module():
+    # End to end: the 5-array box shape and its linked outlier scatter must serialize AND
+    # resolve highcharts-more — the module boxplot shares with bubble and radar, not a
+    # modules/*.js of its own. Assert on the compacted JS: the box must reach the data as
+    # a positional array, which is the whole reason we don't build {name, low, ...} dicts
+    # (highcharts-core collapses those with the name in the leading x slot).
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"g": ["a"] * 5, "v": [10.0, 11.0, 12.0, 13.0, 100.0]})
+    chart = make_chart(df, "boxplot", "g", ["v"])
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'boxplot'" in js
+    compact = "".join(js.split())
+    assert "[10.0,11.0,12.0,13.0,13.0]" in compact  # the 5-array, not a dict point
+    assert "linkedTo:':previous'" in compact  # the outlier series survived
+    assert "type:'scatter'" in compact
+    tags = chart.get_script_tags(as_str=True)
+    assert "highcharts-more" in tags  # bubble/radar's module, shared
+    assert "modules/" not in tags  # boxplot has no module of its own
+
+
+def test_boxplot_light_mode_shape():
+    # Mirrors the treemap/sankey light-mode tests: pin the choices nothing else guards.
+    # The tooltip lives under plotOptions.boxplot (scoping it to the boxes, so the linked
+    # outlier scatter keeps Highcharts' own point tooltip) and RENAMES the caps —
+    # Highcharts calls point.low/point.high "Minimum"/"Maximum", a lie once an outlier is
+    # drawn as its own point. The legend is off: it would only repeat the y-axis title.
+    df = pd.DataFrame({"g": ["a", "a"], "v": [1.0, 2.0]})
+    opts = build_options(df, "boxplot", "g", ["v"])
+    assert opts["legend"]["enabled"] is False
+    assert (
+        "tooltip" not in opts
+    )  # no top-level tooltip in light mode (a no-op, as ever)
+    box_opts = opts["plotOptions"]["boxplot"]
+    assert set(box_opts) == {"colorByPoint", "tooltip"}
+    fmt = box_opts["tooltip"]["pointFormat"]
+    assert "Upper whisker" in fmt and "Lower whisker" in fmt  # not Maximum/Minimum
+    assert "{point.q1}" in fmt and "{point.median}" in fmt and "{point.q3}" in fmt
+    assert box_opts["tooltip"]["headerFormat"] == "<b>{point.key}</b><br/>"
+
+
+def test_boxplot_dark_mode_needs_no_box_hook():
+    # Boxplot is the one mark-styling type with NO branch in _themed. Its box interior is
+    # unsettable (see the fillColor trap) and so stays white in both themes, while
+    # colorByPoint draws the border, whisker, stem and median in a palette hue legible
+    # against that white — so there is nothing left to flip. Only the generic chrome moves.
+    df = pd.DataFrame({"g": ["a", "a"], "v": [1.0, 2.0]})
+    opts = build_options(df, "boxplot", "g", ["v"], dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["xAxis"]["labels"]["style"]["color"] == "#94a3b8"
+    assert opts["yAxis"]["gridLineColor"] == "#334155"
+    assert (
+        opts["tooltip"]["backgroundColor"] == "#0f172a"
+    )  # chrome _themed auto-creates
+    # Untouched: no borderColor/fillColor/medianColor injected, unlike pie/treemap/sankey.
+    assert set(opts["plotOptions"]["boxplot"]) == {"colorByPoint", "tooltip"}
+
+
+# --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
 def test_sample_datasets_are_plottable_and_fresh():
@@ -1241,6 +1604,29 @@ def test_energy_flow_sample_builds_a_sankey_chart():
     generated = sum(link["weight"] for link in links if link["to"] == "Electricity")
     consumed = sum(link["weight"] for link in links if link["from"] == "Electricity")
     assert generated == consumed == 150.0
+
+
+def test_response_times_sample_builds_a_boxplot_chart():
+    # Ties the new boxplot sample to its intended type end to end. Like the sankey sample
+    # (and unlike every other, which has one row per unique x value) its x values REPEAT
+    # — that is the long/tidy shape boxplot aggregates. 60 rows collapse to 4 boxes, and
+    # the lone 890 ms spike in `search` (category index 1) is the frame's only Tukey
+    # outlier, so the linked scatter has exactly one point to draw.
+    from sample_data import _response_times
+
+    df = _response_times()
+    opts = build_options(df, "boxplot", "service", ["response_ms"])
+    assert opts["chart"]["type"] == "boxplot"
+    assert opts["series"][0]["name"] == "response_ms"
+    assert opts["xAxis"]["categories"] == ["auth", "search", "checkout", "profile"]
+    assert len(_boxes(opts)) == df["service"].nunique() == 4
+    assert len(df) == 60  # ~15 raw observations per service, not one row per box
+    # search's box stops at its 120 ms whisker; the 890 ms spike is the sole outlier.
+    assert _boxes(opts)[1] == [85.0, 94.0, 101.0, 109.0, 120.0]
+    assert opts["series"][1]["data"] == [[1, 890.0]]
+    # Every box is well formed: low <= q1 <= median <= q3 <= high.
+    for box in _boxes(opts):
+        assert list(box) == sorted(box)
 
 
 # --------------------------------------------------------------------------- #
@@ -1409,6 +1795,40 @@ def test_app_sankey_kpi_shows_flows(app):
     assert metrics["Flows"] == f"{len(default_df):,}"
 
 
+def test_app_switch_to_boxplot_shows_single_select_y_and_regenerates_config(app):
+    # Boxplot reads its Y as one column of raw observations, so — like pie/treemap/sankey
+    # — it swaps the multi-select Y pills for a single selectbox. It needs no EXTRA
+    # column selector (unlike bubble's Size and sankey's Target), so it adds exactly one
+    # widget. Modeled on the pie/treemap tests, not heatmap's (whose multi=True pills
+    # leave the widget indices unchanged). Network-free.
+    app.selectbox[1].set_value("boxplot").run()  # Chart type -> boxplot
+    assert not app.exception
+    assert not app.pills  # single-select Y, so the pills are gone
+    assert any(sb.label == "Observations (Y)" for sb in app.selectbox)
+    assert not any(sb.label == "Size (Z)" for sb in app.selectbox)  # no extra selector
+    assert not any(sb.label == "Target (to)" for sb in app.selectbox)
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'boxplot'" in app.code[0].value
+
+
+def test_app_boxplot_kpi_shows_boxes(app):
+    # Boxplot is one series of boxes, so the KPI swaps "Series plotted" (which would read
+    # a bare 1) for "Boxes" = the distinct categories — mirroring heatmap's "Cells",
+    # treemap's "Tiles" and sankey's "Flows". The default dataset has one row per month,
+    # so each month is a (degenerate, single-observation) box.
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("boxplot").run()  # Chart type -> boxplot
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    # The app's default X is the first column, as the X selectbox's default index shows.
+    expected = default_df[default_df.columns[0]].nunique()
+    assert metrics["Boxes"] == f"{expected:,}"
+
+
 def test_app_chart_type_selector_offers_every_supported_type(app):
     # Contract test mirroring test_app_render_mode_selector_offers_the_two_modes:
     # the chart-type selectbox offers exactly SUPPORTED_TYPES (so a new builder
@@ -1543,6 +1963,7 @@ def test_app_chart_type_selector_has_help(app):
     assert "heatmap" in help_text
     assert "treemap" in help_text
     assert "sankey" in help_text
+    assert "boxplot" in help_text
     # Every cartesian type is named in the prose; loop so a future addition to
     # CARTESIAN_TYPES that's forgotten in the help text actually fails here.
     for chart_type in CARTESIAN_TYPES:

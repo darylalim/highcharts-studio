@@ -13,7 +13,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `st.multiselect` on wide CSVs, plus the two type-specific extra column
   selectors — Size (Z) for bubble, Target (to) for sankey),
   caching, a KPI metric row (its third metric adapts to the chart type — series
-  plotted, cells for a heatmap, tiles for a treemap, flows for a sankey), the
+  plotted, cells for a heatmap, tiles for a treemap, flows for a sankey, boxes for
+  a boxplot), the
   render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
@@ -25,10 +26,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter/bubble edge cases, radar's polar-line shape, heatmap's colorAxis
-  value matrix, treemap's value-sized tiles, sankey's node-link flows, the brand
+  value matrix, treemap's value-sized tiles, sankey's node-link flows, boxplot's
+  aggregated Tukey distributions, the brand
   palette, the validation
   guards including bubble's required size column, sankey's required and distinct
-  target column, and the heatmap x-in-y rule, and
+  target column, and the heatmap/boxplot x-in-y rule, and
   an end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
   interaction tests.
@@ -114,7 +116,31 @@ hop; pulls in the `modules/sankey` module. Its nodes are named by Highcharts'
 default node label and each link carries its weight as a *per-link* `dataLabels`
 — gated on link count like heatmap's cell labels — because highcharts-core drops
 `plotOptions.sankey.dataLabels.nodeFormat` and the `format` that survives there
-would label the links with the node format and blank the node names).
+would label the links with the node format and blank the node names), and
+`boxplot` (per-category Tukey distributions — the only type whose builder
+*aggregates*: every other maps rows 1:1 onto marks, but a box summarizes many rows.
+The data is long/tidy — `x_col`'s values *repeat*, one row per observation — and each
+distinct `x_col` value becomes one box over that group's raw `y_cols[0]` numbers,
+encoded as a positional `[low, q1, median, q3, high]` 5-array matched to
+`xAxis.categories` *by position*, since a `{name, low, …}` dict point collapses with
+the name in the leading `x` slot. Whiskers follow `matplotlib.cbook.boxplot_stats`:
+pandas' default linear quantiles, 1.5×IQR fences with *inclusive* membership (so a
+zero-IQR group isn't read as all outliers), and `low`/`high` clamped to `q1`/`q3` at
+both ends. Observations are cast to `float64` first (a text column raises `ValueError`,
+as `float(v)` does in the pointwise branches) and reduced to the *finite* ones — an
+infinity can't size a whisker and would turn the whole box to nulls, since
+`iqr = inf - inf = nan`. Observations strictly beyond the fences become a second, linked
+scatter series, emitted only when some exist. Groups keep first-appearance order
+(`groupby(sort=False)`); a group whose observations are all missing keeps its axis
+slot as an `EnforcedNull` box, while a row whose `x_col` is missing names no category
+and forms no group. It shares bubble's and radar's `highcharts-more` module, and is
+the one mark-styling type with *no* `_themed` hook: `plotOptions.boxplot.fillColor`
+and `stemColor` are accepted by `Chart.from_options` and then silently dropped (and
+`ExportServer.global_options` is no side door — it is coerced through the same model),
+so the box interior can't be set at all. It falls back to Highcharts' own
+`var(--highcharts-background-color)`, which the `color-scheme` pin below resolves to
+white in both themes, while `colorByPoint` gives each box a palette-hued
+border/whisker/median legible against that white).
 
 ## Run
 
@@ -153,21 +179,33 @@ dicts over two node columns — the `keys`-plus-arrays form highcharts-core
 rejects outright — rows missing any of the three dropped, its per-link weight
 labels gated on link count, its node/link borders themed for dark mode while the
 labels ride Highcharts' `contrast` default, and resolving the `modules/sankey`
-module), the brand palette, the
+module), boxplot's aggregated Tukey distributions (raw observations grouped by a
+repeating `x_col` into positional `[low, q1, median, q3, high]` 5-arrays in
+first-appearance order; the outliers split into a linked scatter series that is
+emitted only when they exist; the `iqr == 0` degeneracies — a one-observation group,
+an all-identical group, and one with genuine tails — that the *inclusive* fence
+decides; the matplotlib whisker clamp at *both* ends (a skewed group whose `q1` falls
+below every in-fence point, and its mirror whose `q3` rises above every one); non-finite
+observations dropped and a text column rejected with `ValueError`; an all-missing group
+kept as an `EnforcedNull` box while a missing
+`x_col` key forms no group; and the `fillColor`/`stemColor` silent drop pinned on the
+emitted JS, which is why its box interior stays white and it needs no `_themed` hook),
+the brand palette, the
 light/dark theming (dark-mode chrome — including the tooltip and the heatmap
 colorAxis — vs. the shared palette), and the validation guards (including the
-category-x x-in-y rule, widened to heatmap, bubble's required size column, and
-sankey's required, distinct target column) —
+category-x x-in-y rule, widened to heatmap and boxplot, bubble's required size column,
+and sankey's required, distinct target column) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
-to serialize — bubble and radar both pulling in the `highcharts-more` module,
+to serialize — bubble, radar and boxplot all pulling in the `highcharts-more` module,
 heatmap the `modules/heatmap` module, treemap the `modules/treemap` module, and
 sankey the `modules/sankey` module — rather than just assumed; sankey's node
 tooltip is pinned in that serialized JS too, since a top-level `nodeFormat` is
-accepted by `Chart.from_options` and then silently dropped) and the sample
+accepted by `Chart.from_options` and then silently dropped, as boxplot's `fillColor`
+is) and the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
-controls — including the bubble Size (Z) control, radar, heatmap, treemap, and
-sankey's Target (to) control —
+controls — including the bubble Size (Z) control, radar, heatmap, treemap,
+sankey's Target (to) control, and boxplot's single-select Y —
 revealing the generated config behind its toggle,
 the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
@@ -257,6 +295,16 @@ before it runs.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
   in dict configs fed to highcharts-core (`Chart.from_options`), not Python
   `None`.
+- `build_chart_html` pins the chart's `color-scheme` to `only light`
+  (`_LIGHT_COLOR_SCHEME_CSS`, on the `.highcharts-root` `<svg>` — Highcharts sets
+  `color-scheme` there, so a rule on `html` is overridden). Highcharts ≥ 13 expresses
+  its own defaults as `light-dark()` CSS variables, so any color we *don't* set would
+  follow the **viewer's browser**, not the `dark` flag: a light-mode chart rendered dark
+  on a dark-OS browser, and `boxplot`'s unsettable box fill differed between the iframe
+  and the PNG. The export server already rasterizes with the light resolution, so this
+  makes the two render modes agree and leaves `_themed` the single source of truth for
+  dark mode. Anything a new chart type wants themed must go through `build_options`,
+  never through a Highcharts default.
 - Theme charts via `highcharts_builder.DEFAULT_COLORS` (applied by
   `build_options` to every chart, so the iframe and PNG paths are themed too),
   keeping its first color in sync with the light-mode `primaryColor` in

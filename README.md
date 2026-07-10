@@ -54,8 +54,8 @@ light/dark theme, which you can toggle from the settings menu.
   background, text, axes, and tooltip flip to match the mode, while each series
   keeps its palette color.
 - An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
-  metric — series plotted, or cells for a heatmap, tiles for a treemap, and flows
-  for a sankey) above
+  metric — series plotted, or cells for a heatmap, tiles for a treemap, flows
+  for a sankey, and boxes for a boxplot) above
   the chart
   — with the chart type shown as a badge above the chart rather than a metric in
   the row — a side-by-side source-data preview, and a toggle that reveals the
@@ -67,8 +67,10 @@ light/dark theme, which you can toggle from the settings menu.
   category axis), `heatmap` (a category × category grid whose cell colors,
   on a sequential color axis, show the values), `treemap` (nested
   rectangles whose area, sized by a value column, shows each label's share),
-  and `sankey` (a flow diagram: each row is a link between two node columns,
-  whose width is a value column).
+  `sankey` (a flow diagram: each row is a link between two node columns,
+  whose width is a value column), and `boxplot` (per-category distributions: a
+  category column whose values repeat, one row per observation, plus a column of
+  raw measurements — each category becomes a Tukey box, with outliers as dots).
 
 ## Files
 
@@ -98,13 +100,15 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
 - **`tests/test_smoke.py`** — the pure builder (every chart type, the
   missing-data and scatter/bubble edge cases, radar's polar-line shape, heatmap's
   colorAxis value matrix, treemap's value-sized tiles, sankey's node-link flows,
+  boxplot's aggregated Tukey distributions (including the `iqr == 0` degeneracies
+  and the `fillColor` silent drop),
   the brand palette, the
   light/dark theming including the dark-mode tooltip and the heatmap colorAxis, and
   the validation guards — plus an end-to-end pass driving every supported type
   through the real `Chart.from_options` → `to_js_literal` pipeline) and the sample
   datasets, plus a headless `AppTest` pass that drives the full app (switching
   controls including the bubble Size (Z) and sankey Target (to) selectors, radar,
-  heatmap, and treemap, the
+  heatmap, treemap, and boxplot, the
   config toggle, the KPI row, the wide-CSV `st.multiselect` fallback, both render
   modes, and the guard messages).
 - **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see
@@ -171,6 +175,11 @@ them. See `CLAUDE.md` for details.
 - In the **interactive** mode, the chart loads Highcharts JS from the CDN
   (`https://code.highcharts.com/`), so the browser needs network access. The
   iframe has a fixed height (it does not auto-grow).
+- Highcharts ≥ 13 expresses its default colors as `light-dark()` CSS variables, which
+  would resolve against the **viewer's browser** rather than the app's theme. The
+  generated HTML therefore pins the chart's `color-scheme` to `only light`, so those
+  defaults resolve exactly as the export server resolves them and the two render modes
+  agree. All theming flows through `build_options(..., dark=...)` instead.
 - In **static** mode, the running process must reach the Highcharts export
   server (`export.highcharts.com` by default). To remove that external
   dependency, self-host an export server and pass a `server_instance` to

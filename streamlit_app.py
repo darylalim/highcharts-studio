@@ -178,6 +178,9 @@ with st.sidebar:
             "- **heatmap** — a category X axis and one or more numeric Y columns "
             "form a grid (each selected column becomes a row); each cell's color "
             "shows its value\n"
+            "- **boxplot** — a category X column whose values *repeat* (one row per "
+            "observation) + one numeric column of raw measurements; each category's "
+            "distribution becomes a box, with outliers drawn as separate dots\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -192,6 +195,12 @@ with st.sidebar:
         # Node-link flow: two label columns naming a link's ends (the X selectbox
         # plus the Target one below) and one numeric column weighting it.
         x_label, y_label, multi = "Source (from)", "Flow value (weight)", False
+    elif chart_type == "boxplot":
+        # Long/tidy: the X column's values REPEAT (one row per observation) and one
+        # numeric column carries the raw measurements the builder aggregates into a box
+        # per category. Single-select Y like pie/treemap/sankey — a second column would
+        # be a second distribution, which is a second chart.
+        x_label, y_label, multi = "Category (X) axis", "Observations (Y)", False
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     elif chart_type == "heatmap":
@@ -309,6 +318,13 @@ with st.container(horizontal=True):
         # sankey's single-value controls guarantee y_cols[0] and target_col exist).
         flows = int(df[[x_col, target_col, y_cols[0]]].notna().all(axis=1).sum())
         st.metric("Flows", f"{flows:,}", border=True)
+    elif chart_type == "boxplot":
+        # Boxplot is one series of boxes (plus, at most, a linked outlier layer), so
+        # "Series plotted" would read a bare 1 — treemap's problem. Count the boxes: one
+        # per distinct category. nunique() drops missing keys exactly as the builder's
+        # groupby(dropna=True) does, so it matches the axis slots actually drawn — and it
+        # reads only x_col, so it works above the empty-y guard like the metrics above.
+        st.metric("Boxes", f"{df[x_col].nunique():,}", border=True)
     else:
         st.metric("Series plotted", len(y_cols), border=True)
 
