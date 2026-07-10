@@ -381,6 +381,22 @@ def test_dark_mode_themes_cartesian_axes_text_and_legend():
     assert opts["legend"]["itemHoverStyle"]["color"] == "#94a3b8"
 
 
+@pytest.mark.parametrize("chart_type", ["column", "bar"])
+def test_dark_mode_matches_column_bar_borders_to_the_background(chart_type):
+    # column/bar draw a 1px border per bar that defaults to the light background
+    # variable; the color-scheme pin keeps it white even in dark mode, ringing every
+    # bar. Match it to the dark background so the separators vanish as they do in light
+    # mode — the pie/treemap/sankey slice-gap rule, which these two were missing. The
+    # cartesian branch emits no plotOptions, so the hook must create it.
+    df = pd.DataFrame({"x": ["a", "b"], "y": [1, 2]})
+    opts = build_options(df, chart_type, "x", ["y"], dark=True)
+    assert opts["plotOptions"][chart_type]["borderColor"] == "#0f172a"
+    # The line family draws no such border, so it stays untouched (no dead plotOptions).
+    assert "plotOptions" not in build_options(df, "line", "x", ["y"], dark=True)
+    # Light mode is the documented no-op: no border injected at all.
+    assert "plotOptions" not in build_options(df, chart_type, "x", ["y"])
+
+
 def test_dark_mode_themes_pie_labels_and_skips_axes():
     df = pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]})
     opts = build_options(df, "pie", "name", ["v"], dark=True)
@@ -844,6 +860,11 @@ def test_heatmap_dark_mode_themes_the_color_axis():
     assert opts["colorAxis"]["minColor"] == "#1e293b"
     assert opts["colorAxis"]["maxColor"] == "#60a5fa"
     assert opts["colorAxis"]["labels"]["style"]["color"] == "#94a3b8"
+    # The gradient legend's tick lines (full-width gridlines + the shorter edge ticks)
+    # default to white and cross the bar as bright dashes; both are muted to the axis
+    # colors, or the gridlines stay white while only the ticks flip.
+    assert opts["colorAxis"]["gridLineColor"] == "#334155"
+    assert opts["colorAxis"]["tickColor"] == "#475569"
     assert opts["plotOptions"]["heatmap"]["nullColor"] == "#334155"
     # The category axes still recolor via the shared loop.
     assert opts["xAxis"]["labels"]["style"]["color"] == "#94a3b8"

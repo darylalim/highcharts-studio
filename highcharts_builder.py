@@ -187,6 +187,19 @@ def _themed(options: dict, *, dark: bool) -> dict:
         axis["lineColor"] = t["axis"]
         axis["tickColor"] = t["axis"]
         axis["gridLineColor"] = t["grid"]
+    if options["chart"].get("type") in ("column", "bar"):
+        # column/bar draw filled shapes with a 1px border that defaults to
+        # var(--highcharts-background-color) -> white, which the color-scheme pin
+        # keeps white even in dark mode, ringing every bar. Match it to the dark
+        # background so the separators disappear as they do in light mode (where the
+        # same var resolves to the white shell) -- the pie/treemap/sankey gap rule.
+        # The cartesian branch emits no plotOptions, so create it here. Restricted to
+        # column/bar: line/spline/area/areaspline have no such border (verified: they
+        # paint no white against the dark background).
+        bar_type = options["chart"]["type"]
+        options.setdefault("plotOptions", {}).setdefault(bar_type, {})[
+            "borderColor"
+        ] = t["bg"]
     if options["chart"].get("type") == "pie":
         pie = options["plotOptions"]["pie"]
         pie["dataLabels"] = {**pie.get("dataLabels", {}), "color": t["text"]}
@@ -210,6 +223,13 @@ def _themed(options: dict, *, dark: bool) -> dict:
             **color_axis.get("labels", {}),
             "style": {"color": t["muted"]},
         }
+        # The gradient legend's tick lines default to white and cross the bar as bright
+        # dashes at each value (the xAxis/yAxis loop above doesn't reach colorAxis). Two
+        # elements draw them — full-width gridlines and the shorter edge ticks — so mute
+        # both to the same colors the real axes use in that loop, or the gridlines stay
+        # white while only the ticks flip.
+        color_axis["gridLineColor"] = t["grid"]
+        color_axis["tickColor"] = t["axis"]
         options["plotOptions"]["heatmap"]["nullColor"] = t["grid"]
     if options["chart"].get("type") == "sankey":
         # Only the node/link borders need flipping: they default to light and would
