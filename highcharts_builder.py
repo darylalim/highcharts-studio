@@ -275,6 +275,30 @@ def _num(value):
     return number if math.isfinite(number) else EnforcedNull
 
 
+def _label_ok(value) -> bool:
+    """True when a value can NAME a mark: present, and — if it is a real number — finite.
+
+    The label-column counterpart to ``_plottable``. Every type reads ``x_col`` as the name
+    of a mark (a pie slice, an axis category, a sankey node, a boxplot group) except
+    scatter/bubble with a numeric x, where x is a coordinate ``_plottable`` already guards.
+    A missing (``NaN``/``NaT``) or non-finite label names nothing drawable: it would either
+    render as the literal category ``"nan"``/``"inf"`` or, for a non-finite NUMERIC label,
+    stringify past the value-column guard entirely. So its row is dropped, the same policy
+    the value columns get — uniformly, rather than the split it used to have (kept as
+    ``"nan"`` by most types, dropped only by sankey and boxplot).
+
+    Unlike ``_plottable``, a *string* label is valid and must NOT raise: ``math.isfinite``
+    rejects a non-number with ``TypeError``, which here means "not a number, so it can't be
+    non-finite" — a drawable label. Only a numeric label is range-checked.
+    """
+    if pd.isna(value):
+        return False
+    try:
+        return math.isfinite(value)
+    except TypeError:
+        return True
+
+
 def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
     """Reduce one category's raw observations to a Tukey box, plus its outliers.
 
@@ -483,6 +507,23 @@ def build_options(
             f"x_col {x_col!r} cannot also be a y series for a {chart_type} chart"
         )
 
+    # Every type reads x_col as a mark LABEL — a pie slice name, an axis category, a
+    # sankey source node, a boxplot group — EXCEPT scatter/bubble with a numeric x, where
+    # x is a coordinate the per-point `_plottable` already guards. For the label case, a
+    # missing or non-finite label names nothing drawable, so drop its row once, here, in
+    # one place, rather than let each branch stringify it to the literal "nan"/"inf" mark.
+    # This applies the value-column missing-data policy to the label column too, uniformly
+    # (see `_label_ok`); before, only sankey and boxplot dropped such a row. sankey's OTHER
+    # label column, target_col, is handled in its own branch (this filter reaches x_col
+    # only). Reassigning df to the filtered frame keeps every branch's position-aligned
+    # `zip(..., strict=True)` and category/series builds in lockstep.
+    x_is_label = not (
+        chart_type in (XY_TYPES + BUBBLE_TYPES)
+        and pd.api.types.is_numeric_dtype(df[x_col])
+    )
+    if x_is_label:
+        df = df[df[x_col].map(_label_ok)]
+
     title = title or f"{chart_type.title()} chart"
     colors = list(colors) if colors is not None else list(DEFAULT_COLORS)
 
@@ -593,10 +634,12 @@ def build_options(
             for src, dst, weight in zip(
                 df[x_col], df[target_col], df[weight_col], strict=True
             )
-            # The nodes are LABELS, so only presence matters for them (a numeric node
-            # column is stringified below); the weight is a number, so it must also be
-            # finite — see _plottable.
-            if not pd.isna(src) and not pd.isna(dst) and _plottable(weight)
+            # The nodes are LABELS, so `_label_ok` guards them (present, and finite if
+            # numeric — a non-finite node would stringify to "inf"); the weight is a
+            # number, so it must be finite too — see _plottable. The x_col (source) filter
+            # already ran up front; target_col is this branch's own second label column,
+            # so it is checked here.
+            if _label_ok(src) and _label_ok(dst) and _plottable(weight)
         ]
         if len(links) <= _SANKEY_DATALABEL_MAX_LINKS:
             for link in links:

@@ -202,6 +202,47 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
         assert token not in js, f"{chart_type} emitted a non-finite literal: {token}"
 
 
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
+    # The counterpart to the value-column sweep above, for the LABEL column (the one that
+    # NAMES a mark: a pie slice, an axis category, a sankey node, a boxplot group). A
+    # missing or non-finite label names nothing drawable, so its row is dropped in EVERY
+    # type — not rendered as a slice/category/node/box labelled the literal "nan"/"inf".
+    # This is the value-column missing-data policy extended to the label column, and it is
+    # uniform now: before, most types kept the "nan" mark and only sankey and boxplot
+    # dropped it. Proven on the emitted JS (a kept NaN/inf label stringifies to the quoted
+    # category 'nan'/'inf', which contains the token; the good rows never do).
+    from highcharts_builder import make_chart
+
+    # A NaN in a STRING label column (object dtype, so scatter/bubble take the
+    # non-numeric-x path) and an inf in a NUMERIC label column (so they take the numeric-x
+    # path `_plottable` guards) — both label channels, so no type slips through on either.
+    nan_df = pd.DataFrame(
+        {
+            "label": ["a", float("nan"), "c"],
+            "to": ["x", "y", "z"],
+            "value": [1.0, 2.0, 3.0],
+        }
+    )
+    inf_df = pd.DataFrame(
+        {
+            "label": [1.0, float("inf"), 3.0],
+            "to": [9.0, 8.0, 7.0],
+            "value": [1.0, 2.0, 3.0],
+        }
+    )
+    for df, token in ((nan_df, "nan"), (inf_df, "inf")):
+        js = make_chart(
+            df,
+            chart_type,
+            "label",
+            ["value"],
+            size_col=_size_for(chart_type),
+            target_col="to" if chart_type == "sankey" else None,
+        ).to_js_literal()
+        assert js and token not in js.lower(), f"{chart_type} kept a '{token}' label"
+
+
 def test_num_maps_missing_and_non_finite_to_enforced_null():
     from highcharts_builder import _num, _plottable
 
@@ -261,18 +302,24 @@ def test_scatter_and_bubble_drop_non_finite_points():
     ] == [[1.0, 3.0, 5.0]]
 
 
-def test_sankey_drops_a_non_finite_weight_but_keeps_infinite_node_labels():
+def test_sankey_drops_a_non_finite_weight_and_a_non_finite_node_label():
     inf = float("inf")
     df = pd.DataFrame({"s": ["a", "b"], "t": ["c", "d"], "w": [inf, 5.0]})
     assert _links(build_options(df, "sankey", "s", ["w"], target_col="t")) == [
         {"from": "b", "to": "d", "weight": 5.0}
     ]
-    # A node column is a LABEL, so only presence matters: an infinity there stringifies to
-    # a node named "inf" rather than dropping the link. Odd data, but well-defined — the
-    # same restraint as test_sankey_allows_the_weight_to_repeat_a_node_column.
-    nodes = pd.DataFrame({"s": [inf], "t": ["d"], "w": [5.0]})
-    assert _links(build_options(nodes, "sankey", "s", ["w"], target_col="t")) == [
-        {"from": "inf", "to": "d", "weight": 5.0}
+    # A node column is a LABEL, and a non-finite label names nothing drawable: it would
+    # stringify to a node literally named "inf". Under the uniform label policy (`_label_ok`)
+    # that row is dropped in EITHER end — the source (filtered up front) or the target
+    # (checked in the sankey branch) — exactly as every other type now drops a "nan"/"inf"
+    # label, rather than the old sankey-only exception that kept the "inf" node.
+    src_inf = pd.DataFrame({"s": [inf, "a"], "t": ["d", "e"], "w": [5.0, 6.0]})
+    assert _links(build_options(src_inf, "sankey", "s", ["w"], target_col="t")) == [
+        {"from": "a", "to": "e", "weight": 6.0}
+    ]
+    dst_inf = pd.DataFrame({"s": ["a", "b"], "t": [inf, "e"], "w": [5.0, 6.0]})
+    assert _links(build_options(dst_inf, "sankey", "s", ["w"], target_col="t")) == [
+        {"from": "b", "to": "e", "weight": 6.0}
     ]
 
 
