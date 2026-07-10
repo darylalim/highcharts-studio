@@ -1459,6 +1459,28 @@ def test_boxplot_non_finite_observations_are_dropped():
     assert boxes[1] == [5.0, 5.5, 6.0, 6.5, 7.0]
 
 
+def test_boxplot_finite_but_overflowing_group_becomes_enforced_null():
+    # Dropping non-finite INPUTS is not enough for the one type that does arithmetic on
+    # the values: a group of finite-but-huge numbers overflows during aggregation. With a
+    # spread near the double range, iqr = q3 - q1 (and numpy's quantile interpolation,
+    # a + (b - a) * frac) exceeds it and returns +/-inf, so a fence or the median itself
+    # goes non-finite while the rest stay finite — smuggling the bare token `inf` past the
+    # input guard and into the emitted JS (a blank iframe, a 400 from the export server).
+    # The whole group is treated as unplottable, the same EnforcedNull box an all-missing
+    # group gets. Reachable from a plain CSV: read_csv parses -9e307/9e307 as finite floats.
+    big = 9e307  # finite (max double ~1.8e308), but 9e307 - (-9e307) overflows to inf
+    df = pd.DataFrame({"g": ["a"] * 4, "v": [-big, -big, big, big]})
+    boxes = _boxes(build_options(df, "boxplot", "g", ["v"]))
+    assert boxes[0] is EnforcedNull
+    # And it must not have leaked into the serialized JS (the sweep's non_finite_frame
+    # only carries infinities in a value column that gets DROPPED, never this arithmetic
+    # path, so it can't catch this — hence the direct assertion here).
+    from highcharts_builder import make_chart
+
+    js = make_chart(df, "boxplot", "g", ["v"]).to_js_literal()
+    assert js and "inf" not in js
+
+
 def test_boxplot_rejects_a_non_numeric_value_column():
     # The observations are cast to float64 before aggregating, so a text column raises
     # ValueError — the same contract the pointwise branches get for free from `float(v)`

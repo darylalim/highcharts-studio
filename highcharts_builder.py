@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import html
 import math
+import warnings
 
 import pandas as pd
 from highcharts_core.chart import Chart
@@ -325,9 +326,17 @@ def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
     clean = numeric[numeric.abs() != float("inf")].dropna()
     if clean.empty:
         return EnforcedNull, []
-    q1 = float(clean.quantile(0.25))
-    median = float(clean.quantile(0.5))
-    q3 = float(clean.quantile(0.75))
+    # A huge-but-finite group overflows the double range during aggregation (numpy's
+    # quantile interpolation subtracts a + (b - a) * frac); that overflow is expected and
+    # handled by the finiteness guard below, so silence its RuntimeWarning rather than let
+    # it spam the server log as if it were an unguarded bug. Stdlib `warnings`, not
+    # `np.errstate` — the module never imports numpy directly (the `_plottable`/`requests`
+    # reasoning: numpy reaches us only through pandas).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        q1 = float(clean.quantile(0.25))
+        median = float(clean.quantile(0.5))
+        q3 = float(clean.quantile(0.75))
     iqr = q3 - q1
     lower_fence = q1 - _BOXPLOT_WHISKER_MULTIPLIER * iqr
     upper_fence = q3 + _BOXPLOT_WHISKER_MULTIPLIER * iqr
@@ -338,6 +347,17 @@ def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
     inside = clean[(clean >= lower_fence) & (clean <= upper_fence)]
     outside = clean[(clean < lower_fence) | (clean > upper_fence)]
     box = [min(float(inside.min()), q1), q1, median, q3, max(float(inside.max()), q3)]
+    # Dropping the non-finite INPUTS above is not enough: this is the one type that does
+    # arithmetic on the values, and that arithmetic can overflow a finite group. Once the
+    # spread nears the double range (~1.8e308), `iqr = q3 - q1` — and even numpy's quantile
+    # interpolation, which is `a + (b - a) * frac` — exceeds it and returns +/-inf, so a
+    # fence or the median itself goes non-finite while the others stay finite. A non-finite
+    # stat can't size a whisker, and it serializes as the bare token `inf` (the very
+    # ReferenceError/400 the missing-data policy exists to prevent — see `_plottable`). So
+    # treat the whole group as unplottable: the same EnforcedNull box an all-missing group
+    # gets, the same policy `_num` applies to a single non-finite value.
+    if not all(math.isfinite(value) for value in box):
+        return EnforcedNull, []
     return box, [float(value) for value in outside]
 
 
