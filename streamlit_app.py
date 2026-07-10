@@ -22,6 +22,7 @@ from highcharts_builder import (
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
     build_chart_png,
+    count_marks,
     explain_export_failure,
     make_chart,
 )
@@ -251,6 +252,11 @@ with st.sidebar:
             y_cols = st.multiselect(y_label, numeric_cols, default=default)
     else:
         y_cols = [st.selectbox(y_label, numeric_cols)]
+    # Normalize the widgets' loosely-typed return (pills/multiselect/selectbox) to a
+    # concrete list[str] — the column names already are strings, so this only pins the
+    # type, letting the uncached `count_marks` type-check without threading everything
+    # through a cache wrapper. An empty selection stays empty for the main-panel guard.
+    y_cols = [str(col) for col in y_cols]
 
     # Bubble encodes a third dimension as marker size; pick the numeric column
     # that drives it. Only shown for bubble (None otherwise, and ignored by the
@@ -298,34 +304,26 @@ with st.sidebar:
 with st.container(horizontal=True):
     st.metric("Rows", f"{len(df):,}", border=True)
     st.metric("Numeric columns", len(numeric_cols), border=True)
-    # Heatmap is a single series of cells, so "Series plotted" (len(y_cols)) would
-    # misreport it as N — the app's own config toggle shows just one series. Show
-    # the grid's cell count instead. Every other type plots one series per y
-    # column, where len(y_cols) IS the series count.
+    # heatmap/treemap/sankey/boxplot each render ONE series (of cells/tiles/flows/boxes),
+    # so "Series plotted" (len(y_cols)) would misreport them as N or a bare 1. Show the mark
+    # count instead — and get it from the builder's count_marks, which applies the very
+    # _label_ok / _plottable drop rules build_options does, so the KPI can't drift from what
+    # the chart draws (a missing/non-finite label drops its row in every type; a
+    # non-plottable value drops a tile/flow too). count_marks reads only the columns each
+    # type needs, so it works here above the empty-y guard, as these metrics always have.
+    # Every other type plots one series per y column, where len(y_cols) IS the series count.
     if chart_type == "heatmap":
-        st.metric("Cells", f"{len(df) * len(y_cols):,}", border=True)
+        cells = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
+        st.metric("Cells", f"{cells:,}", border=True)
     elif chart_type == "treemap":
-        # Treemap is one series of tiles (like pie), so "Series plotted" would read
-        # a bare 1. Show the tile count instead — the non-null values that become
-        # rectangles — mirroring heatmap's "Cells". y_cols has exactly one column
-        # here (treemap uses the single-value controls), so [0] is always present.
-        tiles = int(df[y_cols[0]].notna().sum())
+        tiles = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
         st.metric("Tiles", f"{tiles:,}", border=True)
     elif chart_type == "sankey":
-        # Sankey is one series of links, so "Series plotted" would read a bare 1
-        # (treemap's problem). Count the flows instead — the rows that become links.
-        # The builder drops a row missing ANY of the three columns, so count the
-        # rows complete in all three (duplicates in the selection are harmless, and
-        # sankey's single-value controls guarantee y_cols[0] and target_col exist).
-        flows = int(df[[x_col, target_col, y_cols[0]]].notna().all(axis=1).sum())
+        flows = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
         st.metric("Flows", f"{flows:,}", border=True)
     elif chart_type == "boxplot":
-        # Boxplot is one series of boxes (plus, at most, a linked outlier layer), so
-        # "Series plotted" would read a bare 1 — treemap's problem. Count the boxes: one
-        # per distinct category. nunique() drops missing keys exactly as the builder's
-        # groupby(dropna=True) does, so it matches the axis slots actually drawn — and it
-        # reads only x_col, so it works above the empty-y guard like the metrics above.
-        st.metric("Boxes", f"{df[x_col].nunique():,}", border=True)
+        boxes = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
+        st.metric("Boxes", f"{boxes:,}", border=True)
     else:
         st.metric("Series plotted", len(y_cols), border=True)
 

@@ -248,6 +248,31 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
         assert js and token not in js.lower(), f"{chart_type} kept a '{token}' label"
 
 
+@pytest.mark.parametrize("chart_type", ["heatmap", "treemap", "sankey", "boxplot"])
+def test_count_marks_matches_the_built_series(chart_type):
+    # The app's KPI (heatmap Cells / treemap Tiles / sankey Flows / boxplot Boxes) comes
+    # from count_marks, which must equal the marks build_options actually draws — the whole
+    # reason it lives in the builder, beside the drop rules. Cross-check the two on a frame
+    # that exercises every drop: a NaN label (dropped in all four), a NaN value (drops a
+    # tile/flow, kept as an EnforcedNull cell/box), an inf value (same), and a NaN target
+    # (drops a sankey link). If they ever diverge, the KPI is lying about the chart.
+    from highcharts_builder import build_options, count_marks
+
+    nan, inf = float("nan"), float("inf")
+    df = pd.DataFrame(
+        {
+            "cat": ["a", "b", nan, "d", "e"],
+            "to": ["p", "q", "r", "s", nan],
+            "v": [1.0, nan, 3.0, inf, 5.0],
+        }
+    )
+    built = build_options(df, chart_type, "cat", ["v"], target_col="to")
+    drawn = len(built["series"][0]["data"])  # series[0] is the cells/tiles/links/boxes
+    assert count_marks(df, chart_type, "cat", ["v"], target_col="to") == drawn
+    # And the expected value, spelled out, so the cross-check can't pass on a shared bug:
+    assert drawn == {"heatmap": 4, "treemap": 2, "sankey": 1, "boxplot": 4}[chart_type]
+
+
 def test_num_maps_missing_and_non_finite_to_enforced_null():
     from highcharts_builder import _num, _plottable
 
@@ -2119,6 +2144,39 @@ def test_app_boxplot_kpi_shows_boxes(app):
     # The app's default X is the first column, as the X selectbox's default index shows.
     expected = default_df[default_df.columns[0]].nunique()
     assert metrics["Boxes"] == f"{expected:,}"
+
+
+def test_app_heatmap_kpi_shows_cells_from_count_marks(app):
+    # Heatmap swaps "Series plotted" for "Cells", sourced from the builder's count_marks so
+    # the KPI can't drift from the grid the chart draws. Assert the app's number equals
+    # count_marks on the default selection (X = first column, Y = first numeric column).
+    from highcharts_builder import count_marks
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("heatmap").run()  # Chart type -> heatmap
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    x = default_df.columns[0]
+    y = [default_df.select_dtypes("number").columns[0]]
+    assert metrics["Cells"] == f"{count_marks(default_df, 'heatmap', x, y):,}"
+
+
+def test_app_treemap_kpi_shows_tiles_from_count_marks(app):
+    # Treemap swaps "Series plotted" for "Tiles", likewise from count_marks (rows with a
+    # drawable label AND a plottable value), so the KPI matches the tiles actually laid out.
+    from highcharts_builder import count_marks
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("treemap").run()  # Chart type -> treemap
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    x = default_df.columns[0]
+    y = [default_df.select_dtypes("number").columns[0]]
+    assert metrics["Tiles"] == f"{count_marks(default_df, 'treemap', x, y):,}"
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):

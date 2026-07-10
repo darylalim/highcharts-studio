@@ -991,6 +991,40 @@ def build_options(
     )
 
 
+def count_marks(
+    df: pd.DataFrame,
+    chart_type: str,
+    x_col: str,
+    y_cols: list[str],
+    *,
+    target_col: str | None = None,
+) -> int:
+    """The number of marks ``build_options`` will draw, for the app's count-adaptive KPI
+    (a heatmap's cells, a treemap's tiles, a sankey's flows, a boxplot's boxes).
+
+    Defined here, beside ``build_options`` and reusing its very ``_label_ok`` / ``_plottable``
+    predicates, so the KPI number can never drift from what the chart actually renders — the
+    reason the drop rules live in this module at all. Reads only the columns each type needs,
+    so it stays correct above ``streamlit_app``'s empty-``y_cols`` guard (heatmap returns 0
+    without touching ``y_cols[0]``; the other three use single-value controls that guarantee
+    one y column). A row whose label is not drawable is dropped in every type (the uniform
+    label policy); for treemap/sankey a non-plottable value/weight drops it too, while a
+    heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``) and a boxplot
+    keeps one box per distinct drawable label (an all-missing group included).
+    """
+    label_ok = df[x_col].map(_label_ok)
+    if chart_type in HEATMAP_TYPES:
+        return int(label_ok.sum()) * len(y_cols)
+    if chart_type in BOXPLOT_TYPES:
+        return int(df.loc[label_ok, x_col].nunique())
+    value_ok = df[y_cols[0]].map(_plottable)
+    if chart_type in TREEMAP_TYPES:
+        return int((label_ok & value_ok).sum())
+    if chart_type in SANKEY_TYPES:
+        return int((label_ok & df[target_col].map(_label_ok) & value_ok).sum())
+    raise ValueError(f"count_marks has no rule for {chart_type!r}")
+
+
 def make_chart(
     df: pd.DataFrame,
     chart_type: str,

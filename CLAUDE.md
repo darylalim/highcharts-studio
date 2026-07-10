@@ -13,8 +13,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `st.multiselect` on wide CSVs, plus the two type-specific extra column
   selectors — Size (Z) for bubble, Target (to) for sankey),
   caching, a KPI metric row (its third metric adapts to the chart type — series
-  plotted, cells for a heatmap, tiles for a treemap, flows for a sankey, boxes for
-  a boxplot), the
+  plotted, or, for the one-series types, the mark count from the builder's
+  `count_marks`: cells for a heatmap, tiles for a treemap, flows for a sankey,
+  boxes for a boxplot — sourced there rather than recomputed here so it can't drift
+  from what the chart draws), the
   render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
@@ -24,8 +26,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   plus `explain_export_failure()`, which turns a failed PNG export into a message
   naming the actual cause (it owns the export-server relationship, so it owns the
   diagnosis; duck-typed on `exc.response.status_code` rather than importing
-  `requests`, which this project never declares). Independently importable and
-  unit-testable.
+  `requests`, which this project never declares), and `count_marks()`, which
+  returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
+  tiles, a sankey's flows, a boxplot's boxes) for the app's KPI row — reusing the
+  same `_label_ok`/`_plottable` drop predicates so the count can't drift from the
+  chart. Independently importable and unit-testable.
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
