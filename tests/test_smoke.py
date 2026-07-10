@@ -184,7 +184,12 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
     # the export server is handed the non-standard JSON literal `Infinity` and answers
     # 400, which the app then misreports as an unreachable server. Both were live bugs in
     # every type before `_plottable`. Only the emitted JS can prove the fix, and this
-    # sweeps SUPPORTED_TYPES so a newly added type is covered the day it is added.
+    # sweeps SUPPORTED_TYPES so a newly added type is covered the day it is added — but only
+    # for its VALUE channel (this fixture carries the infinities in the y/weight/size
+    # column, always with a safe string x). The LABEL channel has its own sweep
+    # (test_missing_or_non_finite_label_drops_the_row_in_every_type), and boxplot's
+    # aggregation-overflow path — the one type that can manufacture a non-finite from
+    # finite inputs — has its own test, since neither is reachable through this frame.
     from highcharts_builder import make_chart
 
     js = make_chart(
@@ -517,8 +522,10 @@ def test_build_chart_html_pins_the_chart_color_scheme(chart_type, dark):
     # resolve those defaults exactly as the export server does, in BOTH modes, leaving
     # `_themed` the single source of truth for dark mode.
     #
-    # The selector must be `.highcharts-root` (the <svg>): Highcharts sets `color-scheme`
-    # on that element, so a rule on `html` is overridden by it.
+    # The selector must be `.highcharts-root` (the <svg>), not `html`: Highcharts declares
+    # `color-scheme: light dark` on `.highcharts-container` (between `html` and the <svg>),
+    # and since `color-scheme` inherits, that shadows an `html` rule for the SVG subtree —
+    # so the pin has to sit at or below the container to win.
     df = pd.DataFrame({"g": ["a", "a", "b", "b"], "v": [1.0, 2.0, 3.0, 4.0]})
     html = build_chart_html(df, chart_type, "g", ["v"], dark=dark)
     assert ".highcharts-root{color-scheme:only light}" in html

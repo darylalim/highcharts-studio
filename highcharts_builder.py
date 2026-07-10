@@ -143,8 +143,12 @@ _BOXPLOT_OUTLIER_COLOR = DEFAULT_COLORS[3]
 # The export server already rasterizes with the LIGHT resolution, so pinning the chart's
 # own root to `only light` makes the iframe agree with the PNG in both themes and leaves
 # `_themed` as the single source of truth for dark mode. It must target `.highcharts-root`
-# (the `<svg>`), because Highcharts sets `color-scheme` on that element — a rule on `html`
-# is simply overridden by it. Note this reaches the iframe only: the export server renders
+# (the `<svg>`), NOT `html`: Highcharts declares `color-scheme: light dark` on
+# `.highcharts-container` (the div between `html` and the `<svg>`; verified against
+# Highcharts 13), and since `color-scheme` inherits, that container value shadows any
+# `html`-level rule for the whole SVG subtree. The pin therefore has to sit at or below
+# the container — `.highcharts-root` is the `<svg>` directly under it — to win. Note this
+# reaches the iframe only: the export server renders
 # the extracted SVG server-side, where no CSS of ours applies (and neither `chart.style`
 # nor `ExportServer.global_options` is an escape hatch — the former is applied with
 # `elem.style[key]`, which ignores custom properties, and the latter is coerced through
@@ -254,8 +258,11 @@ def _plottable(value) -> bool:
     non-standard JSON literal ``Infinity``, rejects the payload with a 400. So a
     non-finite number is treated exactly as a missing one — a gap for the types that keep
     a slot (via ``_num``), a dropped row for the types that drop one (pie, treemap,
-    scatter, bubble, sankey's weight). A ``float()`` that raises ``ValueError`` on a text
-    column keeps doing so, here rather than one line later.
+    scatter, bubble, sankey's weight). A ``float()`` that raises on a non-numeric cell
+    keeps doing so, here rather than one line later — ``ValueError`` for a text value
+    (``float("x")``), ``TypeError`` for an object like a ``Timestamp`` (``float()`` has no
+    conversion). The app never hits either: ``streamlit_app.py`` draws value columns from
+    ``select_dtypes("number")``, so only the pure builder API can pass a non-numeric one.
 
     Reachable from a plain CSV: ``inf``, ``Infinity``, ``-inf`` and ``1e400`` (which
     silently overflows) all parse to a float infinity that survives ``select_dtypes``.

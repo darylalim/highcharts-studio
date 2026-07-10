@@ -309,17 +309,28 @@ before it runs.
   infinity can't be serialized: `to_js_literal` emits the bare token `inf`, which is not
   a JavaScript identifier (JS spells it `Infinity`), so the chart call dies with a
   `ReferenceError` and the iframe renders blank; the export server, sent the
-  non-standard JSON literal `Infinity`, answers `400`. So each type applies its own
-  missing-data policy to `inf`: the keep-the-slot types go through `_num` (gap =
-  `EnforcedNull`), the drop-the-row types through the shared `_plottable` predicate
-  (pie, treemap, scatter, bubble, and sankey's *weight* — its node columns are labels,
-  so they keep the plain `pd.isna` check), and boxplot drops non-finite observations
-  before aggregating. `test_no_supported_type_emits_a_non_finite_js_literal` sweeps
-  `SUPPORTED_TYPES`, so a new type is covered the day it is added. Reachable from a
-  plain CSV: `inf`, `Infinity`, `-inf` and `1e400` (which silently overflows).
+  non-standard JSON literal `Infinity`, answers `400`. So each type applies the same
+  missing-data policy to a non-finite **value**: the keep-the-slot types go through `_num`
+  (gap = `EnforcedNull`), the drop-the-row types through the shared `_plottable` predicate
+  (pie, treemap, scatter, bubble, and sankey's *weight*), and boxplot drops non-finite
+  observations before aggregating — and, because it is the one type that does *arithmetic*
+  on the values, then nulls the whole box (an `EnforcedNull`) if that arithmetic overflows
+  a finite group into a non-finite quantile/fence. The same policy governs the **label**
+  column (the one that NAMES a mark — a slice/category/node/box): a missing or non-finite
+  label names nothing drawable, so its row is dropped uniformly via `_label_ok`, filtered
+  once at the top of `build_options` (except scatter/bubble with a numeric x, where x is a
+  coordinate `_plottable` already guards; sankey's second label column, `target_col`, is
+  checked in its own branch). This replaced an earlier split where most types kept a
+  `"nan"`/`"inf"` label and only sankey/boxplot dropped it. Two sweeps pin it:
+  `test_no_supported_type_emits_a_non_finite_js_literal` for the value channel and
+  `test_missing_or_non_finite_label_drops_the_row_in_every_type` for the label channel, so
+  a new type is covered on both the day it is added. Reachable from a plain CSV: `inf`,
+  `Infinity`, `-inf` and `1e400` (which silently overflows), and a blank cell (`nan`).
 - `build_chart_html` pins the chart's `color-scheme` to `only light`
-  (`_LIGHT_COLOR_SCHEME_CSS`, on the `.highcharts-root` `<svg>` — Highcharts sets
-  `color-scheme` there, so a rule on `html` is overridden). Highcharts ≥ 13 expresses
+  (`_LIGHT_COLOR_SCHEME_CSS`, on the `.highcharts-root` `<svg>`, not `html`: Highcharts
+  declares `color-scheme: light dark` on the `.highcharts-container` div between them, and
+  since the property inherits, that shadows an `html` rule for the SVG subtree — so the pin
+  must sit at or below the container to win). Highcharts ≥ 13 expresses
   its own defaults as `light-dark()` CSS variables, so any color we *don't* set would
   follow the **viewer's browser**, not the `dark` flag: a light-mode chart rendered dark
   on a dark-OS browser, and `boxplot`'s unsettable box fill differed between the iframe
