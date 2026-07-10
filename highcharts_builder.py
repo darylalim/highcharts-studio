@@ -14,6 +14,7 @@ The flow mirrors the highcharts-core pattern (an options ``dict`` ->
 from __future__ import annotations
 
 import html
+import math
 
 import pandas as pd
 from highcharts_core.chart import Chart
@@ -221,11 +222,36 @@ def _themed(options: dict, *, dark: bool) -> dict:
     return options
 
 
+def _plottable(value) -> bool:
+    """True when a value can actually be drawn: present, and FINITE.
+
+    An infinity is not missing — ``pd.isna(inf)`` is ``False`` — but it can't be plotted
+    either, and it can't even be *serialized*. ``to_js_literal`` renders a Python ``inf``
+    as the bare token ``inf``, which is not a JavaScript identifier (JS spells it
+    ``Infinity``), so the whole ``Highcharts.chart(...)`` call dies with a ReferenceError
+    and the iframe renders blank; the export server, handed the same value as the
+    non-standard JSON literal ``Infinity``, rejects the payload with a 400. So a
+    non-finite number is treated exactly as a missing one — a gap for the types that keep
+    a slot (via ``_num``), a dropped row for the types that drop one (pie, treemap,
+    scatter, bubble, sankey's weight). A ``float()`` that raises ``ValueError`` on a text
+    column keeps doing so, here rather than one line later.
+
+    Reachable from a plain CSV: ``inf``, ``Infinity``, ``-inf`` and ``1e400`` (which
+    silently overflows) all parse to a float infinity that survives ``select_dtypes``.
+    """
+    return not pd.isna(value) and math.isfinite(float(value))
+
+
 def _num(value):
-    """Coerce one DataFrame value to a JSON-friendly number or Highcharts null."""
+    """Coerce one DataFrame value to a JSON-friendly number or Highcharts null.
+
+    Missing *and* non-finite values both become ``EnforcedNull`` — a gap in the line, an
+    empty heatmap cell — for the reason ``_plottable`` explains.
+    """
     if pd.isna(value):
         return EnforcedNull
-    return float(value)
+    number = float(value)
+    return number if math.isfinite(number) else EnforcedNull
 
 
 def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
@@ -425,7 +451,7 @@ def build_options(
         data = [
             {"name": str(name), "y": float(value)}
             for name, value in zip(df[x_col], df[value_col], strict=True)
-            if not pd.isna(value)
+            if _plottable(value)
         ]
         return _themed(
             {
@@ -460,7 +486,7 @@ def build_options(
         data = [
             {"name": str(name), "value": float(value)}
             for name, value in zip(df[x_col], df[value_col], strict=True)
-            if not pd.isna(value)
+            if _plottable(value)
         ]
         return _themed(
             {
@@ -527,7 +553,10 @@ def build_options(
             for src, dst, weight in zip(
                 df[x_col], df[target_col], df[weight_col], strict=True
             )
-            if not pd.isna(src) and not pd.isna(dst) and not pd.isna(weight)
+            # The nodes are LABELS, so only presence matters for them (a numeric node
+            # column is stringified below); the weight is a number, so it must also be
+            # finite — see _plottable.
+            if not pd.isna(src) and not pd.isna(dst) and _plottable(weight)
         ]
         if len(links) <= _SANKEY_DATALABEL_MAX_LINKS:
             for link in links:
@@ -588,14 +617,12 @@ def build_options(
                 points = [
                     [float(x), float(y)]
                     for x, y in zip(df[x_col], df[col], strict=True)
-                    if not pd.isna(x) and not pd.isna(y)
+                    if _plottable(x) and _plottable(y)
                 ]
             else:
                 # Non-numeric x: place points by row position (the values label
                 # those positions via _xy_x_axis's categories); drop missing y.
-                points = [
-                    [i, float(y)] for i, y in enumerate(df[col]) if not pd.isna(y)
-                ]
+                points = [[i, float(y)] for i, y in enumerate(df[col]) if _plottable(y)]
             series.append({"name": col, "data": points})
         return _themed(
             {
@@ -619,7 +646,7 @@ def build_options(
                 points = [
                     [float(x), float(y), float(z)]
                     for x, y, z in zip(df[x_col], df[col], df[size_col], strict=True)
-                    if not pd.isna(x) and not pd.isna(y) and not pd.isna(z)
+                    if _plottable(x) and _plottable(y) and _plottable(z)
                 ]
             else:
                 # Non-numeric x: place points by row position (like scatter), each
@@ -627,7 +654,7 @@ def build_options(
                 points = [
                     [i, float(y), float(z)]
                     for i, (y, z) in enumerate(zip(df[col], df[size_col], strict=True))
-                    if not pd.isna(y) and not pd.isna(z)
+                    if _plottable(y) and _plottable(z)
                 ]
             series.append({"name": col, "data": points})
         # Name all three dimensions in the tooltip (the default shows a bare

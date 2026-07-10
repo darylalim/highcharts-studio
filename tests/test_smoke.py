@@ -9,7 +9,10 @@ Layers:
   cartesian and radar series, dropped points/slices elsewhere, numeric vs
   non-numeric x, and bubble's (x, y, size) triples whose series share one size
   column, its ``highcharts-more`` module resolution, and its dimension-naming
-  tooltip), radar's polar-line shape (chart.type "line" + ``chart.polar``,
+  tooltip), non-finite data (an ``inf`` is not missing but can't be serialized —
+  ``to_js_literal`` emits the bare token ``inf``, a JS ReferenceError, and the
+  export server 400s — so every type applies its own missing-data policy to it,
+  swept over ``SUPPORTED_TYPES``), radar's polar-line shape (chart.type "line" + ``chart.polar``,
   sharing the ``highcharts-more`` module), heatmap's category × category value
   matrix (``[x, y, value]`` cells colored by a ``colorAxis``, empty cells kept as
   ``EnforcedNull``, resolving its own ``modules/heatmap.js``), treemap's
@@ -155,6 +158,122 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
         target_col=_target_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
+
+
+@pytest.fixture
+def non_finite_frame() -> pd.DataFrame:
+    """``labeled_frame``'s shape, but the numeric column carries an infinity at each end
+    and one drawable value. Every type reads x from "label" and y from "value", so the
+    one frame exercises all of them (bubble takes "value" as its size too, sankey as its
+    weight — see ``_size_for``/``_target_for``)."""
+    return pd.DataFrame(
+        {
+            "label": ["a", "b", "c"],
+            "target": ["x", "y", "z"],
+            "value": [float("inf"), float("-inf"), 9.0],
+        }
+    )
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart_type):
+    # An infinity is not missing — pd.isna(inf) is False — but it cannot be serialized:
+    # to_js_literal renders it as the bare token `inf`, which is not a JavaScript
+    # identifier (JS spells it `Infinity`), so the whole Highcharts.chart(...) call dies
+    # with a ReferenceError and the iframe renders blank. The static path fares no better:
+    # the export server is handed the non-standard JSON literal `Infinity` and answers
+    # 400, which the app then misreports as an unreachable server. Both were live bugs in
+    # every type before `_plottable`. Only the emitted JS can prove the fix, and this
+    # sweeps SUPPORTED_TYPES so a newly added type is covered the day it is added.
+    from highcharts_builder import make_chart
+
+    js = make_chart(
+        non_finite_frame,
+        chart_type,
+        "label",
+        ["value"],
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
+    ).to_js_literal()
+    assert js
+    # `Infinity` is capitalized, so a lowercase "inf" can only be the broken token. None
+    # of the column names, titles or type names above contains "inf"/"nan" either.
+    for token in ("inf", "nan", "NaN"):
+        assert token not in js, f"{chart_type} emitted a non-finite literal: {token}"
+
+
+def test_num_maps_missing_and_non_finite_to_enforced_null():
+    from highcharts_builder import _num, _plottable
+
+    assert _num(1.5) == 1.5
+    assert _num(float("nan")) is EnforcedNull
+    assert _num(float("inf")) is EnforcedNull  # not missing, but not drawable
+    assert _num(float("-inf")) is EnforcedNull
+    # The drop-path predicate agrees with the keep-the-slot one on what is drawable.
+    assert _plottable(1.5)
+    assert not _plottable(float("nan"))
+    assert not _plottable(float("inf"))
+    assert not _plottable(float("-inf"))
+
+
+@pytest.mark.parametrize("chart_type", CATEGORY_X_TYPES)
+def test_category_x_non_finite_becomes_enforced_null(chart_type):
+    # The keep-the-slot family treats an infinity exactly as it treats a NaN: a gap in the
+    # line, not a dropped point — so the categories stay aligned with the data.
+    df = pd.DataFrame({"x": ["a", "b", "c"], "y": [1.0, float("inf"), 3.0]})
+    data = build_options(df, chart_type, "x", ["y"])["series"][0]["data"]
+    assert data == [1.0, EnforcedNull, 3.0]
+
+
+def test_heatmap_non_finite_cell_becomes_enforced_null():
+    df = pd.DataFrame({"day": ["Mon", "Tue"], "AM": [1.0, float("-inf")]})
+    data = build_options(df, "heatmap", "day", ["AM"])["series"][0]["data"]
+    assert len(data) == 2  # the grid never collapses
+    assert data[1][2] is EnforcedNull
+
+
+@pytest.mark.parametrize("chart_type", ["pie", "treemap"])
+def test_single_value_types_drop_a_non_finite_row(chart_type):
+    # The drop-the-row family drops an infinity exactly as it drops a NaN: a slice or tile
+    # can no more be sized by infinity than by nothing.
+    df = pd.DataFrame({"n": ["a", "b", "c"], "v": [1.0, float("inf"), 3.0]})
+    data = build_options(df, chart_type, "n", ["v"])["series"][0]["data"]
+    assert [point["name"] for point in data] == ["a", "c"]
+
+
+def test_scatter_and_bubble_drop_non_finite_points():
+    inf = float("inf")
+    xy = pd.DataFrame({"x": [1.0, 2.0, 3.0], "y": [10.0, inf, 30.0]})
+    assert build_options(xy, "scatter", "x", ["y"])["series"][0]["data"] == [
+        [1.0, 10.0],
+        [3.0, 30.0],
+    ]
+    # An infinite x drops the point too, not just an infinite y.
+    xinf = pd.DataFrame({"x": [1.0, inf, 3.0], "y": [10.0, 20.0, 30.0]})
+    assert build_options(xinf, "scatter", "x", ["y"])["series"][0]["data"] == [
+        [1.0, 10.0],
+        [3.0, 30.0],
+    ]
+    # And so does an infinite SIZE, which would otherwise ask for a bubble of infinite area.
+    zinf = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0], "s": [5.0, -inf]})
+    assert build_options(zinf, "bubble", "x", ["y"], size_col="s")["series"][0][
+        "data"
+    ] == [[1.0, 3.0, 5.0]]
+
+
+def test_sankey_drops_a_non_finite_weight_but_keeps_infinite_node_labels():
+    inf = float("inf")
+    df = pd.DataFrame({"s": ["a", "b"], "t": ["c", "d"], "w": [inf, 5.0]})
+    assert _links(build_options(df, "sankey", "s", ["w"], target_col="t")) == [
+        {"from": "b", "to": "d", "weight": 5.0}
+    ]
+    # A node column is a LABEL, so only presence matters: an infinity there stringifies to
+    # a node named "inf" rather than dropping the link. Odd data, but well-defined — the
+    # same restraint as test_sankey_allows_the_weight_to_repeat_a_node_column.
+    nodes = pd.DataFrame({"s": [inf], "t": ["d"], "w": [5.0]})
+    assert _links(build_options(nodes, "sankey", "s", ["w"], target_col="t")) == [
+        {"from": "inf", "to": "d", "weight": 5.0}
+    ]
 
 
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)

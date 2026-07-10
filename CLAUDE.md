@@ -165,7 +165,9 @@ uv run pytest
 `tests/test_smoke.py` exercises the pure builder (`build_options`) —
 parametrized across every supported chart type, covering missing data
 (`EnforcedNull` for the category-x family — cartesian and radar — dropped
-points/slices elsewhere), the numeric vs non-numeric scatter/bubble paths
+points/slices elsewhere) and non-finite data (each type applying that same policy
+to an `inf`, swept over `SUPPORTED_TYPES` by asserting no type emits a bare `inf`
+into the serialized JS), the numeric vs non-numeric scatter/bubble paths
 (bubble adds the `(x, y, size)` triples whose series share one size column, plus
 its dimension-naming tooltip), radar's polar-line shape (`chart.type` `line` +
 `chart.polar`, sharing the `highcharts-more` module and themed by the same
@@ -295,6 +297,18 @@ before it runs.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
   in dict configs fed to highcharts-core (`Chart.from_options`), not Python
   `None`.
+- Treat a **non-finite** number as a missing one. `pd.isna(inf)` is `False`, but an
+  infinity can't be serialized: `to_js_literal` emits the bare token `inf`, which is not
+  a JavaScript identifier (JS spells it `Infinity`), so the chart call dies with a
+  `ReferenceError` and the iframe renders blank; the export server, sent the
+  non-standard JSON literal `Infinity`, answers `400`. So each type applies its own
+  missing-data policy to `inf`: the keep-the-slot types go through `_num` (gap =
+  `EnforcedNull`), the drop-the-row types through the shared `_plottable` predicate
+  (pie, treemap, scatter, bubble, and sankey's *weight* — its node columns are labels,
+  so they keep the plain `pd.isna` check), and boxplot drops non-finite observations
+  before aggregating. `test_no_supported_type_emits_a_non_finite_js_literal` sweeps
+  `SUPPORTED_TYPES`, so a new type is covered the day it is added. Reachable from a
+  plain CSV: `inf`, `Infinity`, `-inf` and `1e400` (which silently overflows).
 - `build_chart_html` pins the chart's `color-scheme` to `only light`
   (`_LIGHT_COLOR_SCHEME_CSS`, on the `.highcharts-root` `<svg>` — Highcharts sets
   `color-scheme` there, so a rule on `html` is overridden). Highcharts ≥ 13 expresses
