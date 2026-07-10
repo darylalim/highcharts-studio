@@ -1608,6 +1608,82 @@ def test_boxplot_dark_mode_needs_no_box_hook():
 
 
 # --------------------------------------------------------------------------- #
+# Static-PNG failure messages (the export server's three different answers)
+# --------------------------------------------------------------------------- #
+class _FakeResponse:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+
+class _FakeRequestError(OSError):
+    """Stands in for a ``requests`` exception: they all subclass ``OSError`` and carry a
+    ``response`` (``None`` when no HTTP answer ever arrived). Faked rather than imported,
+    for the same reason the helper doesn't import requests — and so these tests need no
+    network."""
+
+    def __init__(self, status_code: int | None = None):
+        super().__init__("boom")
+        self.response = _FakeResponse(status_code) if status_code else None
+
+
+def test_export_failure_explains_a_build_error_without_blaming_the_network():
+    # `except Exception` also catches a ValueError raised by build_options before any
+    # request is made. Telling that user to check their network sends them somewhere the
+    # bug isn't. Non-OSError == it never left the process.
+    from highcharts_builder import explain_export_failure
+
+    message = explain_export_failure(ValueError("At least one y column is required."))
+    assert "could not be built" in message
+    assert "not with your network" in message
+    assert "export server" in message  # names what it did NOT reach
+
+
+def test_export_failure_explains_an_unreachable_server():
+    from highcharts_builder import explain_export_failure
+
+    message = explain_export_failure(_FakeRequestError())  # no HTTP response at all
+    assert "could not be reached" in message
+    assert "Check your network" in message
+
+
+@pytest.mark.parametrize("status", [400, 413, 422])
+def test_export_failure_explains_a_rejected_chart(status):
+    # The case that most needs saying out loud: the server answered, so it is plainly
+    # reachable, and the fault is in the payload we sent it.
+    from highcharts_builder import explain_export_failure
+
+    message = explain_export_failure(_FakeRequestError(status))
+    assert f"HTTP {status}" in message
+    assert "rejected this chart" in message
+    assert "not at your network" in message
+    assert "check your network" not in message.lower()  # the old, wrong advice
+
+
+@pytest.mark.parametrize("status", [500, 502, 503])
+def test_export_failure_explains_a_server_side_error(status):
+    from highcharts_builder import explain_export_failure
+
+    message = explain_export_failure(_FakeRequestError(status))
+    assert f"HTTP {status}" in message
+    assert "internal error" in message
+    assert "rejected" not in message
+
+
+def test_app_static_png_error_uses_the_export_failure_explainer():
+    # The helper is only worth having if the app calls it, and the AppTest suite stays on
+    # the network-free interactive path, so it can never reach that except block. Pin the
+    # call site by reading the source — the same mechanical-sync idea as
+    # test_theme_colors_stay_in_sync_with_config.
+    source = (ROOT / "streamlit_app.py").read_text()
+    assert "explain_export_failure" in source
+    assert "explain_export_failure(exc)" in source
+    # And the old advice, which asserted a cause it could not know, is gone for good.
+    assert (
+        "This usually means the Highcharts export server is unreachable" not in source
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Sample datasets
 # --------------------------------------------------------------------------- #
 def test_sample_datasets_are_plottable_and_fresh():

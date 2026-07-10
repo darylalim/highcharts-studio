@@ -20,8 +20,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
   and a toggle that reveals the generated Highcharts config (JS).
 - `highcharts_builder.py` — pure, Streamlit-free helpers that turn a DataFrame
-  into a Highcharts options `dict`, a `Chart`, and embeddable HTML or PNG bytes.
-  Independently importable and unit-testable.
+  into a Highcharts options `dict`, a `Chart`, and embeddable HTML or PNG bytes,
+  plus `explain_export_failure()`, which turns a failed PNG export into a message
+  naming the actual cause (it owns the export-server relationship, so it owns the
+  diagnosis; duck-typed on `exc.response.status_code` rather than importing
+  `requests`, which this project never declares). Independently importable and
+  unit-testable.
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
@@ -82,6 +86,10 @@ html = build_chart_html(df, chart_type, x_col, y_cols, height=height, title=titl
 
 # static: rendered server-side to PNG bytes via the export server, for st.image
 png = build_chart_png(df, chart_type, x_col, y_cols, title=title)
+
+# ...and, when that raises, why — a build error, an unreachable server, or an HTTP
+# answer (a 4xx rejection is worth saying out loud: the server is plainly reachable).
+message = explain_export_failure(exc)  # plain markdown; the module stays Streamlit-free
 ```
 
 All three helpers take an optional `dark=` flag (default `False`) that themes the

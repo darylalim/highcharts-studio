@@ -22,6 +22,7 @@ from highcharts_builder import (
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
     build_chart_png,
+    explain_export_failure,
     make_chart,
 )
 from sample_data import SAMPLES
@@ -405,10 +406,12 @@ with left.container(border=True, height="stretch"):
                 target_col,
             )
         except Exception as exc:  # build error or export-server failure
+            # The three causes need three different answers, and the builder owns the
+            # export-server relationship, so it owns the explanation too (a pure,
+            # importable function, as the hooks convention asks).
             st.error(
                 f"Static (PNG) render failed.\n\n`{type(exc).__name__}: {exc}`\n\n"
-                "This usually means the Highcharts export server is unreachable — "
-                "check your network, or switch to the **Interactive** mode instead.",
+                f"{explain_export_failure(exc)}",
                 icon=":material/cloud_off:",
             )
             st.stop()

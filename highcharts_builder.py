@@ -1029,3 +1029,48 @@ def build_chart_png(
         width=width,
         timeout=timeout,
     )
+
+
+def explain_export_failure(exc: Exception) -> str:
+    """Explain, in the user's terms, why a ``build_chart_png`` call failed.
+
+    ``build_chart_png`` can fail three genuinely different ways, and telling a user to
+    "check your network" when the export server answered them is worse than saying
+    nothing. They are told apart WITHOUT importing ``requests``: it reaches this project
+    only as a transitive dependency of highcharts-core, so importing it directly would be
+    depending on something ``pyproject.toml`` never declares.
+
+    - Nothing was ever sent. ``make_chart`` raised before the request — a bad column, an
+      unsupported type. Every ``requests`` exception subclasses ``OSError``
+      (``HTTPError`` -> ``RequestException`` -> ``OSError``), so anything that is *not*
+      an ``OSError`` never left the process.
+    - The request was made and no HTTP response came back (connection refused, DNS
+      failure, timeout). Those carry ``response = None``.
+    - The server answered, and its answer was an error. ``exc.response.status_code``
+      separates "it rejected our chart" (4xx) from "it broke" (5xx). A 4xx is the one
+      that most needs saying out loud, because the server is plainly reachable.
+
+    Returned as plain markdown for ``st.error``; this module stays Streamlit-free.
+    """
+    if not isinstance(exc, OSError):
+        return (
+            "The chart could not be built, so nothing was sent to the export server. "
+            "This is a problem with the data or the selected columns — not with your "
+            "network."
+        )
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status is None:
+        return (
+            "The Highcharts export server could not be reached. Check your network, or "
+            "switch to the **Interactive** mode instead."
+        )
+    if 400 <= status < 500:
+        return (
+            f"The Highcharts export server is reachable, but it rejected this chart "
+            f"(HTTP {status}). That points at the chart config it was sent, not at your "
+            f"network. The **Interactive** mode renders the same chart in the browser."
+        )
+    return (
+        f"The Highcharts export server reported an internal error (HTTP {status}). Try "
+        f"again in a moment, or switch to the **Interactive** mode instead."
+    )
