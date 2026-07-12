@@ -16,6 +16,7 @@ from __future__ import annotations
 import html
 import math
 import warnings
+from typing import Any
 
 import pandas as pd
 from highcharts_core.chart import Chart
@@ -32,6 +33,7 @@ TREEMAP_TYPES = ("treemap",)  # nested rectangles sized by value, like pie
 SANKEY_TYPES = ("sankey",)  # node-link flows: source -> target links sized by weight
 BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw rows
 WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
+SUNBURST_TYPES = ("sunburst",)  # a hierarchy as concentric rings, re-rootable by click
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -43,6 +45,7 @@ SUPPORTED_TYPES = (
     + SANKEY_TYPES
     + BOXPLOT_TYPES
     + WATERFALL_TYPES
+    + SUNBURST_TYPES
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
@@ -65,6 +68,10 @@ CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 # and can't drift apart. Sankey is deliberately absent: its x_col is a node label,
 # not an axis, and its collision is source-vs-target — target_col isn't in y_cols
 # at all, so this rule can't express it (see the dedicated guard in build_options).
+# Sunburst is absent for the same reason, one relation over: its x_col names a node,
+# and its collision is node-vs-parent, so parent_col isn't in y_cols either. x_col in
+# y_cols then merely names every node by its own (numeric) value — odd, well-defined,
+# drawable: scatter's x-in-y tolerance, not heatmap's grid misalignment.
 X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES + BOXPLOT_TYPES + WATERFALL_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
@@ -153,6 +160,72 @@ _WATERFALL_TOTAL_LABEL = "Total"
 # drawn on smaller bridges (the _HEATMAP_DATALABEL_MAX_CELLS / _SANKEY_DATALABEL_MAX_LINKS
 # rule). Counts the appended total, since it is drawn and labelled like any other bar.
 _WATERFALL_DATALABEL_MAX_STEPS = 30
+
+# Sunburst is the only type that reads the frame as an ADJACENCY LIST — each row is one node
+# naming its PARENT by label — so it is the only one whose marks are not in the data: the
+# hierarchy has to be ASSEMBLED before anything can be drawn (see _sunburst_tree).
+#
+# Highcharts links parent to child by `id`, and these ids are SYNTHESIZED rather than taken
+# from the labels. A label is not a key. Two rows may legitimately share one ("Other" under
+# both Sales and Marketing), and label-as-id would then hand Highcharts two points with the
+# same id — which is not a silent mismatch but Highcharts error #31, "Non-unique point or
+# node id", printed in a red band across the chart (verified by rendering). Synthesizing ids
+# from the row position makes that unreachable: CSV text lands only in `name`, so nothing in
+# a hostile file can collide with anything. The cost of the label-keyed shape is paid exactly
+# once, and only where it is genuinely unpayable — a label that is USED as a parent must name
+# one node (see _SUNBURST_AMBIGUOUS).
+_SUNBURST_NODE_ID_PREFIX = "n"  # -> n0, n1, ... ; cannot collide with the root id below
+
+# The synthesized root: the centre sector every branch hangs off. APPENDED by the builder, as
+# waterfall appends its Total bar — so this is the second type whose mark count exceeds its
+# row count, and the second whose chart draws a mark the frame never held. Its id is internal
+# (never read from the CSV), so a node literally named "__root__" is just a node; a node named
+# "All" is a cosmetic name clash on screen, exactly as a waterfall step named "Total" is.
+# Neither string may contain an "inf"/"nan" substring: the non-finite sweep asserts those
+# tokens appear NOWHERE in the emitted JS (the _WATERFALL_TOTAL_LABEL rule).
+_SUNBURST_ROOT_ID = "__root__"
+_SUNBURST_ROOT_LABEL = "All"
+# The root's hue comes OFF the categorical scale entirely — the _WATERFALL_SUM_COLOR argument,
+# and here it is sharper still. Ring 1 CYCLES the palette (a ninth branch reuses the first
+# hue), so there is no palette entry that is guaranteed not to be some branch's color: the
+# only way to say "this sector is not a category, it is the WHOLE" is a hue from outside the
+# palette. Read straight from this constant and never indexed out of the overridable `colors`
+# — the _BOXPLOT_OUTLIER_COLOR rule, for both of its reasons: a short custom palette can't
+# IndexError, and a custom palette must not be able to repaint the total as one more branch.
+# Left unset, Highcharts paints the root one of its OWN defaults — a cyan in no palette of
+# ours (verified by rendering). This slate reads against the white shell and _DARK_CHROME
+# alike, so like the series palette it needs no dark-mode flip.
+_SUNBURST_ROOT_COLOR = "#94a3b8"  # slate: the app's "not a category" grey
+# The root would otherwise take an equal share of the radius as every data ring — on a
+# two-ring tree, half of it: a giant grey disc. Shrink it to a hub.
+_SUNBURST_ROOT_SIZE = {"unit": "percentage", "value": 15}
+_SUNBURST_ROOT_LEVEL = 1  # the synthesized root
+_SUNBURST_BRANCH_LEVEL = 2  # ring 1: the top-level branches, seeded from `colors`
+# Sectors below ring 1 carry no color of their own — they INHERIT their branch's hue, which is
+# what makes a branch read as one thing (verified by rendering) — so within a branch they are
+# told apart by a brightness variation instead. The SIGN alternates per ring because the
+# variation is applied to the parent's ALREADY VARIED color: a fixed -0.5 at every level walks
+# a deep tree down to black.
+_SUNBURST_COLOR_VARIATION = 0.5
+# Above this many sectors the names overprint into noise, so they're only drawn on smaller
+# trees (the _HEATMAP_DATALABEL_MAX_CELLS / _SANKEY_DATALABEL_MAX_LINKS /
+# _WATERFALL_DATALABEL_MAX_STEPS rule). Counts the appended root, which is labelled like any
+# other sector.
+_SUNBURST_DATALABEL_MAX_SECTORS = 60
+
+# The two ways an adjacency list can be a CONTRADICTION rather than merely incomplete. Named
+# here so build_options' raise and streamlit_app's warning are literally the same string (the
+# X_IN_Y_GUARD_TYPES "named once so they can't drift" rule).
+_SUNBURST_CYCLE = (
+    "The {parent_col!r} column must describe a tree, but {chain} is a cycle: a node "
+    "cannot be its own ancestor."
+)
+_SUNBURST_AMBIGUOUS = (
+    "The parent label {label!r} names {count} different rows in {x_col!r}, so it points "
+    "at no single node: a label used as a parent must name exactly one."
+)
+# A 10,000-node cycle must not print a 10,000-node message.
+_SUNBURST_CYCLE_PREVIEW = 6
 
 # Highcharts >= 13 expresses its own default colors as CSS custom properties wrapped in
 # `light-dark(...)` — e.g. `--highcharts-background-color: light-dark(#ffffff, #141414)`.
@@ -293,6 +366,15 @@ def _themed(options: dict, *, dark: bool) -> dict:
         waterfall["lineColor"] = t["axis"]
         # The bar hues (up/down/sum) need no flip: like the shared series palette, they
         # read against both backgrounds, and their meaning is fixed (see the constants).
+    if options["chart"].get("type") == "sunburst":
+        # Sector borders default to var(--highcharts-background-color), which the color-scheme
+        # pin holds at WHITE in both themes — so in dark mode every sector is ringed white
+        # (verified by rendering). Dissolve them into the dark background, exactly as pie,
+        # treemap and sankey dissolve their gaps. Nothing else flips: the sector LABELS ride
+        # Highcharts' `contrast`, computed against the fill they sit on rather than the chart
+        # background (the treemap rule, not pie's), and the branch hues and the root's slate
+        # read on both backgrounds like the shared palette.
+        options["plotOptions"]["sunburst"]["borderColor"] = t["bg"]
     return options
 
 
@@ -353,6 +435,72 @@ def _label_ok(value) -> bool:
         return math.isfinite(value)
     except TypeError:
         return True
+
+
+def _sizable(value) -> bool:
+    """True when a value can SIZE AN ARC: plottable, and NON-NEGATIVE.
+
+    ``_plottable`` is not enough for a sunburst, and the gap is not fussiness. Highcharts
+    draws no sector for a negative node AND excludes it from its parent's children-sum, so a
+    negative leaf does not merely fail to appear: it quietly shrinks its parent's arc below
+    the total the CSV plainly states, with nothing on screen saying so. (Verified by
+    rendering: a ``-400`` leaf beside a ``500`` one drew nothing and left its parent sized
+    500, not 100.) That is exactly the failure sankey drops a link for — one that "serializes
+    SILENTLY, as an invisible zero-width one" — and it would break the rule ``count_marks``
+    exists to hold: the KPI would count a mark the chart never draws. An arc has no negative
+    length and a part-of-whole has no negative part, so the row is dropped: pie's and
+    treemap's drop-the-row rule, widened by one comparison.
+
+    ZERO is kept. It is a real measurement ("this team has nobody"), it draws a zero-width
+    sector, and — unlike a negative — it corrupts no ancestor's sum. Pie and treemap keep
+    their zeros for the same reason.
+    """
+    return _plottable(value) and float(value) >= 0
+
+
+def _node_key(value) -> str:
+    """The string a sunburst node label is matched BY — and displayed AS.
+
+    Sunburst is the only type whose two label columns must COMPARE EQUAL to one another: the
+    parent column names a parent BY ITS LABEL, so a bare ``str()`` is a trap rather than a
+    formality. pandas widens any column holding a blank cell to ``float64``, and a blank
+    parent cell is precisely how a top-level branch is spelled — so the most canonical
+    adjacency-list CSV there is::
+
+        node,parent,value
+        1,,
+        2,1,10
+
+    hands us an ``int64`` node column and a ``float64`` parent column. Under ``str()`` those
+    stringify to ``"1"`` and ``"1.0"``, every parent dangles, every row is dropped, and the
+    chart comes out SILENTLY EMPTY. So an integral float is rendered as the integer it is,
+    and the two columns meet.
+
+    This deliberately diverges from ``_category_labels``, which stringifies with a bare
+    ``str()`` — it can afford to, because nothing there has to match anything.
+    """
+    # np.float64 subclasses Python float, so this catches a pandas cell too.
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _is_top_level(parent) -> bool:
+    """True when a sunburst parent cell names NO parent, so its row is a top-level branch.
+
+    Sunburst's parent column is the one place in this module where a MISSING label is not an
+    error but a STATEMENT. Everywhere else ``_label_ok`` returning False means "this names
+    nothing drawable, so drop the row"; here it means "this node hangs off the root".
+
+    A non-finite parent folds into the same answer by the module's own equation (a non-finite
+    value IS a missing one — see ``_plottable``). So does an empty or whitespace-only string,
+    which is what a blank cell becomes in a hand-built frame and in a quoted CSV: read as a
+    LABEL it would match no node, dangle, and drop the row — the silently wrong answer, where
+    "top-level branch" is the visibly right one.
+    """
+    if not _label_ok(parent):
+        return True
+    return isinstance(parent, str) and not parent.strip()
 
 
 def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
@@ -441,6 +589,226 @@ def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
     return box, [float(value) for value in outside]
 
 
+def _cycle_chain(loop: list[str], name_of: dict[str, str]) -> str:
+    """Render a detected cycle as ``'A' → 'B' → 'A'``, truncated so a 10,000-node cycle
+    doesn't print a 10,000-node message. The closing label is always kept, so the loop
+    visibly closes even when the middle is elided."""
+    labels = [repr(name_of[node]) for node in loop]
+    if len(labels) > _SUNBURST_CYCLE_PREVIEW + 1:
+        labels = [*labels[:_SUNBURST_CYCLE_PREVIEW], "...", labels[-1]]
+    return " → ".join(labels)
+
+
+def _sunburst_tree(
+    df: pd.DataFrame, x_col: str, parent_col: str, value_col: str
+) -> tuple[list[dict[str, object]], int, str | None]:
+    """Assemble an adjacency list into a sunburst's node points (the root NOT included).
+
+    Returns ``(points, max_level, None)``, or ``([], _SUNBURST_ROOT_LEVEL, message)`` when the
+    parent column does not describe a tree at all.
+
+    That split is the whole design. Everything that can be wrong with an adjacency list is one
+    of exactly two kinds:
+
+    * MISSING DATA — an undrawable label, an unsizable leaf value, a parent naming no node.
+      Each has a right answer (drop the row), so it comes back as a shorter ``points`` list,
+      exactly as pie and treemap drop their valueless slices and tiles.
+    * A CONTRADICTION — a cycle, or a parent label naming more than one node. Neither has any
+      right drawing at all, so it comes back as a MESSAGE: ``build_options`` raises it and
+      ``streamlit_app`` shows it (through ``explain_tree_error``), from this one place, so the
+      two can't drift.
+
+    Returning that message rather than raising it is what keeps ``count_marks`` TOTAL, and
+    that matters: the app's KPI row runs ABOVE its guards, so a ``count_marks`` that raised on
+    a cyclic CSV would blow the page up with a traceback before the warning explaining it
+    could ever render.
+
+    Shared by ``build_options`` and ``count_marks`` — a stronger form of the can't-drift rule
+    than the other types get. They don't merely reuse the same drop predicates; they reuse the
+    whole computation, so the KPI is ``len(points) + 1`` by construction rather than by
+    agreement.
+    """
+    ids: list[str] = []
+    name_of: dict[str, str] = {}
+    # Any, not object: these hold raw DataFrame cells, which is what every other branch's
+    # `float(value)` / `_plottable(value)` already takes untyped. `object` would make the
+    # float() below a type error rather than the runtime ValueError a text column should get.
+    value_of: dict[str, Any] = {}
+    raw_parent: dict[str, Any] = {}
+    by_key: dict[str, list[str]] = {}
+
+    # A plain zip, NOT a Series mask — so the `.astype(bool)` row-less trap that every other
+    # type's `.map()` filter has to be cast against cannot arise here at all: a row-less frame
+    # is simply an empty loop. (`_label_ok` is re-checked even though build_options already
+    # filtered x_col with it, because count_marks calls this on the RAW frame — the helper has
+    # to stand on its own, and is idempotent either way.)
+    for label, parent, value in zip(
+        df[x_col], df[parent_col], df[value_col], strict=True
+    ):
+        if not _label_ok(label):
+            continue
+        # Ids run over the SURVIVING rows rather than df.index: build_options passes an
+        # already-filtered frame (whose index has gaps) while count_marks passes the raw one,
+        # so a counter is what makes the two produce byte-identical ids.
+        node = f"{_SUNBURST_NODE_ID_PREFIX}{len(ids)}"
+        ids.append(node)
+        name_of[node] = _node_key(label)
+        value_of[node] = value
+        raw_parent[node] = parent
+        by_key.setdefault(_node_key(label), []).append(node)
+
+    # Resolve each row's parent LABEL to a node id.
+    parent_of: dict[
+        str, str | None
+    ] = {}  # id -> parent id, the root, or None (dangling)
+    for node in ids:
+        parent = raw_parent[node]
+        if _is_top_level(parent):
+            parent_of[node] = _SUNBURST_ROOT_ID
+            continue
+        key = _node_key(parent)
+        matches = by_key.get(key)
+        if matches is None:
+            parent_of[node] = None  # dangling — pruned, with its descendants, below
+        elif len(matches) > 1:
+            # A duplicate label is only a contradiction once something POINTS AT it. Two
+            # unreferenced "Other" leaves are two honest sectors (identity is the ROW, as it
+            # is for treemap — synthesized ids are what let them coexist). But a row saying
+            # `parent = "Other"` names no single node, and the alternatives to refusing it are
+            # both silent lies: MERGE the twins (one sector worth a sum nobody asked for) or
+            # PICK one (a subtree confidently grafted onto the wrong branch). Sankey's
+            # contradiction rule — raise, and say which label.
+            return (
+                [],
+                _SUNBURST_ROOT_LEVEL,
+                _SUNBURST_AMBIGUOUS.format(label=key, count=len(matches), x_col=x_col),
+            )
+        else:
+            parent_of[node] = matches[0]  # may be the node ITSELF — a one-node cycle
+
+    # One walk up the parent chain does BOTH jobs: it catches cycles, and where it grounds on
+    # the root it hands back each node's level for free. Iterative, not recursive — a
+    # 50,000-deep chain is valid input and a 50,000-long cycle is reachable input, and
+    # recursion would die on both. O(N): every node is walked once, then settled.
+    walking, dead = 1, 2
+    level: dict[str, int] = {}  # id -> level; ABSENT means unreachable from the root
+    state: dict[str, int] = {}
+    for start in ids:
+        if start in level or state.get(start) == dead:
+            continue
+        path: list[str] = []
+        node: str | None = start
+        while (
+            node is not None
+            and node != _SUNBURST_ROOT_ID
+            and node not in level
+            and state.get(node) != dead
+        ):
+            if state.get(node) == walking:  # stepped back onto THIS path
+                loop = [*path[path.index(node) :], node]
+                return (
+                    [],
+                    _SUNBURST_ROOT_LEVEL,
+                    _SUNBURST_CYCLE.format(
+                        parent_col=parent_col, chain=_cycle_chain(loop, name_of)
+                    ),
+                )
+            state[node] = walking
+            path.append(node)
+            node = parent_of[node]
+        if node == _SUNBURST_ROOT_ID:
+            base: int | None = _SUNBURST_ROOT_LEVEL
+        elif node is None or state.get(node) == dead:
+            base = None  # dangling, or hanging off something that dangles
+        else:
+            base = level[node]  # joined a chain already settled by an earlier walk
+        # Settle the path just walked, nearest-the-root first. A dangling node's descendants
+        # terminate their own walk on a `dead` node and are marked dead in turn, so the
+        # TRANSITIVE drop falls out for free: reachability-from-the-root IS the dangling rule,
+        # stated once. It has to be transitive — an unmatched `parent` is not left alone by
+        # Highcharts, which silently re-parents it to the root, quietly promoting an orphaned
+        # grandchild into ring 1.
+        for depth, walked in enumerate(reversed(path), start=1):
+            if base is None:
+                state[walked] = dead
+            else:
+                level[walked] = base + depth
+
+    # Prune valueless LEAVES, deepest first. A node's children all sit at level + 1, so
+    # descending level is a topological order for a forest: every child is decided before its
+    # parent, with no recursion and no fixed-point loop. One rule — keep(n) = the value can
+    # size an arc, OR something under n survived — and its corollary is not a special case but
+    # the rule itself: a node whose only child was dropped BECOMES a leaf, and then its own
+    # value is what sizes it.
+    kept: dict[str, bool] = {}
+    kept_children: dict[str, list[str]] = {}
+    for node in sorted(level, key=lambda n: level[n], reverse=True):
+        # `_sizable` is evaluated for every node, internal ones included, so a text value
+        # column raises ValueError uniformly (through float() inside _plottable) rather than
+        # raising or not depending on the tree's shape — boxplot's stated contract.
+        keep = _sizable(value_of[node]) or bool(kept_children.get(node))
+        kept[node] = keep
+        parent = parent_of[node]
+        if keep and parent is not None and parent != _SUNBURST_ROOT_ID:
+            kept_children.setdefault(parent, []).append(node)
+
+    points: list[dict[str, object]] = []
+    for node in ids:  # ROW order, not level order
+        if not kept.get(node):
+            continue
+        point: dict[str, object] = {
+            "id": node,
+            "parent": parent_of[node],
+            "name": name_of[node],
+        }
+        if not kept_children.get(node):
+            # Only a LEAF of the DRAWN tree carries a value. An internal node is emitted with
+            # none, and Highcharts sums its children into it. That is not deference, it is the
+            # only honest option: an explicit parent value OVERRIDES the sum, so emitting a
+            # CSV's subtotal row draws a parent whose arc disagrees with the arcs inside it
+            # (verified by rendering — two branches declaring `value = 1` drew as equal halves
+            # while holding 900 and 100). And it would go wrong even when the subtotal is
+            # RIGHT, the moment one child row is dropped: the parent would keep claiming the
+            # full total with a child missing beneath it. Omitting it makes a parent's arc
+            # always equal what is actually drawn under it — the discipline count_marks
+            # enforces on the KPI, applied to the geometry.
+            point["value"] = float(value_of[node])
+        points.append(point)
+    max_level = max(
+        (level[node] for node in ids if kept.get(node)), default=_SUNBURST_ROOT_LEVEL
+    )
+    return points, max_level, None
+
+
+def _sunburst_levels(max_level: int) -> list[dict[str, object]]:
+    """The per-ring ``levels`` array, for a tree of arbitrary depth.
+
+    Ring 1 (level 2) gets no entry: its sectors are seeded with an explicit per-point color
+    instead. Every ring BELOW it needs a ``colorVariation``, or a branch's descendants — which
+    inherit its hue — would be indistinguishable from one another. The sign ALTERNATES because
+    the variation is applied to the parent's already-varied color, so a fixed ``-0.5`` at
+    every ring walks a deep tree down to black.
+
+    ``levelIsConstant`` is left at Highcharts' default (absolute depths). Its own demo sets it
+    ``false``, which is wrong here: with relative levels, drilling into a branch would make
+    that branch level 1 and its children level 2 — and level 2 has no ``colorVariation`` — so
+    every child would render in the parent's exact hue. Absolute levels keep a sector's color
+    identical before and after a traversal, which is the point of turning traversal on.
+    """
+    levels: list[dict[str, object]] = [
+        # dict() copies the module constant so nothing downstream can mutate it (the
+        # _HEATMAP_GRADIENT rule). Without it the root takes an equal share of the radius as
+        # every data ring — on a two-ring tree, half of it: a giant slate disc.
+        {"level": _SUNBURST_ROOT_LEVEL, "levelSize": dict(_SUNBURST_ROOT_SIZE)}
+    ]
+    for index, ring in enumerate(range(_SUNBURST_BRANCH_LEVEL + 1, max_level + 1)):
+        to = -_SUNBURST_COLOR_VARIATION if index % 2 == 0 else _SUNBURST_COLOR_VARIATION
+        levels.append(
+            {"level": ring, "colorVariation": {"key": "brightness", "to": to}}
+        )
+    return levels
+
+
 def _category_labels(df: pd.DataFrame, x_col: str) -> list[str]:
     """Coerce an x column to string category *labels* (Highcharts categories are
     labels, not values). Shared by the scatter/bubble non-numeric-x, heatmap, and
@@ -496,6 +864,7 @@ def build_options(
     dark: bool = False,
     size_col: str | None = None,
     target_col: str | None = None,
+    parent_col: str | None = None,
 ) -> dict:
     """Return a Highcharts options ``dict`` for the given DataFrame and columns.
 
@@ -548,19 +917,32 @@ def build_options(
       deltas — it is what makes the chart a bridge rather than a row of floating bars.
       Bars are colored by MEANING (rise/fall/total), not identity. Shares bubble's,
       radar's and boxplot's ``highcharts-more`` module.
+    - ``sunburst``: a hierarchy drawn as concentric rings. The only type that reads the
+      frame as an ADJACENCY LIST: each row is one node, named by ``x_col``, placed under
+      the node named in ``parent_col`` (a blank parent means a top-level branch), and — if
+      it is a LEAF — sized by the first ``y_cols`` column. An internal node carries no
+      value: its arc is the SUM of its children's, computed by Highcharts. A closing root
+      is APPENDED (as waterfall appends its total), so the centre reads the whole. A row
+      whose parent names no node is dropped with its descendants, like pie's valueless
+      slices; a cycle or an ambiguous parent label is a contradiction and raises. Pulls in
+      the ``modules/sunburst`` module.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
     tooltip) for dark mode; the series palette itself is shared across modes.
     ``size_col`` names the marker-size column and is required for ``bubble``;
     ``target_col`` names the destination-node column and is required for
-    ``sankey``. Each is ignored by the other types.
+    ``sankey``; ``parent_col`` names the parent-label column and is required for
+    ``sunburst``. Each is ignored by the other types.
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
     a ``bubble`` chart with no ``size_col``, a ``sankey`` chart with no
-    ``target_col`` or whose ``target_col`` is its ``x_col``, or (for the
-    category-axis types — cartesian, radar, heatmap, boxplot, and waterfall) an
-    ``x_col`` that is also one of the ``y_cols``.
+    ``target_col`` or whose ``target_col`` is its ``x_col``, a ``sunburst`` chart
+    with no ``parent_col``, whose ``parent_col`` is its ``x_col``, or whose parent
+    column does not describe a tree (a cycle, or a parent label naming more than one
+    node — see ``explain_tree_error``), or (for the category-axis types — cartesian,
+    radar, heatmap, boxplot, and waterfall) an ``x_col`` that is also one of the
+    ``y_cols``.
     """
     if chart_type not in SUPPORTED_TYPES:
         raise ValueError(
@@ -578,6 +960,16 @@ def build_options(
         # either — odd, but it still renders, as scatter's x-in-y does.)
         raise ValueError(
             f"x_col {x_col!r} cannot also be the target column for a sankey chart"
+        )
+    if chart_type in SUNBURST_TYPES and not parent_col:
+        raise ValueError("A sunburst chart requires a parent column via parent_col.")
+    if chart_type in SUNBURST_TYPES and x_col == parent_col:
+        # Every row would name itself as its own parent — a one-node cycle in every node. The
+        # tree walk WOULD catch it, but only once there are rows, and with a mystifying
+        # "'Jan' → 'Jan' is a cycle" when the real fault is that one column was picked twice.
+        # Sankey's source-is-target argument: a column can't be both ends of the relation.
+        raise ValueError(
+            f"x_col {x_col!r} cannot also be the parent column for a sunburst chart"
         )
     if chart_type in X_IN_Y_GUARD_TYPES and x_col in y_cols:
         raise ValueError(
@@ -1088,6 +1480,99 @@ def build_options(
             dark=dark,
         )
 
+    if chart_type in SUNBURST_TYPES:  # a hierarchy drawn as concentric rings
+        assert parent_col is not None  # guarded above for sunburst
+        value_col = y_cols[0]
+        points, max_level, problem = _sunburst_tree(df, x_col, parent_col, value_col)
+        if problem:
+            # The tree's own contradictions (a cycle, an ambiguous parent label). Raised from
+            # the message _sunburst_tree returns rather than one composed here, so this and the
+            # app's warning (explain_tree_error) are literally the same string.
+            raise ValueError(problem)
+
+        # Seed RING 1 — the top-level branches — with the categorical palette in
+        # first-appearance order. Every deeper sector then INHERITS its branch's hue for free
+        # (verified by rendering) and is separated from its siblings by the levels'
+        # colorVariation, which is what makes a whole branch read as one thing.
+        #
+        # Seeded per POINT because both of the obvious alternatives are traps. The canonical
+        # Highcharts recipe — `levels[].colorByPoint` — is accepted by Chart.from_options and
+        # then silently DROPPED from the emitted JS (the treemap "value not y" / sankey
+        # nodeFormat trap). And the `colorByPoint` that DOES survive is the series-wide one,
+        # which is the wrong option entirely: it hands every point in the flat data array its
+        # own palette hue, deep descendants included, destroying the very inheritance the
+        # scheme rests on. So sunburst sets no colorByPoint at all.
+        #
+        # Read from `colors` (not DEFAULT_COLORS): a branch's hue is its arbitrary IDENTITY,
+        # like a pie slice's, so a caller may override it — the opposite of waterfall, whose
+        # red-means-loss is semantics. `%` cycles a short custom palette rather than
+        # IndexError-ing (the _BOXPLOT_OUTLIER_COLOR concern), and `or` keeps an empty one from
+        # a ZeroDivisionError.
+        palette = colors or list(DEFAULT_COLORS)
+        branch = 0
+        for point in points:
+            if point["parent"] == _SUNBURST_ROOT_ID:
+                point["color"] = palette[branch % len(palette)]
+                branch += 1
+        if points:
+            # The synthesized root, APPENDED — waterfall's Total set the precedent for drawing
+            # a mark the frame never held, and appending keeps the real nodes at their row
+            # positions. It carries no `parent` (a parentless point IS a root to Highcharts)
+            # and no `value` (Highcharts sums its children, so the centre reads a total that is
+            # computed rather than asserted). Only when there IS something to crown: a lone
+            # slate disc labelled "All" is not a chart — waterfall's no-lone-Total restraint,
+            # and boxplot's in omitting an empty outlier series.
+            points.append(
+                {
+                    "id": _SUNBURST_ROOT_ID,
+                    "name": _SUNBURST_ROOT_LABEL,
+                    "color": _SUNBURST_ROOT_COLOR,
+                }
+            )
+
+        sunburst_opts: dict[str, object] = {
+            "allowTraversingTree": True,  # click a sector to re-root the chart on it
+            "cursor": "pointer",  # ...so it looks clickable (pie's rule)
+            "levels": _sunburst_levels(max_level),
+            # The one type that does NOT print its value in the mark, and the geometry is why.
+            # A sunburst sector is a thin CURVED arc with the text bent along it
+            # (rotationMode), so there is room for one short string, not two — and the name is
+            # the only thing that identifies a sector at all, since a sunburst has neither axis
+            # nor legend, while the value is already encoded as the sector's ANGLE. So the name
+            # takes the line and the value lives in the tooltip. Unlike heatmap's and column's,
+            # a sunburst's dataLabels default to ON, so past the gate they must be turned off
+            # EXPLICITLY: omitting the key (heatmap's and sankey's style) would be a gate that
+            # did nothing.
+            "dataLabels": (
+                _in_mark_labels("{point.name}", rotationMode="circular")
+                if len(points) <= _SUNBURST_DATALABEL_MAX_SECTORS
+                else {"enabled": False}
+            ),
+        }
+        return _themed(
+            {
+                "chart": {"type": "sunburst"},
+                # Genuinely used, not carried for consistency: ring 1 seeds from it (pie's and
+                # treemap's categorical use, not heatmap's).
+                "colors": colors,
+                "title": {"text": title},
+                # {point.name}, not waterfall's {point.category}: a sunburst's points are NAMED
+                # dicts rather than positional ones. On the appended root {point.value} is the
+                # grand total Highcharts summed, which is exactly what it should read.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": "{point.name}: <b>{point.value}</b>",
+                },
+                # Every sector is labelled on the chart, so a legend naming the single value
+                # column would say nothing (treemap's, sankey's, boxplot's and waterfall's
+                # reasoning).
+                "legend": {"enabled": False},
+                "plotOptions": {"sunburst": sunburst_opts},
+                "series": [{"name": value_col, "data": points}],
+            },
+            dark=dark,
+        )
+
     # cartesian (line/spline/area/areaspline/column/bar) and radar share the same
     # category-x data shape: x_col labels the axis and each y column is a series.
     categories = _category_labels(df, x_col)
@@ -1133,6 +1618,23 @@ def build_options(
     )
 
 
+def explain_tree_error(
+    df: pd.DataFrame, x_col: str, parent_col: str, value_col: str
+) -> str | None:
+    """``None`` when a sunburst's parent column describes a tree; otherwise the reason it
+    doesn't — the very message ``build_options`` raises.
+
+    The app renders this as a warning and stops, so the two can never say different things
+    (the ``X_IN_Y_GUARD_TYPES`` named-once rule, and the ``explain_export_failure`` precedent:
+    the builder owns the relationship, so the builder owns the diagnosis).
+
+    Needed because the interactive path does NOT catch builder errors. Nothing the UI can
+    select makes any other type raise, and sunburst's tree guards — the one failure a user can
+    reach just by uploading a CSV — have to keep that true.
+    """
+    return _sunburst_tree(df, x_col, parent_col, value_col)[2]
+
+
 def count_marks(
     df: pd.DataFrame,
     chart_type: str,
@@ -1140,23 +1642,49 @@ def count_marks(
     y_cols: list[str],
     *,
     target_col: str | None = None,
+    parent_col: str | None = None,
 ) -> int:
     """The number of marks ``build_options`` will draw, for the app's count-adaptive KPI
     (a heatmap's cells, a treemap's tiles, a sankey's flows, a boxplot's boxes, a
-    waterfall's steps).
+    waterfall's steps, a sunburst's sectors).
 
     Defined here, beside ``build_options`` and reusing its very ``_label_ok`` / ``_plottable``
     predicates, so the KPI number can never drift from what the chart actually renders — the
     reason the drop rules live in this module at all. Reads only the columns each type needs,
     so it stays correct above ``streamlit_app``'s empty-``y_cols`` guard (heatmap returns 0
-    without touching ``y_cols[0]``; the other three use single-value controls that guarantee
-    one y column). A row whose label is not drawable is dropped in every type (the uniform
+    without touching ``y_cols[0]``; every other count-adaptive type uses a single-value Y
+    control, which guarantees one y column). A row whose label is not drawable is dropped in
+    every type (the uniform
     label policy); for treemap/sankey a non-plottable value/weight drops it too, while a
     heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``), a boxplot
     keeps one box per distinct drawable label (an all-missing group included), and a
     waterfall keeps one bar per drawable label (a missing delta included, as an
-    ``EnforcedNull``) plus its appended total.
+    ``EnforcedNull``) plus its appended total. A sunburst is the one type whose count is not a
+    row filter at all — see its branch, which reuses the whole tree build rather than the
+    predicates — and, like waterfall's, its count exceeds its drawable row count, by the
+    appended root.
     """
+    if chart_type in SUNBURST_TYPES:
+        # Sunburst's drops are not a per-row mask, so this branch sits ABOVE the shared one
+        # below and reuses no predicate. A node's fate depends on its ANCESTORS (a dangling
+        # parent, a cycle) and on its DESCENDANTS (a valueless internal node lives only if a
+        # leaf under it does), so instead of reusing the drop predicates it reuses the whole
+        # tree build — the same _sunburst_tree the chart is drawn from. That is the strongest
+        # form of the can't-drift rule in this module: the count is len(series[0]["data"]) by
+        # construction. It also means this branch touches no `.map()` mask, so the row-less
+        # `.astype(bool)` trap cannot arise in it (see _sunburst_tree).
+        assert parent_col is not None  # the app only counts what it can also build
+        points, _max_level, problem = _sunburst_tree(df, x_col, parent_col, y_cols[0])
+        # A contradictory tree draws nothing — build_options raises, and the app warns and
+        # stops — so it counts nothing. And this must NOT raise: count_marks runs ABOVE the
+        # app's guards, so a raise here would blow the page up with a traceback before the
+        # warning that explains it could render. The KPI reads 0 over the empty chart, the same
+        # useful empty state "Series plotted" gives before the empty-selection guard fires.
+        if problem or not points:
+            return 0
+        # Plus the appended root, a drawn sector like any other — waterfall's appended-total
+        # rule, and the second type whose count exceeds its row count.
+        return len(points) + 1
     # `.astype(bool)` on all three masks, the same cast — and for the same reason —
     # `build_options`' label filter makes. On a ROW-LESS frame `.map()` has no values to infer
     # a result dtype from, so it hands back an empty NON-boolean Series (object, or `str` for
@@ -1198,6 +1726,7 @@ def make_chart(
     dark: bool = False,
     size_col: str | None = None,
     target_col: str | None = None,
+    parent_col: str | None = None,
 ) -> Chart:
     """Build and return a highcharts-core ``Chart`` for the given columns."""
     options = build_options(
@@ -1209,6 +1738,7 @@ def make_chart(
         dark=dark,
         size_col=size_col,
         target_col=target_col,
+        parent_col=parent_col,
     )
     chart = Chart.from_options(options)
     chart.container = container_id
@@ -1227,6 +1757,7 @@ def build_chart_html(
     dark: bool = False,
     size_col: str | None = None,
     target_col: str | None = None,
+    parent_col: str | None = None,
 ) -> str:
     """Build a full, self-contained HTML document that renders the chart.
 
@@ -1249,6 +1780,7 @@ def build_chart_html(
         dark=dark,
         size_col=size_col,
         target_col=target_col,
+        parent_col=parent_col,
     )
 
     script_tags = chart.get_script_tags(as_str=True)
@@ -1285,6 +1817,7 @@ def build_chart_png(
     dark: bool = False,
     size_col: str | None = None,
     target_col: str | None = None,
+    parent_col: str | None = None,
 ) -> bytes:
     """Render the chart to PNG bytes via the Highcharts export server.
 
@@ -1304,6 +1837,7 @@ def build_chart_png(
         dark=dark,
         size_col=size_col,
         target_col=target_col,
+        parent_col=parent_col,
     )
     if height is not None:
         # highcharts-core types `options` and `options.chart` as Optional, but

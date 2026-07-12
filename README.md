@@ -55,7 +55,8 @@ light/dark theme, which you can toggle from the settings menu.
   keeps its palette color.
 - An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
   metric — series plotted, or cells for a heatmap, tiles for a treemap, flows
-  for a sankey, boxes for a boxplot, and steps for a waterfall) above
+  for a sankey, boxes for a boxplot, steps for a waterfall, and sectors for a
+  sunburst) above
   the chart
   — with the chart type shown as a badge above the chart rather than a metric in
   the row — a side-by-side source-data preview, and a toggle that reveals the
@@ -71,10 +72,14 @@ light/dark theme, which you can toggle from the settings menu.
   whose width is a value column), `boxplot` (per-category distributions: a
   category column whose values repeat, one row per observation, plus a column of
   raw measurements — each category becomes a Tukey box, with outliers as dots),
-  and `waterfall` (a cumulative bridge: a step-label column plus a column of
+  `waterfall` (a cumulative bridge: a step-label column plus a column of
   signed *deltas*, so each bar floats where the last one ended, showing how a
   starting value becomes an ending one — rises green, falls red, and a closing
-  **Total** bar added for you).
+  **Total** bar added for you), and `sunburst` (a hierarchy as concentric rings:
+  one row per node, a **Parent** column naming each node's parent — blank means a
+  top-level branch — and a column of *leaf* values. A parent's arc is the **sum** of
+  its children's, so a node with children needs no value of its own; a centre
+  sector is added for you; and clicking a sector zooms into that branch).
 
 ## Files
 
@@ -106,13 +111,17 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
   colorAxis value matrix, treemap's value-sized tiles, sankey's node-link flows,
   boxplot's aggregated Tukey distributions (including the `iqr == 0` degeneracies
   and the `fillColor` silent drop), waterfall's appended `isSum` total and its
-  semantic up/down/total bar colors,
+  semantic up/down/total bar colors, sunburst's assembled hierarchy (synthesized
+  node ids, so two leaves named the same stay two sectors rather than colliding;
+  valueless internal nodes, so Highcharts' sum is authoritative; a dropped dangling
+  parent vs. a raised cycle; and the appended root),
   the brand palette, the
   light/dark theming including the dark-mode tooltip and the heatmap colorAxis, and
   the validation guards — plus an end-to-end pass driving every supported type
   through the real `Chart.from_options` → `to_js_literal` pipeline) and the sample
   datasets, plus a headless `AppTest` pass that drives the full app (switching
-  controls including the bubble Size (Z) and sankey Target (to) selectors, radar,
+  controls including the bubble Size (Z), sankey Target (to) and sunburst Parent
+  selectors, radar,
   heatmap, treemap, boxplot, and waterfall, the
   config toggle, the KPI row, the wide-CSV `st.multiselect` fallback, both render
   modes, and the guard messages).

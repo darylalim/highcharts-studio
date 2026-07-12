@@ -24,6 +24,7 @@ from highcharts_builder import (
     build_chart_png,
     count_marks,
     explain_export_failure,
+    explain_tree_error,
     make_chart,
 )
 from sample_data import SAMPLES
@@ -58,6 +59,7 @@ MARK_METRICS = {
     "sankey": "Flows",
     "boxplot": "Boxes",
     "waterfall": "Steps",  # counts the appended Total, as the chart draws it
+    "sunburst": "Sectors",  # likewise counts the appended root — the other appending type
 }
 
 st.set_page_config(
@@ -79,7 +81,7 @@ def load_csv(file) -> pd.DataFrame:
 
 @st.cache_data(show_spinner="Rendering Highcharts…", max_entries=128)
 def cached_chart_html(
-    df, chart_type, x_col, y_cols, height, title, dark, size_col, target_col
+    df, chart_type, x_col, y_cols, height, title, dark, size_col, target_col, parent_col
 ) -> str:
     return build_chart_html(
         df,
@@ -91,6 +93,7 @@ def cached_chart_html(
         dark=dark,
         size_col=size_col,
         target_col=target_col,
+        parent_col=parent_col,
     )
 
 
@@ -98,7 +101,7 @@ def cached_chart_html(
     show_spinner="Rendering PNG via the Highcharts export server…", max_entries=64
 )
 def cached_chart_png(
-    df, chart_type, x_col, y_cols, height, title, dark, size_col, target_col
+    df, chart_type, x_col, y_cols, height, title, dark, size_col, target_col, parent_col
 ) -> bytes:
     return build_chart_png(
         df,
@@ -110,12 +113,13 @@ def cached_chart_png(
         dark=dark,
         size_col=size_col,
         target_col=target_col,
+        parent_col=parent_col,
     )
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
 def cached_chart_js(
-    df, chart_type, x_col, y_cols, title, dark, size_col, target_col
+    df, chart_type, x_col, y_cols, title, dark, size_col, target_col, parent_col
 ) -> str:
     # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
     # literal string for a built chart.
@@ -128,6 +132,7 @@ def cached_chart_js(
         dark=dark,
         size_col=size_col,
         target_col=target_col,
+        parent_col=parent_col,
     ).to_js_literal()
 
 
@@ -201,6 +206,11 @@ with st.sidebar:
             "*deltas* (not levels); each bar floats where the last one ended, showing "
             "how a starting value becomes an ending one, and a closing **Total** bar is "
             "added for you\n"
+            "- **sunburst** — a hierarchy, one row per node: a Node column, a **Parent** "
+            "column naming that node's parent (blank = a top-level branch), and one "
+            "numeric column of *leaf* values. Each ring is a level, and a parent's arc is "
+            "the **sum** of its children — so a node with children needs no value of its "
+            "own. Every node needs its own row, and click a sector to zoom into it\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -228,6 +238,12 @@ with st.sidebar:
         # levels here (revenue per month, say) is the one way to get a plausible-looking but
         # meaningless bridge, and nothing downstream can detect it.
         x_label, y_label, multi = "Step labels", "Step values (signed delta)", False
+    elif chart_type == "sunburst":
+        # An ADJACENCY LIST: each row is one node, named by X, placed under the node named in
+        # the Parent selectbox below, and — if it is a LEAF — sized by one numeric column. A
+        # node with children needs no value of its own: its arc is the sum of theirs, which is
+        # why the label says "leaf". Single-select Y like pie/treemap/sankey/boxplot/waterfall.
+        x_label, y_label, multi = "Node labels", "Leaf values", False
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     elif chart_type == "heatmap":
@@ -256,6 +272,26 @@ with st.sidebar:
     if chart_type == "sankey":
         target_col = st.selectbox(
             "Target (to)", df.columns, index=min(1, len(df.columns) - 1)
+        )
+
+    # Sunburst's second label column, sitting next to Node for the same reason sankey's Target
+    # sits next to Source: the two name the ends of one relation. Drawn from every column, not
+    # numeric_cols — a parent is a LABEL. The index is a CONSTANT, exactly as sankey's is:
+    # these widgets are keyless, so Streamlit folds `index` into their identity, and the
+    # tempting "the column after Node" default would re-mint this widget and silently reset the
+    # user's Parent every time they changed Node. Node == Parent is caught by the guard in the
+    # main panel, and the tree's own contradictions by the one below it.
+    parent_col = None
+    if chart_type == "sunburst":
+        parent_col = st.selectbox(
+            "Parent (blank = top level)",
+            df.columns,
+            index=min(1, len(df.columns) - 1),
+            help=(
+                "Each row's parent **node label** — a value from the Node column. A blank "
+                "cell means the node is a top-level branch. A node that has children needs "
+                "no value: its arc is the sum of theirs."
+            ),
         )
 
     if multi:
@@ -336,8 +372,20 @@ with st.container(horizontal=True):
     # DRAWABLE step count by one — not necessarily its row count, since an undrawable label
     # drops its step). count_marks reads only the columns each type needs, so it works here
     # above the empty-y guard, as these metrics always have. See MARK_METRICS.
-    if chart_type in MARK_METRICS:
-        marks = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
+    # Sunburst is the one type whose count_marks needs a column the user could have set to
+    # x_col — and, unlike sankey's, its count RESOLVES THE HIERARCHY, so Node == Parent is a
+    # self-cycle in every row. count_marks itself is total (it returns 0 on a contradictory
+    # tree rather than raising, precisely so this row can't blow up), but build_options DOES
+    # raise on that selection, so the guard below is what the user must reach — and this metric
+    # must not pretend to a number. It falls through to "Series plotted", the same useful empty
+    # state an unselected Y already shows before its own guard fires.
+    countable = chart_type in MARK_METRICS and not (
+        chart_type == "sunburst" and x_col == parent_col
+    )
+    if countable:
+        marks = count_marks(
+            df, chart_type, x_col, y_cols, target_col=target_col, parent_col=parent_col
+        )
         st.metric(MARK_METRICS[chart_type], f"{marks:,}", border=True)
     else:
         st.metric("Series plotted", len(y_cols), border=True)
@@ -386,6 +434,26 @@ with left.container(border=True, height="stretch"):
             icon=":material/warning:",
         )
         st.stop()
+    # Sunburst's own collision, sankey's one relation over: a node and its parent. Like
+    # sankey's, it isn't the x-in-y rule — the Parent column isn't among the Y series at all.
+    if chart_type == "sunburst" and x_col == parent_col:
+        st.warning(
+            "Node and Parent must be different columns — every node would be its own "
+            "parent.",
+            icon=":material/warning:",
+        )
+        st.stop()
+    # And the tree's own contradictions: a cycle, or a parent label naming more than one node.
+    # Neither is missing data (that is dropped, silently and correctly) and neither has any
+    # right drawing, so build_options RAISES on them — and this is the one builder error a user
+    # can reach just by uploading a CSV. The interactive path doesn't catch, so it has to be
+    # stopped here. The message comes from the builder (explain_tree_error), so this warning
+    # cannot drift from the exception it stands in for.
+    if chart_type == "sunburst" and parent_col is not None:
+        problem = explain_tree_error(df, x_col, parent_col, y_cols[0])
+        if problem:
+            st.warning(problem, icon=":material/warning:")
+            st.stop()
 
     badge_label, badge_icon, badge_color = MODE_BADGES[render_mode]
     with st.container(horizontal=True):
@@ -417,6 +485,7 @@ with left.container(border=True, height="stretch"):
                 dark,
                 size_col,
                 target_col,
+                parent_col,
             )
         except Exception as exc:  # build error or export-server failure
             # The three causes need three different answers, and the builder owns the
@@ -451,6 +520,7 @@ with left.container(border=True, height="stretch"):
             dark,
             size_col,
             target_col,
+            parent_col,
         )
         # The HTML is embedded in a sandboxed iframe with a FIXED height — it
         # does not auto-grow to its content, so size it to the chart.
@@ -470,6 +540,14 @@ with left.container(border=True, height="stretch"):
     # the config both cheap and observable to the headless tests.
     if st.toggle(":material/code: Show the generated Highcharts config (JavaScript)"):
         chart_js = cached_chart_js(
-            df, chart_type, x_col, tuple(y_cols), title, dark, size_col, target_col
+            df,
+            chart_type,
+            x_col,
+            tuple(y_cols),
+            title,
+            dark,
+            size_col,
+            target_col,
+            parent_col,
         )
         st.code(chart_js, language="javascript")

@@ -10,15 +10,17 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
-  `st.multiselect` on wide CSVs, plus the two type-specific extra column
-  selectors — Size (Z) for bubble, Target (to) for sankey),
+  `st.multiselect` on wide CSVs, plus the three type-specific extra column
+  selectors — Size (Z) for bubble, Target (to) for sankey, Parent for sunburst),
   caching, a KPI metric row (its third metric adapts to the chart type — series
   plotted, or, for the one-series types, the mark count from the builder's
   `count_marks`: cells for a heatmap, tiles for a treemap, flows for a sankey,
-  boxes for a boxplot, steps for a waterfall — sourced there rather than recomputed
-  here so it can't drift from what the chart draws; waterfall's is the one that
-  *exceeds* its drawable step count, by one, since the total bar is appended by the
-  builder — not necessarily its row count, since an undrawable label drops its step;
+  boxes for a boxplot, steps for a waterfall, sectors for a sunburst — sourced there
+  rather than recomputed
+  here so it can't drift from what the chart draws; waterfall's and sunburst's are the
+  two that *exceed* their drawable mark count, by one, since each appends a mark the
+  frame never held (a total bar, a root sector) — not necessarily their row count,
+  since an undrawable label drops its row;
   membership of the `MARK_METRICS` dict is what makes a type count-adaptive, so the
   KPI stays one branch however many such types there are), the
   render-mode
@@ -30,21 +32,31 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   plus `explain_export_failure()`, which turns a failed PNG export into a message
   naming the actual cause (it owns the export-server relationship, so it owns the
   diagnosis; duck-typed on `exc.response.status_code` rather than importing
-  `requests`, which this project never declares), and `count_marks()`, which
+  `requests`, which this project never declares), `explain_tree_error()`, its sunburst
+  counterpart — the builder owns the hierarchy, so it owns the diagnosis — which returns
+  the very message `build_options` raises for a malformed tree, so the app's warning and
+  the exception it stands in for cannot drift apart (needed because the interactive path
+  does *not* catch builder errors, and a cyclic CSV is the one such error a user can reach
+  just by uploading a file), and `count_marks()`, which
   returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
-  tiles, a sankey's flows, a boxplot's boxes, a waterfall's steps) for the app's KPI
+  tiles, a sankey's flows, a boxplot's boxes, a waterfall's steps, a sunburst's sectors)
+  for the app's KPI
   row — reusing the same `_label_ok`/`_plottable` drop predicates so the count can't
-  drift from the chart. Independently importable and unit-testable.
+  drift from the chart (sunburst goes further and reuses the whole `_sunburst_tree` build,
+  since its drops are not a per-row mask at all: a node's fate depends on its *ancestors*
+  and its *descendants*). Independently importable and unit-testable.
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter/bubble edge cases, radar's polar-line shape, heatmap's colorAxis
   value matrix, treemap's value-sized tiles, sankey's node-link flows, boxplot's
   aggregated Tukey distributions, waterfall's appended total and semantic bar
-  colors, the brand
+  colors, sunburst's assembled hierarchy (synthesized ids, valueless internal nodes,
+  the dropped dangling parent vs. the raised cycle, and the appended root), the brand
   palette, the validation
   guards including bubble's required size column, sankey's required and distinct
-  target column, and the heatmap/boxplot/waterfall x-in-y rule, and
+  target column, sunburst's required and distinct parent column, and the
+  heatmap/boxplot/waterfall x-in-y rule, and
   an end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
   interaction tests.
@@ -107,10 +119,13 @@ chart chrome (background/text/axes/gridlines/tooltip) for dark mode; the app
 derives it from `st.context.theme.type` and threads it through the cached
 renderers. Bubble charts also take a `size_col=` naming the numeric column that
 drives each marker's area (required for `bubble`, raising `ValueError` if
-omitted; ignored by the other types), threaded through the same renderers, and
+omitted; ignored by the other types), threaded through the same renderers,
 sankey charts a `target_col=` naming the destination-node column (required for
 `sankey`, and raising `ValueError` if omitted or equal to `x_col`; likewise
-ignored by the other types), threaded the same way.
+ignored by the other types), threaded the same way, and sunburst charts a
+`parent_col=` naming the parent-label column (required for `sunburst`, raising
+`ValueError` if omitted or equal to `x_col` — and, unlike the other two, also raising
+when the column it names does not describe a *tree*: see `explain_tree_error`).
 
 Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
 `pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension),
@@ -194,7 +209,92 @@ shell becomes a muddy grey ring one shade off the dark background, and buys noth
 waterfall's bars never touch), so it is dissolved into the background as pie/treemap/sankey
 dissolve their gaps. `lineColor`: the *connector* lines — the only line Highcharts draws
 *between* marks, and what makes the chart read as a running total at all — survive on the
-dark background only barely, so they are lifted to the axis color).
+dark background only barely, so they are lifted to the axis color), and `sunburst` (a
+hierarchy drawn as concentric rings — the only type that reads the frame as an **adjacency
+list**: each row is one node, named by `x_col`, placed under the node named in `parent_col`
+(a blank/missing/whitespace parent means a top-level branch — the one place in the module
+where a missing label is a *statement* rather than an error), and, *if it is a leaf*, sized
+by the first `y_cols` column. So it is also the only type whose marks are not in the data:
+the tree has to be **assembled** before anything can be drawn, which is what `_sunburst_tree`
+does — and, since a node's fate depends on its *ancestors* (a dangling parent, a cycle) and
+on its *descendants* (a valueless internal node lives only if a leaf under it does), it is the
+one type whose drops are not a per-row mask at all. `count_marks` therefore reuses not the
+drop predicates but the *whole build*, which is a stronger form of the can't-drift rule than
+any other type gets: the KPI is `len(series[0]["data"])` by construction.
+
+Node ids are **synthesized** (`n0`, `n1`, …), never taken from the labels. A label is not a
+key: two rows may legitimately share one — an `Other` bucket under both Sales and Marketing —
+and label-as-id would hand Highcharts two points with the same `id`, which is not a silent
+mismatch but **error #31, "Non-unique point or node id"**, printed in a red band across the
+chart (verified by rendering). Synthesizing makes that unreachable: CSV text lands only in
+`name`, so nothing in a hostile file can collide with anything, and the twins stay two honest
+sectors rather than merging into one worth a sum nobody asked for. The label-keyed shape's one
+real cost is then paid exactly once, and only where it is genuinely unpayable — a duplicate
+label that is *used* as a parent names no single node, and the alternatives (merge them, or
+pick one and graft a subtree onto the wrong branch) are both silent lies.
+
+That is the type's organizing split, and it is `_sunburst_tree`'s whole design: everything
+wrong with an adjacency list is either **missing data**, which has a right answer and is
+*dropped* — a dangling parent (with its descendants, transitively: Highcharts does not leave an
+unmatched parent alone, it silently *re-parents* the child to the root, promoting an orphaned
+grandchild into ring 1 and lying about the data), or a leaf value that can't size an arc — or a
+**contradiction**, which has no right drawing and *raises*: a cycle, an ambiguous parent. The
+two are told apart by one iterative walk up the parent chain (iterative because a 50,000-deep
+chain is valid input and a 50,000-long cycle is reachable input) that simultaneously grounds
+each node, drops the unreachable, and raises on a loop. Order is moot, and provably so: no node
+in a cycle can ever be dangling, so dropping a dangling row can never break one. The
+contradiction comes back as a **returned message**, not a raised one — that is what keeps
+`count_marks` *total*, and it matters, because the app's KPI row runs *above* its guards, so a
+`count_marks` that raised on a cyclic CSV would blow the page up with a traceback before the
+warning explaining it could render.
+
+`_sizable` is `_plottable` widened by one comparison, and it is the type's own predicate for a
+reason: Highcharts draws no sector for a **negative** leaf *and* excludes it from its parent's
+sum (verified by rendering — a `-400` leaf beside a `500` one drew nothing and left its parent
+sized 500, not 100), so keeping the row would make the KPI count a mark the chart never draws.
+An arc has no negative length and a part-of-whole has no negative part, so the row is dropped —
+pie's and treemap's rule. Zero is *kept*: a real measurement, a zero-width sector, and it
+corrupts no sum.
+
+An internal node carries **no value**, and this is not deference to Highcharts but the only
+honest option: an explicit parent value *overrides* the children-sum, so emitting a CSV's
+subtotal row draws a parent whose arc disagrees with the arcs inside it (verified by rendering —
+two branches each declaring `value = 1` drew as equal halves while holding 900 and 100). It
+would go wrong even when the subtotal is *right*, the moment one child row is dropped: the
+parent would keep claiming the full total with a child missing beneath it. Omitting it makes a
+parent's arc always equal what is actually drawn under it — the discipline `count_marks`
+enforces on the KPI, applied to the geometry. Its corollary is not a special case but the rule
+itself (`keep(n) = the value can size an arc, OR something under n survived`): a node whose only
+child was dropped *becomes* a leaf, and then its own value is what sizes it.
+
+A **root** sector is **appended** — waterfall's Total set the precedent for drawing a mark the
+frame never held, and this is the second such type, so its count likewise exceeds its row count.
+It carries no value (internal by construction, so the centre reads a total Highcharts computes
+rather than one the builder asserts) and a color taken **off the categorical scale entirely** —
+waterfall's Total argument, transposed and sharper: ring 1 *cycles* the palette, so no palette
+entry is guaranteed not to be some branch's hue, and the only way to say "this is not a
+category, it is the whole" is a neutral from outside it. (Left unset, Highcharts paints it one
+of its own defaults — a cyan in no palette of ours.) It is appended only when at least one node
+survives: a lone slate disc labelled `All` is not a chart.
+
+Ring 1 is seeded with a per-**point** `color` from the *overridable* `colors` list — a branch's
+hue is its arbitrary identity, like a pie slice's, the opposite of waterfall's semantic
+red-means-loss — and every descendant then **inherits** its branch's hue for free, separated
+from its siblings by a `levels[].colorVariation` whose sign *alternates* per ring (the variation
+applies to the parent's already-varied color, so a fixed `-0.5` walks a deep tree to black). It
+has to be seeded per point, because *both* obvious alternatives are traps: the canonical
+Highcharts recipe, `levels[].colorByPoint`, is accepted by `Chart.from_options` and then
+**silently dropped** (sankey's `nodeFormat` / boxplot's `fillColor` / treemap's `value`-not-`y`
+again), while the `colorByPoint` that *does* survive is the series-wide one, which would hand
+every point in the flat data array its own hue — deep descendants included — destroying the very
+inheritance the scheme rests on. It labels each sector with its **name only** — the one type
+that breaks the print-the-value-in-the-mark rule the other five keep — because a sector is a
+thin *curved* arc with the text bent along it, so there is room for one short string, and the
+name is the only thing identifying a sector (a sunburst has neither axis nor legend) while the
+value is already the *angle*. `allowTraversingTree` makes a click re-root the chart on that
+branch. It needs **one** `_themed` hook — `borderColor`, the white sector rings that pie,
+treemap and sankey each dissolve — and pulls in `modules/sunburst`, and, unlike
+bubble/radar/boxplot/waterfall, *not* `highcharts-more`).
 
 ## Run
 
@@ -255,28 +355,53 @@ an `EnforcedNull` rather than dropping its row; the in-bar value labels and thei
 step-count gate on both sides of the boundary; the `{point.category}` tooltip token,
 since the positional points would render `{point.name}` blank; and the two dark-mode
 hooks, bar borders *and* connector lines),
+sunburst's assembled hierarchy (the synthesized ids — pinned by two leaves both named
+`Other`, which must stay two sectors worth 100 and 40 rather than merging into one worth
+140, the exact corruption label-as-id causes and which Highcharts rejects outright as
+error #31; the invariant that every drawn leaf carries a `value` and every internal node
+carries none, *even when the CSV states one*, since a stated parent value overrides the
+sum; the appended root, its off-palette color that a custom `colors` must NOT repaint,
+and its absence when no node survives; the dangling parent dropped *with its descendants*
+rather than silently re-parented; the cycle, the self-parent one-node cycle, the
+rootless forest that is necessarily a cycle, and the cycle a dangling row must not hide;
+the 5,000-long cycle and 5,000-deep chain that pin the walk as iterative; the ambiguous
+parent label that raises where an unreferenced duplicate does not; `_sizable` dropping a
+negative leaf while keeping a zero; the `_node_key` int-vs-float trap, where a blank
+parent cell widens that column to `float64` and a bare `str()` would dangle every row and
+empty the chart *silently*; the per-point ring-1 seeding and the `colorByPoint` that must
+appear NOWHERE in the emitted JS — dropped from `levels`, and wrong at series level; the
+alternating `colorVariation`; the name-only sector labels and their gate; and the one
+dark-mode hook),
 the brand palette, the
 light/dark theming (dark-mode chrome — including the tooltip and the heatmap
 colorAxis — vs. the shared palette), and the validation guards (including the
 category-x x-in-y rule, widened to heatmap, boxplot and waterfall, bubble's required
-size column, and sankey's required, distinct target column) —
+size column, sankey's required, distinct target column, and sunburst's required,
+distinct parent column) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
 to serialize — bubble, radar, boxplot and waterfall all pulling in the
 `highcharts-more` module,
-heatmap the `modules/heatmap` module, treemap the `modules/treemap` module, and
-sankey the `modules/sankey` module — rather than just assumed; sankey's node
+heatmap the `modules/heatmap` module, treemap the `modules/treemap` module,
+sankey the `modules/sankey` module, and sunburst the `modules/sunburst` module (and,
+alone among the four extra-module types, *not* `highcharts-more`) — rather than just
+assumed; sankey's node
 tooltip is pinned in that serialized JS too, since a top-level `nodeFormat` is
 accepted by `Chart.from_options` and then silently dropped, as boxplot's `fillColor`
-is, and waterfall's `isSum` is pinned there for the same reason — it is a point key
-that *does* survive, which only the emitted JS can show) and the sample
+is and as sunburst's `levels[].colorByPoint` is, and waterfall's `isSum` is pinned
+there for the same reason — it is a point key
+that *does* survive, which only the emitted JS can show, as sunburst's `id`/`parent`
+and `allowTraversingTree` are) and the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, treemap,
-sankey's Target (to) control, and boxplot's and waterfall's single-select Y —
+sankey's Target (to) control, sunburst's Parent control, and boxplot's and waterfall's
+single-select Y —
 revealing the generated config behind its toggle,
 the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
-the guard messages).
+the guard messages — including a *cyclic uploaded CSV*, the one builder error a user
+can reach just by uploading a file, which must warn and stop rather than render a
+traceback).
 
 `tests/test_hooks.py` covers the `.claude/hooks/` scripts: the extracted pure
 functions (`protected_reason`, `is_python_target`, `has_dirty_python`) directly,
@@ -368,11 +493,17 @@ before it runs.
   produced, and with no rows there are none, so it returns an empty **non-boolean** Series
   (object, or `str` for an Arrow-backed column). That then breaks three different ways —
   a DataFrame indexed by a non-boolean Series is not masked at all but read as a list of
-  **column names** (this is what made `build_options` die with a bare `KeyError` in all
-  15 types); `.sum()` of an empty string mask is `''`, so `int()` raises `ValueError`; and
+  **column names** (this is what made `build_options` die with a bare `KeyError` in *every*
+  type — one shared line, so the count is however many types there are, and a new one
+  inherits the bug the day it is added unless the cast is there); `.sum()` of an empty string
+  mask is `''`, so `int()` raises `ValueError`; and
   `&` between two of them raises out of the Arrow kernel, while `bool & str` merely *warns*
   today but is deprecated and will raise in pandas 4. The casts live at
-  `build_options`' `_label_ok` filter and on all three of `count_marks`' masks. Two sweeps
+  `build_options`' `_label_ok` filter and on all three of `count_marks`' masks. Sunburst is
+  the one type that needs no cast of its own: `_sunburst_tree` reads the frame with a plain
+  `zip` rather than a mask, so a row-less frame is simply an empty loop, and its `count_marks`
+  branch returns *above* the three masks. It still rides the shared `_label_ok` filter, so it
+  is covered by that cast like everything else. Two sweeps
   pin it (`test_row_less_frame_draws_an_empty_chart_in_every_type` over `SUPPORTED_TYPES`,
   and `test_count_marks_casts_every_mask_not_just_the_label_one`, which promotes warnings to
   errors — the only way the non-label casts are observable at all).

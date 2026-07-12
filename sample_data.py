@@ -260,6 +260,90 @@ def _profit_bridge() -> pd.DataFrame:
     )
 
 
+def _org_headcount() -> pd.DataFrame:
+    """Company headcount as an ADJACENCY LIST — one row per node, each naming its parent.
+
+    Tailored to sunburst, and to nothing else in this file, on four counts:
+
+    * It is the only sample whose rows are a HIERARCHY. Sankey's ``_energy_flow`` is the near
+      miss worth naming: its rows are edges of a *graph*, and ``Electricity`` is both a source
+      and a target — which no tree can be. Here every node has exactly one parent.
+    * It is the only sample whose value column is deliberately BLANK on some rows. Everywhere
+      else a blank means missing data; here it means *"ask my children"*. Engineering's 80 is
+      nowhere in this frame — it is 80 *because its teams are*, and the chart is what does that
+      addition. The centre reads a total the builder never computed.
+    * Three levels of nesting (division → group → team) plus the synthesized root make FOUR
+      rings, which is what makes the colour *inheritance* and the *alternating* sign of the
+      ``colorVariation`` visible at all. A two-level tree would show neither.
+    * ``Other`` appears TWICE, under two different divisions — the exact case a label-keyed
+      node identity would silently MERGE into one 9-person sector under whichever parent won
+      (and which Highcharts itself rejects outright, as error #31, "Non-unique point or node
+      id"). Nothing *names* ``Other`` as a parent, so the ambiguity never arises and the two
+      stay honest 5- and 4-person leaves. It is the sample's whole argument for synthesized
+      ids.
+
+    The blank ``reports_to`` cells are the three top-level branches. Headcount sums to 143
+    (Engineering 80, Sales 39, Marketing 24).
+    """
+    return pd.DataFrame(
+        {
+            "team": [
+                "Engineering",  # the three top-level branches (blank parent)
+                "Sales",
+                "Marketing",
+                "Platform",  # under Engineering
+                "Product",
+                "Backend",  # under Platform
+                "Infrastructure",
+                "Mobile",  # under Product
+                "Web",
+                "Enterprise",  # under Sales
+                "SMB",
+                "Other",
+                "Brand",  # under Marketing
+                "Growth",
+                "Other",  # ...the second one: a different team, the same name
+            ],
+            "reports_to": [
+                None,
+                None,
+                None,
+                "Engineering",
+                "Engineering",
+                "Platform",
+                "Platform",
+                "Product",
+                "Product",
+                "Sales",
+                "Sales",
+                "Sales",
+                "Marketing",
+                "Marketing",
+                "Marketing",
+            ],
+            "headcount": [
+                # The five internal nodes state no headcount: Highcharts sums it from the
+                # leaves below them. Only the ten leaf teams carry a number.
+                None,
+                None,
+                None,
+                None,
+                None,
+                24.0,
+                16.0,
+                18.0,
+                22.0,
+                20.0,
+                14.0,
+                5.0,
+                9.0,
+                11.0,
+                4.0,
+            ],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -273,4 +357,5 @@ SAMPLES = {
     "Energy flow (sankey)": _energy_flow,
     "Service response times (boxplot)": _response_times,
     "Quarterly profit bridge (waterfall)": _profit_bridge,
+    "Company headcount (sunburst)": _org_headcount,
 }
