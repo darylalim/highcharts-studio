@@ -232,6 +232,34 @@ def _response_times() -> pd.DataFrame:
     return pd.DataFrame({"service": services, "response_ms": response_ms})
 
 
+def _profit_bridge() -> pd.DataFrame:
+    """A quarterly profit bridge — how gross revenue BECOMES net profit, one signed step
+    at a time. Tailored to the waterfall shape, the only one in this file whose numeric
+    column holds *deltas* rather than levels: every other dataset's values stand on their
+    own, while these only mean anything cumulatively, each starting where the last ended.
+
+    The steps mix signs (the point of the type — a same-signed column would just be a
+    column chart drawn oddly) and are ordered as a P&L reads: an opening revenue figure,
+    then the costs that eat into it, then the one mid-sequence *rise* (``Other income``)
+    that proves the up/down coloring is driven by each value's sign rather than by
+    position. No total row: the builder appends the closing ``Total`` bar itself, summing
+    these to 79.
+    """
+    return pd.DataFrame(
+        {
+            "step": [
+                "Gross revenue",
+                "COGS",
+                "Salaries",
+                "Marketing",
+                "Other income",
+                "Tax",
+            ],
+            "delta": [420.0, -155.0, -120.0, -64.0, 38.0, -40.0],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -244,4 +272,5 @@ SAMPLES = {
     "Company market cap (treemap)": _company_market_cap,
     "Energy flow (sankey)": _energy_flow,
     "Service response times (boxplot)": _response_times,
+    "Quarterly profit bridge (waterfall)": _profit_bridge,
 }

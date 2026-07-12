@@ -46,6 +46,20 @@ MODE_BADGES: dict[str, tuple[str, str, _BadgeColor]] = {
     MODE_STATIC: ("Static PNG", ":material/image:", "violet"),
 }
 
+# The one-series types, and the mark each one draws. These render a SINGLE series (of
+# cells/tiles/flows/boxes/steps), so the default "Series plotted" metric would misreport
+# them as a bare 1; they show their mark count instead, sourced from the builder's
+# count_marks. Membership of this dict is what makes a type count-adaptive, so the KPI
+# below stays one branch however many such types there are. Every other type plots one
+# series per y column, where len(y_cols) IS the series count.
+MARK_METRICS = {
+    "heatmap": "Cells",
+    "treemap": "Tiles",
+    "sankey": "Flows",
+    "boxplot": "Boxes",
+    "waterfall": "Steps",  # counts the appended Total, as the chart draws it
+}
+
 st.set_page_config(
     page_title="Highcharts Studio",
     page_icon=":material/insights:",
@@ -183,6 +197,10 @@ with st.sidebar:
             "- **boxplot** — a category X column whose values *repeat* (one row per "
             "observation) + one numeric column of raw measurements; each category's "
             "distribution becomes a box, with outliers drawn as separate dots\n"
+            "- **waterfall** — a step-label column + one numeric column of signed "
+            "*deltas* (not levels); each bar floats where the last one ended, showing "
+            "how a starting value becomes an ending one, and a closing **Total** bar is "
+            "added for you\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -203,6 +221,13 @@ with st.sidebar:
         # per category. Single-select Y like pie/treemap/sankey — a second column would
         # be a second distribution, which is a second chart.
         x_label, y_label, multi = "Category (X) axis", "Observations (Y)", False
+    elif chart_type == "waterfall":
+        # Signed DELTAS, not levels: each bar floats where the last one ended. Single-select
+        # Y like pie/treemap/sankey/boxplot — a second column would be a second running
+        # total, which is a second chart. The label says "delta" because picking a column of
+        # levels here (revenue per month, say) is the one way to get a plausible-looking but
+        # meaningless bridge, and nothing downstream can detect it.
+        x_label, y_label, multi = "Step labels", "Step values (signed delta)", False
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     elif chart_type == "heatmap":
@@ -304,26 +329,16 @@ with st.sidebar:
 with st.container(horizontal=True):
     st.metric("Rows", f"{len(df):,}", border=True)
     st.metric("Numeric columns", len(numeric_cols), border=True)
-    # heatmap/treemap/sankey/boxplot each render ONE series (of cells/tiles/flows/boxes),
-    # so "Series plotted" (len(y_cols)) would misreport them as N or a bare 1. Show the mark
-    # count instead — and get it from the builder's count_marks, which applies the very
-    # _label_ok / _plottable drop rules build_options does, so the KPI can't drift from what
-    # the chart draws (a missing/non-finite label drops its row in every type; a
-    # non-plottable value drops a tile/flow too). count_marks reads only the columns each
-    # type needs, so it works here above the empty-y guard, as these metrics always have.
-    # Every other type plots one series per y column, where len(y_cols) IS the series count.
-    if chart_type == "heatmap":
-        cells = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
-        st.metric("Cells", f"{cells:,}", border=True)
-    elif chart_type == "treemap":
-        tiles = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
-        st.metric("Tiles", f"{tiles:,}", border=True)
-    elif chart_type == "sankey":
-        flows = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
-        st.metric("Flows", f"{flows:,}", border=True)
-    elif chart_type == "boxplot":
-        boxes = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
-        st.metric("Boxes", f"{boxes:,}", border=True)
+    # The count comes from the builder's count_marks, which applies the very _label_ok /
+    # _plottable drop rules build_options does, so the KPI can't drift from what the chart
+    # draws (a missing/non-finite label drops its row in every type; a non-plottable value
+    # drops a tile/flow too; a waterfall's appended Total is a bar, so its count exceeds its
+    # DRAWABLE step count by one — not necessarily its row count, since an undrawable label
+    # drops its step). count_marks reads only the columns each type needs, so it works here
+    # above the empty-y guard, as these metrics always have. See MARK_METRICS.
+    if chart_type in MARK_METRICS:
+        marks = count_marks(df, chart_type, x_col, y_cols, target_col=target_col)
+        st.metric(MARK_METRICS[chart_type], f"{marks:,}", border=True)
     else:
         st.metric("Series plotted", len(y_cols), border=True)
 

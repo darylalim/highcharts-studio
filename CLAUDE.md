@@ -15,8 +15,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   caching, a KPI metric row (its third metric adapts to the chart type — series
   plotted, or, for the one-series types, the mark count from the builder's
   `count_marks`: cells for a heatmap, tiles for a treemap, flows for a sankey,
-  boxes for a boxplot — sourced there rather than recomputed here so it can't drift
-  from what the chart draws), the
+  boxes for a boxplot, steps for a waterfall — sourced there rather than recomputed
+  here so it can't drift from what the chart draws; waterfall's is the one that
+  *exceeds* its drawable step count, by one, since the total bar is appended by the
+  builder — not necessarily its row count, since an undrawable label drops its step;
+  membership of the `MARK_METRICS` dict is what makes a type count-adaptive, so the
+  KPI stays one branch however many such types there are), the
   render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
@@ -28,18 +32,19 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   diagnosis; duck-typed on `exc.response.status_code` rather than importing
   `requests`, which this project never declares), and `count_marks()`, which
   returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
-  tiles, a sankey's flows, a boxplot's boxes) for the app's KPI row — reusing the
-  same `_label_ok`/`_plottable` drop predicates so the count can't drift from the
-  chart. Independently importable and unit-testable.
+  tiles, a sankey's flows, a boxplot's boxes, a waterfall's steps) for the app's KPI
+  row — reusing the same `_label_ok`/`_plottable` drop predicates so the count can't
+  drift from the chart. Independently importable and unit-testable.
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter/bubble edge cases, radar's polar-line shape, heatmap's colorAxis
   value matrix, treemap's value-sized tiles, sankey's node-link flows, boxplot's
-  aggregated Tukey distributions, the brand
+  aggregated Tukey distributions, waterfall's appended total and semantic bar
+  colors, the brand
   palette, the validation
   guards including bubble's required size column, sankey's required and distinct
-  target column, and the heatmap/boxplot x-in-y rule, and
+  target column, and the heatmap/boxplot/waterfall x-in-y rule, and
   an end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
   interaction tests.
@@ -129,7 +134,7 @@ hop; pulls in the `modules/sankey` module. Its nodes are named by Highcharts'
 default node label and each link carries its weight as a *per-link* `dataLabels`
 — gated on link count like heatmap's cell labels — because highcharts-core drops
 `plotOptions.sankey.dataLabels.nodeFormat` and the `format` that survives there
-would label the links with the node format and blank the node names), and
+would label the links with the node format and blank the node names),
 `boxplot` (per-category Tukey distributions — the only type whose builder
 *aggregates*: every other maps rows 1:1 onto marks, but a box summarizes many rows.
 The data is long/tidy — `x_col`'s values *repeat*, one row per observation — and each
@@ -153,7 +158,43 @@ and `stemColor` are accepted by `Chart.from_options` and then silently dropped (
 so the box interior can't be set at all. It falls back to Highcharts' own
 `var(--highcharts-background-color)`, which the `color-scheme` pin below resolves to
 white in both themes, while `colorByPoint` gives each box a palette-hued
-border/whisker/median legible against that white).
+border/whisker/median legible against that white), and `waterfall` (a cumulative
+"bridge" — the category-x data shape read as signed **deltas** rather than levels, so
+each bar floats where the last one ended and the chart shows how a starting value
+*becomes* an ending one. `x_col` names each step and the first `y_cols` column gives
+its signed change; a missing/non-finite delta keeps its axis slot as an `EnforcedNull`
+(the `_num` rule, not pie's drop-the-row), because a null delta reads as "no change" —
+Highcharts draws no bar and carries the running total straight through, which is
+exactly true. The builder then **appends** a closing `Total` bar (`{"isSum": True}`,
+which makes Highcharts sum the preceding deltas itself so the bar reaches down to zero
+as a *level* rather than stacking as one more delta) — it is what makes the chart a
+bridge rather than a row of floating bars, and it makes waterfall the one type whose
+mark count exceeds its row count; it is appended only when there is at least one step
+to sum. Bars are colored by **meaning**, not identity — green rise, red fall, brand-blue
+total, read straight from `DEFAULT_COLORS` by index rather than from the *overridable*
+`colors` list, the `_BOXPLOT_OUTLIER_COLOR` rule for both of its reasons (a short custom
+palette can't `IndexError`, and red-means-loss is the chart's semantics, not a series'
+arbitrary identity, so a custom palette must not repaint a fall green). The total's
+`color` is carried **per point**, which takes the total *off the up/down scale entirely*.
+Left alone, Highcharts colors a sum by its OWN sign, exactly as it colors a delta (a
+positive total goes green, a negative one red — verified by rendering, not assumed); but
+green does not mean the same thing on the two kinds of bar. On a delta it says "this step
+added"; on the total it would say only "the end level is above zero", which a bridge that
+fell 420 → 79 would earn just as cheerfully. Same hue, two claims. So the total is marked
+as the different KIND of bar it is: a **level**, not a change. It labels each bar with
+its delta — gated on step count like heatmap's cells and sankey's links — because unlike
+column/bar (which carry no labels) a waterfall's bar floats at the running total and
+encodes its value as a *length*, not a height above the axis, so no axis can be read
+against it. It shares bubble's, radar's and boxplot's `highcharts-more` module, and it is
+the one type needing **two** `_themed` hooks — and *neither* is the column/bar case, since
+waterfall's border and connectors both default to a fixed `#333333` (measured off the
+rendered PNG) rather than the background variable that resolves to white for column/bar,
+so its bars are never ringed white. `borderColor`: that crisp definition line on the white
+shell becomes a muddy grey ring one shade off the dark background, and buys nothing (a
+waterfall's bars never touch), so it is dissolved into the background as pie/treemap/sankey
+dissolve their gaps. `lineColor`: the *connector* lines — the only line Highcharts draws
+*between* marks, and what makes the chart read as a running total at all — survive on the
+dark background only barely, so they are lifted to the axis color).
 
 ## Run
 
@@ -205,22 +246,33 @@ observations dropped and a text column rejected with `ValueError`; an all-missin
 kept as an `EnforcedNull` box while a missing
 `x_col` key forms no group; and the `fillColor`/`stemColor` silent drop pinned on the
 emitted JS, which is why its box interior stays white and it needs no `_themed` hook),
+waterfall's cumulative bridge (the appended `isSum` total — pinned on the emitted JS,
+and *absent* when no step survives to sum, so a lone "Total: 0" bar is never drawn;
+the semantic up/down/total colors, which a custom `colors` palette must NOT repaint,
+and the total's *per-point* color, whose absence would silently paint it with the DOWN
+color and read it as a loss whatever its sign; a missing delta keeping its axis slot as
+an `EnforcedNull` rather than dropping its row; the in-bar value labels and their
+step-count gate on both sides of the boundary; the `{point.category}` tooltip token,
+since the positional points would render `{point.name}` blank; and the two dark-mode
+hooks, bar borders *and* connector lines),
 the brand palette, the
 light/dark theming (dark-mode chrome — including the tooltip and the heatmap
 colorAxis — vs. the shared palette), and the validation guards (including the
-category-x x-in-y rule, widened to heatmap and boxplot, bubble's required size column,
-and sankey's required, distinct target column) —
+category-x x-in-y rule, widened to heatmap, boxplot and waterfall, bubble's required
+size column, and sankey's required, distinct target column) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
-to serialize — bubble, radar and boxplot all pulling in the `highcharts-more` module,
+to serialize — bubble, radar, boxplot and waterfall all pulling in the
+`highcharts-more` module,
 heatmap the `modules/heatmap` module, treemap the `modules/treemap` module, and
 sankey the `modules/sankey` module — rather than just assumed; sankey's node
 tooltip is pinned in that serialized JS too, since a top-level `nodeFormat` is
 accepted by `Chart.from_options` and then silently dropped, as boxplot's `fillColor`
-is) and the sample
+is, and waterfall's `isSum` is pinned there for the same reason — it is a point key
+that *does* survive, which only the emitted JS can show) and the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, treemap,
-sankey's Target (to) control, and boxplot's single-select Y —
+sankey's Target (to) control, and boxplot's and waterfall's single-select Y —
 revealing the generated config behind its toggle,
 the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
@@ -316,8 +368,8 @@ before it runs.
   produced, and with no rows there are none, so it returns an empty **non-boolean** Series
   (object, or `str` for an Arrow-backed column). That then breaks three different ways —
   a DataFrame indexed by a non-boolean Series is not masked at all but read as a list of
-  **column names** (this is what made `build_options` die with a bare `KeyError` in every
-  type); `.sum()` of an empty string mask is `''`, so `int()` raises `ValueError`; and
+  **column names** (this is what made `build_options` die with a bare `KeyError` in all
+  15 types); `.sum()` of an empty string mask is `''`, so `int()` raises `ValueError`; and
   `&` between two of them raises out of the Arrow kernel, while `bool & str` merely *warns*
   today but is deprecated and will raise in pandas 4. The casts live at
   `build_options`' `_label_ok` filter and on all three of `count_marks`' masks. Two sweeps

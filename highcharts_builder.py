@@ -31,6 +31,7 @@ HEATMAP_TYPES = ("heatmap",)  # an x-category × y-category matrix colored by va
 TREEMAP_TYPES = ("treemap",)  # nested rectangles sized by value, like pie
 SANKEY_TYPES = ("sankey",)  # node-link flows: source -> target links sized by weight
 BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw rows
+WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -41,6 +42,7 @@ SUPPORTED_TYPES = (
     + TREEMAP_TYPES
     + SANKEY_TYPES
     + BOXPLOT_TYPES
+    + WATERFALL_TYPES
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
@@ -51,16 +53,19 @@ SUPPORTED_TYPES = (
 CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 
 # The full set the x-in-y guard rejects (x_col can't also be a y series): the
-# category-axis types plus heatmap and boxplot, whose x_col is likewise a category
-# axis (heatmap's values label the columns; boxplot's name the boxes) but which stay
-# out of CATEGORY_X_TYPES above so the shared series tests skip them — neither uses
-# the cartesian per-point series build. Grouping boxplot's observation column by
-# itself would give every box exactly one observation, equal to its own label.
+# category-axis types plus heatmap, boxplot and waterfall, whose x_col is likewise a
+# category axis (heatmap's values label the columns; boxplot's name the boxes;
+# waterfall's name the steps) but which stay out of CATEGORY_X_TYPES above so the
+# shared series tests skip them — none uses the cartesian per-point series build
+# unaltered. Grouping boxplot's observation column by itself would give every box
+# exactly one observation, equal to its own label; waterfall builds the cartesian
+# per-point series and then APPENDS the total point, so its data array is one longer
+# than the shared tests assert.
 # Named once so the builder guard and its streamlit_app mirror share one constant
 # and can't drift apart. Sankey is deliberately absent: its x_col is a node label,
 # not an axis, and its collision is source-vs-target — target_col isn't in y_cols
 # at all, so this rule can't express it (see the dedicated guard in build_options).
-X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES + BOXPLOT_TYPES
+X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES + BOXPLOT_TYPES + WATERFALL_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
 # and static PNG) share one look that matches the Streamlit theme in
@@ -127,6 +132,27 @@ _BOXPLOT_WHISKER_MULTIPLIER = 1.5
 # Red reads against the boxes' white interior and the dark chart background alike, so
 # (like the shared series palette) it needs no dark-mode flip.
 _BOXPLOT_OUTLIER_COLOR = DEFAULT_COLORS[3]
+
+# A waterfall colors its bars by MEANING, not by identity: green for a rise, red for a
+# fall, and the brand primary for the closing total. So these are read straight from
+# DEFAULT_COLORS by index and NOT from the overridable `colors` list — the
+# _BOXPLOT_OUTLIER_COLOR rule, for both of its reasons. A caller's short custom palette
+# can't IndexError; and, more to the point, red-means-loss is the chart's semantics
+# rather than a series' arbitrary identity, so a custom palette must not be able to
+# repaint a fall green. (`colors` is still carried, as heatmap carries it, for
+# cross-type consistency — the palette tests sweep every type.)
+_WATERFALL_UP_COLOR = DEFAULT_COLORS[1]  # green: the step added to the running total
+_WATERFALL_DOWN_COLOR = DEFAULT_COLORS[3]  # red: the step subtracted from it
+_WATERFALL_SUM_COLOR = DEFAULT_COLORS[0]  # blue: the total itself, a level not a delta
+# The label of the appended closing bar. Must contain no "inf"/"nan" substring: the
+# non-finite sweep (test_no_supported_type_emits_a_non_finite_js_literal) asserts those
+# tokens appear NOWHERE in the emitted JS, so a category name carrying one would fail it
+# spuriously.
+_WATERFALL_TOTAL_LABEL = "Total"
+# Above this many steps the in-bar value labels overprint into noise, so they're only
+# drawn on smaller bridges (the _HEATMAP_DATALABEL_MAX_CELLS / _SANKEY_DATALABEL_MAX_LINKS
+# rule). Counts the appended total, since it is drawn and labelled like any other bar.
+_WATERFALL_DATALABEL_MAX_STEPS = 30
 
 # Highcharts >= 13 expresses its own default colors as CSS custom properties wrapped in
 # `light-dark(...)` — e.g. `--highcharts-background-color: light-dark(#ffffff, #141414)`.
@@ -244,6 +270,29 @@ def _themed(options: dict, *, dark: bool) -> dict:
         # against whatever each label sits on, so they stay legible in either theme
         # (the treemap reasoning, not pie's).
         options["plotOptions"]["sankey"]["borderColor"] = t["bg"]
+    if options["chart"].get("type") == "waterfall":
+        waterfall = options["plotOptions"]["waterfall"]
+        # Two flips, and NEITHER is the column/bar case above — waterfall's bar border and
+        # its connector lines both default to a FIXED #333333 (measured off the rendered
+        # PNG on both backgrounds), not to the var(--highcharts-background-color) that
+        # resolves to white for column/bar. So the bars are never ringed white and the flips
+        # below are not that bug; they are two smaller, real ones:
+        #
+        # The 1px border reads as a crisp definition line on the white shell, but against
+        # the dark background #333333 is only a shade off it, so every bar picks up a muddy
+        # grey ring. Nothing separates adjacent bars in a waterfall (they never touch), so
+        # the border buys nothing there — match it to the background and let it go, the way
+        # pie, treemap and sankey dissolve their own gaps.
+        waterfall["borderColor"] = t["bg"]
+        # The CONNECTOR lines are the dashes bridging each bar to the next, and they are
+        # what makes a waterfall read as a running total rather than a row of floating bars
+        # — so they must stay legible. At #333333 on the dark background they survive, but
+        # only barely; lift them to the color the real axis lines take. This half has no
+        # precedent among the other types: it is the only line Highcharts draws *between*
+        # marks.
+        waterfall["lineColor"] = t["axis"]
+        # The bar hues (up/down/sum) need no flip: like the shared series palette, they
+        # read against both backgrounds, and their meaning is fixed (see the constants).
     return options
 
 
@@ -422,6 +471,20 @@ def _tooltip_label(name: str) -> str:
     return html.escape(str(name)).replace("{", "").replace("}", "")
 
 
+def _in_mark_labels(fmt: str, **extra: object) -> dict[str, object]:
+    """Value labels printed IN the mark, so the Static-PNG mode (which has no hover
+    tooltip) still shows the numbers. "contrast" text + outline is computed against the
+    FILL the label sits on, not the chart background, so -- unlike pie's labels -- it needs
+    no dark-mode flip."""
+    return {
+        "enabled": True,
+        "format": fmt,
+        "color": "contrast",
+        "style": {"textOutline": "1px contrast", "fontWeight": "normal"},
+        **extra,
+    }
+
+
 def build_options(
     df: pd.DataFrame,
     chart_type: str,
@@ -478,6 +541,13 @@ def build_options(
       only when some exist. A group whose observations are all missing keeps its axis
       slot as an ``EnforcedNull`` box. Shares bubble's and radar's ``highcharts-more``
       module.
+    - ``waterfall``: a cumulative "bridge". The category-x data shape read as signed
+      DELTAS rather than levels: ``x_col`` names each step, the first ``y_cols`` column
+      gives its signed change, and each bar floats where the last one ended. A closing
+      ``Total`` bar is APPENDED (Highcharts' ``isSum``), so the frame holds only the
+      deltas — it is what makes the chart a bridge rather than a row of floating bars.
+      Bars are colored by MEANING (rise/fall/total), not identity. Shares bubble's,
+      radar's and boxplot's ``highcharts-more`` module.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
@@ -489,8 +559,8 @@ def build_options(
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
     a ``bubble`` chart with no ``size_col``, a ``sankey`` chart with no
     ``target_col`` or whose ``target_col`` is its ``x_col``, or (for the
-    category-axis types — cartesian, radar, heatmap, and boxplot) an ``x_col`` that
-    is also one of the ``y_cols``.
+    category-axis types — cartesian, radar, heatmap, boxplot, and waterfall) an
+    ``x_col`` that is also one of the ``y_cols``.
     """
     if chart_type not in SUPPORTED_TYPES:
         raise ValueError(
@@ -534,10 +604,10 @@ def build_options(
         # so it hands back an empty *object* Series rather than an empty *boolean* one. A
         # DataFrame indexed by a non-boolean Series is not a mask at all — pandas reads it as
         # a list of COLUMN NAMES — so `df[...]` would select zero columns and the very next
-        # line to touch `df[x_col]` would die with a bare `KeyError: <x_col>`, in every chart
-        # type. An empty frame is a legitimate input (a CSV with headers and no rows), and it
-        # should draw an empty chart, not raise. The cast pins the dtype so the empty case
-        # masks exactly like the populated one.
+        # line to touch `df[x_col]` would die with a bare `KeyError: <x_col>`, for every
+        # chart type. An empty frame is a legitimate input (a CSV with headers and no rows),
+        # and it should draw an empty chart, not raise. The cast pins the dtype so the empty
+        # case masks exactly like the populated one.
         df = df[df[x_col].map(_label_ok).astype(bool)]
 
     title = title or f"{chart_type.title()} chart"
@@ -616,15 +686,7 @@ def build_options(
                         # legible on every palette fill in BOTH themes — the label
                         # sits on the tile, not the chart background — so, unlike
                         # pie's labels, it needs no dark-mode color flip.
-                        "dataLabels": {
-                            "enabled": True,
-                            "format": "{point.name}<br>{point.value}",
-                            "color": "contrast",
-                            "style": {
-                                "textOutline": "1px contrast",
-                                "fontWeight": "normal",
-                            },
-                        },
+                        "dataLabels": _in_mark_labels("{point.name}<br>{point.value}"),
                     }
                 },
                 "series": [{"name": value_col, "data": data}],
@@ -805,12 +867,7 @@ def build_options(
         # whole gradient and in dark mode. Skipped on large grids, where the labels
         # would overprint into noise.
         if len(cells) <= _HEATMAP_DATALABEL_MAX_CELLS:
-            heatmap_opts["dataLabels"] = {
-                "enabled": True,
-                "format": "{point.value}",
-                "color": "contrast",
-                "style": {"textOutline": "1px contrast", "fontWeight": "normal"},
-            }
+            heatmap_opts["dataLabels"] = _in_mark_labels("{point.value}")
         return _themed(
             {
                 "chart": {"type": "heatmap"},
@@ -955,6 +1012,82 @@ def build_options(
             dark=dark,
         )
 
+    if chart_type in WATERFALL_TYPES:  # signed deltas floating at a running total
+        # The category-x data shape read as DELTAS rather than levels: each bar starts
+        # where the last one ended, so the chart shows how a starting value BECOMES an
+        # ending one. A single value column, like pie/treemap/sankey/boxplot.
+        value_col = y_cols[0]
+        categories = _category_labels(df, x_col)
+        # A missing or non-finite delta KEEPS its slot as an EnforcedNull (the `_num`
+        # cartesian rule) rather than dropping its row as pie and treemap do. Both the
+        # shape and the semantics ask for it: the step still names a category on the axis,
+        # and a null delta reads as "no change" — Highcharts draws no bar and carries the
+        # running total straight through to the next step, which is exactly true. Dropping
+        # the row would instead delete a step from the bridge without saying so.
+        steps: list[object] = [_num(value) for value in df[value_col].tolist()]
+        if steps:
+            # The closing bar. `isSum` makes Highcharts total the preceding deltas itself,
+            # so the bar reaches down to zero as a LEVEL instead of stacking on the running
+            # total as one more delta — which is the whole difference between a bridge and
+            # a row of floating bars, and is why the frame carries only the deltas. Only
+            # when there IS a step to sum: a lone "Total: 0" bar is not a chart (the
+            # restraint boxplot shows in omitting an empty outlier series).
+            #
+            # The per-point `color` is not decoration; it repairs a genuine ambiguity. Left
+            # alone, Highcharts colors the sum by ITS OWN SIGN, exactly as it colors a delta
+            # — a positive total takes `upColor` (green), a negative one takes `color` (red).
+            # Verified by rendering it, not assumed. But the two signs do not mean the same
+            # thing on the two kinds of bar: on a delta, green says "this step ADDED", while
+            # on the total green would say only "the end level is above zero" — which a
+            # bridge that fell 420 -> 79 would also paint green, cheerfully, all the way
+            # down. Same hue, two different claims. So the total is taken off the up/down
+            # scale entirely and marked as the different KIND of bar it is: a LEVEL, not a
+            # change. A per-point color is the only way to say that, and — unlike boxplot's
+            # fillColor — it does survive serialization.
+            categories.append(_WATERFALL_TOTAL_LABEL)
+            steps.append({"isSum": True, "color": _WATERFALL_SUM_COLOR})
+        # `upColor` paints a rise; `color` is the fall (and would be the sum too, but for
+        # the per-point override above).
+        waterfall_opts: dict[str, object] = {
+            "upColor": _WATERFALL_UP_COLOR,
+            "color": _WATERFALL_DOWN_COLOR,
+        }
+        if len(steps) <= _WATERFALL_DATALABEL_MAX_STEPS:
+            # Print each delta IN its bar, as pie, heatmap, treemap and sankey print their
+            # values — so the Static-PNG mode, which has no hover tooltip, still shows the
+            # numbers. This is where waterfall parts company with column/bar, which
+            # deliberately carry no labels: their bars stand on the axis, so a height IS a
+            # value, while a waterfall's bar floats at the running total and encodes its
+            # value as a LENGTH, which no axis can be read against. `inside` keeps the
+            # label on the bar, where "contrast" is computed against the fill it sits on
+            # (the treemap rule) rather than against the chart background — so it needs no
+            # dark-mode flip.
+            waterfall_opts["dataLabels"] = _in_mark_labels("{point.y}", inside=True)
+        return _themed(
+            {
+                "chart": {"type": "waterfall"},
+                "colors": colors,
+                "title": {"text": title},
+                "xAxis": {"categories": categories, "title": {"text": x_col}},
+                "yAxis": {"title": {"text": value_col}},
+                # One series, whose name the y-axis already carries — treemap, sankey and
+                # boxplot turn theirs off for the same reason. What a legend COULD key here
+                # is rise/fall/total, and those three colors already say it themselves.
+                "legend": {"enabled": False},
+                # {point.category}, NOT {point.name}: the points are positional, their names
+                # living in xAxis.categories, so {point.name} would render blank (bubble's
+                # non-numeric-x tooltip resolves the same way, for the same reason). On the
+                # appended bar {point.y} is the summed total, which is what it should read.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": "{point.category}: <b>{point.y}</b>",
+                },
+                "plotOptions": {"waterfall": waterfall_opts},
+                "series": [{"name": value_col, "data": steps}],
+            },
+            dark=dark,
+        )
+
     # cartesian (line/spline/area/areaspline/column/bar) and radar share the same
     # category-x data shape: x_col labels the axis and each y column is a series.
     categories = _category_labels(df, x_col)
@@ -1009,7 +1142,8 @@ def count_marks(
     target_col: str | None = None,
 ) -> int:
     """The number of marks ``build_options`` will draw, for the app's count-adaptive KPI
-    (a heatmap's cells, a treemap's tiles, a sankey's flows, a boxplot's boxes).
+    (a heatmap's cells, a treemap's tiles, a sankey's flows, a boxplot's boxes, a
+    waterfall's steps).
 
     Defined here, beside ``build_options`` and reusing its very ``_label_ok`` / ``_plottable``
     predicates, so the KPI number can never drift from what the chart actually renders — the
@@ -1018,8 +1152,10 @@ def count_marks(
     without touching ``y_cols[0]``; the other three use single-value controls that guarantee
     one y column). A row whose label is not drawable is dropped in every type (the uniform
     label policy); for treemap/sankey a non-plottable value/weight drops it too, while a
-    heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``) and a boxplot
-    keeps one box per distinct drawable label (an all-missing group included).
+    heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``), a boxplot
+    keeps one box per distinct drawable label (an all-missing group included), and a
+    waterfall keeps one bar per drawable label (a missing delta included, as an
+    ``EnforcedNull``) plus its appended total.
     """
     # `.astype(bool)` on all three masks, the same cast — and for the same reason —
     # `build_options`' label filter makes. On a ROW-LESS frame `.map()` has no values to infer
@@ -1035,6 +1171,13 @@ def count_marks(
         return int(label_ok.sum()) * len(y_cols)
     if chart_type in BOXPLOT_TYPES:
         return int(df.loc[label_ok, x_col].nunique())
+    if chart_type in WATERFALL_TYPES:
+        # One bar per drawable label — the value is NOT consulted, because a missing delta
+        # keeps its slot as an EnforcedNull bar rather than dropping its row (see the
+        # branch). Plus the appended total, which is a drawn bar like any other, and which
+        # the branch likewise appends only when there is at least one step to sum.
+        steps = int(label_ok.sum())
+        return steps + 1 if steps else 0
     value_ok = df[y_cols[0]].map(_plottable).astype(bool)
     if chart_type in TREEMAP_TYPES:
         return int((label_ok & value_ok).sum())

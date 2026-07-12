@@ -55,7 +55,7 @@ light/dark theme, which you can toggle from the settings menu.
   keeps its palette color.
 - An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
   metric — series plotted, or cells for a heatmap, tiles for a treemap, flows
-  for a sankey, and boxes for a boxplot) above
+  for a sankey, boxes for a boxplot, and steps for a waterfall) above
   the chart
   — with the chart type shown as a badge above the chart rather than a metric in
   the row — a side-by-side source-data preview, and a toggle that reveals the
@@ -68,9 +68,13 @@ light/dark theme, which you can toggle from the settings menu.
   on a sequential color axis, show the values), `treemap` (nested
   rectangles whose area, sized by a value column, shows each label's share),
   `sankey` (a flow diagram: each row is a link between two node columns,
-  whose width is a value column), and `boxplot` (per-category distributions: a
+  whose width is a value column), `boxplot` (per-category distributions: a
   category column whose values repeat, one row per observation, plus a column of
-  raw measurements — each category becomes a Tukey box, with outliers as dots).
+  raw measurements — each category becomes a Tukey box, with outliers as dots),
+  and `waterfall` (a cumulative bridge: a step-label column plus a column of
+  signed *deltas*, so each bar floats where the last one ended, showing how a
+  starting value becomes an ending one — rises green, falls red, and a closing
+  **Total** bar added for you).
 
 ## Files
 
@@ -101,14 +105,15 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
   missing-data and scatter/bubble edge cases, radar's polar-line shape, heatmap's
   colorAxis value matrix, treemap's value-sized tiles, sankey's node-link flows,
   boxplot's aggregated Tukey distributions (including the `iqr == 0` degeneracies
-  and the `fillColor` silent drop),
+  and the `fillColor` silent drop), waterfall's appended `isSum` total and its
+  semantic up/down/total bar colors,
   the brand palette, the
   light/dark theming including the dark-mode tooltip and the heatmap colorAxis, and
   the validation guards — plus an end-to-end pass driving every supported type
   through the real `Chart.from_options` → `to_js_literal` pipeline) and the sample
   datasets, plus a headless `AppTest` pass that drives the full app (switching
   controls including the bubble Size (Z) and sankey Target (to) selectors, radar,
-  heatmap, treemap, and boxplot, the
+  heatmap, treemap, boxplot, and waterfall, the
   config toggle, the KPI row, the wide-CSV `st.multiselect` fallback, both render
   modes, and the guard messages).
 - **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see

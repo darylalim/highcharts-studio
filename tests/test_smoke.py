@@ -29,11 +29,23 @@ Layers:
   the ``iqr == 0`` degeneracies that the inclusive fence saves, the matplotlib
   whisker clamp, an all-missing group kept as an ``EnforcedNull`` box, and the
   ``fillColor``/``stemColor`` silent drop that leaves its box interior unsettable —
-  sharing bubble's and radar's ``highcharts-more``), the brand-palette
+  sharing bubble's and radar's ``highcharts-more``), waterfall's cumulative bridge
+  (signed deltas floating at a running total, closed by an APPENDED ``isSum`` bar —
+  so it is the one type drawing more marks than the frame has rows, and the one
+  whose ``count_marks`` exceeds its drawable row count; the bar colors are semantic
+  rather than identity-based, read from ``DEFAULT_COLORS`` by index so a custom
+  ``colors`` palette cannot repaint a fall green, and the total carries its own
+  per-point color, which takes it OFF that up/down scale — Highcharts would otherwise
+  color the sum by its own sign, and "the end level is above zero" is not the claim
+  "this step added"; a missing delta keeps its axis slot as an ``EnforcedNull``; the
+  in-bar value labels are gated on step count; and it needs TWO dark-mode hooks — the
+  bar borders and the connector lines between bars, neither of which is column/bar's
+  white-ring case — while sharing that same ``highcharts-more``),
+  the brand-palette
   (``DEFAULT_COLORS`` / ``colors`` override), and the validation guards
   (unsupported type, empty ``y_cols``, the category-x x-in-y rule widened to
-  heatmap and boxplot, the bubble size-column requirement, and sankey's required,
-  distinct target column).
+  heatmap, boxplot and waterfall, the bubble size-column requirement, and sankey's
+  required, distinct target column).
 - light/dark theming: dark mode paints the chart background (light leaves it
   unset), the chart chrome (axes/text/gridlines, pie labels, and the tooltip)
   flips while the ``DEFAULT_COLORS`` palette stays shared across modes,
@@ -53,8 +65,9 @@ Layers:
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
   control flow — switching chart type (including bubble, which reveals a
   Size (Z) control, radar, heatmap, treemap, sankey, which reveals a
-  Target (to) control, and boxplot, which reveals a single-select Y and no extra
-  control at all), title, and series, revealing
+  Target (to) control, and boxplot and waterfall, which reveal a single-select Y
+  and no extra control at all — waterfall also asserting that its Steps KPI counts
+  the appended total), title, and series, revealing
   the generated Highcharts config
   behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
   the render-mode selector's two modes (interactive iframe / static PNG), plus
@@ -271,13 +284,12 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
     # `.astype(bool)` in that filter is what pins the dtype.
     #
     # Swept over SUPPORTED_TYPES because the filter is shared by all of them: one line, one
-    # bug, every type — and a newly added type is covered the day it is added. Both
+    # bug, fifteen types — and a newly added type is covered the day it is added. Both
     # scatter/bubble paths are reached: the object-dtype x below takes the label path (the
-    # filtered one), and the numeric-x frame in the next test takes the branch that skips it.
+    # filtered one), and the numeric-x frame at the end takes the branch that skips it.
     from highcharts_builder import make_chart
 
-    # "target" (not "to") — the name `_target_for` hands the sankey case, as in
-    # `labeled_frame`.
+    # "target" (not "to") — the name `_target_for` hands the sankey case, as in `labeled_frame`.
     empty = pd.DataFrame(
         {
             "label": pd.Series([], dtype=object),
@@ -351,14 +363,19 @@ def test_row_less_frame_with_a_numeric_x_also_draws_an_empty_chart():
         assert opts["series"][0]["data"] == []
 
 
-@pytest.mark.parametrize("chart_type", ["heatmap", "treemap", "sankey", "boxplot"])
+@pytest.mark.parametrize(
+    "chart_type", ["heatmap", "treemap", "sankey", "boxplot", "waterfall"]
+)
 def test_count_marks_matches_the_built_series(chart_type):
-    # The app's KPI (heatmap Cells / treemap Tiles / sankey Flows / boxplot Boxes) comes
+    # The app's KPI (heatmap Cells / treemap Tiles / sankey Flows / boxplot Boxes /
+    # waterfall Steps) comes
     # from count_marks, which must equal the marks build_options actually draws — the whole
     # reason it lives in the builder, beside the drop rules. Cross-check the two on a frame
-    # that exercises every drop: a NaN label (dropped in all four), a NaN value (drops a
-    # tile/flow, kept as an EnforcedNull cell/box), an inf value (same), and a NaN target
+    # that exercises every drop: a NaN label (dropped in all five), a NaN value (drops a
+    # tile/flow, kept as an EnforcedNull cell/box/bar), an inf value (same), and a NaN target
     # (drops a sankey link). If they ever diverge, the KPI is lying about the chart.
+    # Waterfall is the one type whose count EXCEEDS its surviving rows — the appended Total
+    # is a drawn bar, so 4 labelled steps make 5 marks.
     from highcharts_builder import build_options, count_marks
 
     nan, inf = float("nan"), float("inf")
@@ -370,7 +387,7 @@ def test_count_marks_matches_the_built_series(chart_type):
         }
     )
     built = build_options(df, chart_type, "cat", ["v"], target_col="to")
-    drawn = len(built["series"][0]["data"])  # series[0] is the cells/tiles/links/boxes
+    drawn = len(built["series"][0]["data"])  # the cells/tiles/links/boxes/bars
     assert count_marks(df, chart_type, "cat", ["v"], target_col="to") == drawn
     # The two must also agree on a ROW-LESS frame (a header-only CSV), where the chart is
     # empty — so the KPI reads 0 rather than counting marks nobody drew. This is the case
@@ -385,7 +402,12 @@ def test_count_marks_matches_the_built_series(chart_type):
     )
     assert count_marks(empty, chart_type, "cat", ["v"], target_col="to") == 0
     # And the expected value, spelled out, so the cross-check can't pass on a shared bug:
-    assert drawn == {"heatmap": 4, "treemap": 2, "sankey": 1, "boxplot": 4}[chart_type]
+    assert (
+        drawn
+        == {"heatmap": 4, "treemap": 2, "sankey": 1, "boxplot": 4, "waterfall": 5}[
+            chart_type
+        ]
+    )
 
 
 def test_num_maps_missing_and_non_finite_to_enforced_null():
@@ -1845,6 +1867,252 @@ def test_boxplot_dark_mode_needs_no_box_hook():
 
 
 # --------------------------------------------------------------------------- #
+# waterfall (signed deltas floating at a running total)
+# --------------------------------------------------------------------------- #
+def _bridge() -> pd.DataFrame:
+    """Four signed deltas — the mixed signs are the point of the type."""
+    return pd.DataFrame(
+        {
+            "step": ["Revenue", "COGS", "Opex", "Tax"],
+            "delta": [120.0, -45.0, -18.0, -7.0],
+        }
+    )
+
+
+def test_waterfall_builds_steps_and_appends_a_total():
+    # The frame carries only the DELTAS; the closing bar is the builder's, not the data's.
+    # So the axis gains a category and the series a point that no row produced — waterfall
+    # is the one type whose mark count exceeds its row count.
+    opts = build_options(_bridge(), "waterfall", "step", ["delta"])
+    assert opts["chart"]["type"] == "waterfall"
+    assert opts["xAxis"]["categories"] == ["Revenue", "COGS", "Opex", "Tax", "Total"]
+    data = opts["series"][0]["data"]
+    assert data[:4] == [120.0, -45.0, -18.0, -7.0]  # positional, matched to categories
+    # isSum makes Highcharts total the preceding deltas itself, so the bar reaches down to
+    # zero as a LEVEL rather than stacking as one more delta. That IS the bridge.
+    assert data[4]["isSum"] is True
+    assert opts["series"][0]["name"] == "delta"
+    assert opts["xAxis"]["title"]["text"] == "step"  # every category-x type pins this
+    assert opts["yAxis"]["title"]["text"] == "delta"
+    assert opts["legend"]["enabled"] is False
+
+
+def test_waterfall_colors_rises_falls_and_the_total_by_meaning():
+    # The bars are colored by MEANING, not identity: green up, red down, brand-blue total.
+    opts = build_options(_bridge(), "waterfall", "step", ["delta"])
+    wf = opts["plotOptions"]["waterfall"]
+    assert wf["upColor"] == DEFAULT_COLORS[1]  # green: a rise
+    assert wf["color"] == DEFAULT_COLORS[3]  # red: a fall
+    assert opts["series"][0]["data"][4]["color"] == DEFAULT_COLORS[0]  # blue: the total
+
+
+def test_waterfall_total_is_taken_off_the_up_down_color_scale():
+    # Left alone, Highcharts colors the sum by ITS OWN SIGN, exactly as it colors a delta: a
+    # positive total takes upColor (green), a negative one takes color (red). Verified by
+    # rendering it. But green does not mean the same thing on the two kinds of bar — on a
+    # delta it says "this step ADDED", while on the total it would say only "the end level is
+    # above zero", which a bridge that fell 420 -> 79 would also earn. So the total is taken
+    # off the up/down scale and marked as the different KIND of bar it is: a LEVEL, not a
+    # change. Pin the per-point color on the emitted JS — unlike boxplot's fillColor
+    # (accepted, then silently dropped), a point color does survive.
+    from highcharts_builder import make_chart
+
+    js = make_chart(_bridge(), "waterfall", "step", ["delta"]).to_js_literal()
+    assert js  # stubbed str | None
+    compact = "".join(js.split())
+    assert f"isSum:true,color:'{DEFAULT_COLORS[0]}'" in compact
+    # The total's hue must be neither of the two the deltas use, or it rejoins the very scale
+    # this takes it off. (_bridge() sums to +50, so without the override it would be green.)
+    assert DEFAULT_COLORS[0] not in (DEFAULT_COLORS[1], DEFAULT_COLORS[3])
+
+
+def test_waterfall_semantic_colors_ignore_a_custom_palette():
+    # `colors` overrides the series palette, but must NOT repaint the bars: red-means-loss
+    # is the chart's semantics, not a series' arbitrary identity, so a custom palette can't
+    # turn a fall green. The _BOXPLOT_OUTLIER_COLOR rule — and it also means a caller's
+    # SHORT palette (two entries here, where the hues index up to 3) can't IndexError.
+    opts = build_options(
+        _bridge(), "waterfall", "step", ["delta"], colors=["#000000", "#ffffff"]
+    )
+    assert opts["colors"] == ["#000000", "#ffffff"]  # carried, as heatmap carries it
+    wf = opts["plotOptions"]["waterfall"]
+    assert wf["upColor"] == DEFAULT_COLORS[1] and wf["color"] == DEFAULT_COLORS[3]
+    assert opts["series"][0]["data"][-1]["color"] == DEFAULT_COLORS[0]
+
+
+def test_waterfall_missing_delta_keeps_its_slot_as_enforced_null():
+    # A missing/non-finite delta KEEPS its slot (the `_num` cartesian rule), rather than
+    # dropping its row as pie and treemap do. Semantics, not just shape: a null delta means
+    # "no change", so Highcharts draws no bar and carries the running total straight through
+    # — true. Dropping the row would delete a step from the bridge without saying so.
+    df = pd.DataFrame(
+        {
+            "step": ["a", "b", "c", "d"],
+            "delta": [1.0, float("nan"), float("inf"), 4.0],
+        }
+    )
+    opts = build_options(df, "waterfall", "step", ["delta"])
+    data = opts["series"][0]["data"]
+    assert data[1] is EnforcedNull and data[2] is EnforcedNull  # inf is missing too
+    assert opts["xAxis"]["categories"] == [
+        "a",
+        "b",
+        "c",
+        "d",
+        "Total",
+    ]  # nothing shifted
+    # And the null must REACH the JS — a Python None would be dropped and misalign the bars.
+    from highcharts_builder import make_chart
+
+    js = make_chart(df, "waterfall", "step", ["delta"]).to_js_literal()
+    # not a bare "null", which other keys could satisfy
+    assert js and "null]" in js  # stubbed str | None
+
+
+def test_waterfall_with_no_drawable_steps_appends_no_total():
+    # A lone "Total: 0" bar is not a chart — the restraint boxplot shows in omitting an
+    # empty outlier series, and sankey/heatmap in gating their labels on count.
+    from highcharts_builder import count_marks
+
+    df = pd.DataFrame({"step": [float("nan")], "delta": [1.0]})
+    opts = build_options(df, "waterfall", "step", ["delta"])
+    assert opts["series"][0]["data"] == []
+    assert opts["xAxis"]["categories"] == []
+    # And the KPI must agree with the empty chart. This is the ONLY test that reaches
+    # count_marks' zero-step branch: without it, `return steps + 1` (dropping the `if steps`
+    # guard entirely) passes the whole suite while the app reports "Steps: 1" over a chart
+    # with no bars at all.
+    assert count_marks(df, "waterfall", "step", ["delta"]) == 0
+
+
+def test_waterfall_labels_each_bar_with_its_delta():
+    # The value is printed IN the bar, as pie/heatmap/treemap/sankey print theirs, so the
+    # Static-PNG mode (which has no hover tooltip) still shows the numbers. This is where
+    # waterfall parts from column/bar, which carry no labels: their bars stand ON the axis,
+    # so a height is a value — while a waterfall's bar floats at the running total and
+    # encodes its value as a LENGTH, which no axis can be read against.
+    opts = build_options(_bridge(), "waterfall", "step", ["delta"])
+    labels = opts["plotOptions"]["waterfall"]["dataLabels"]
+    assert labels["enabled"] is True
+    assert labels["format"] == "{point.y}"
+    assert (
+        labels["inside"] is True
+    )  # on the bar, where "contrast" is computed vs the fill
+    assert labels["color"] == "contrast"
+    # The outline is what keeps "contrast" legible where a label straddles a bar's edge. It
+    # comes from the shared _in_mark_labels helper (with heatmap's cells and treemap's
+    # tiles), so pin it here too — otherwise dropping it from that helper breaks three types
+    # and no waterfall test notices.
+    assert labels["style"]["textOutline"] == "1px contrast"
+    assert labels["color"] == "contrast"
+
+
+def test_waterfall_many_steps_omit_the_value_labels():
+    # Above the gate the labels overprint into noise (the heatmap/sankey rule). The count
+    # includes the appended total, which is drawn and labelled like any other bar.
+    from highcharts_builder import _WATERFALL_DATALABEL_MAX_STEPS
+
+    n = _WATERFALL_DATALABEL_MAX_STEPS  # n steps + 1 total = one over the gate
+    df = pd.DataFrame({"step": [str(i) for i in range(n)], "delta": [1.0] * n})
+    opts = build_options(df, "waterfall", "step", ["delta"])
+    assert len(opts["series"][0]["data"]) == n + 1
+    assert "dataLabels" not in opts["plotOptions"]["waterfall"]
+    # One fewer step and they come back, so the boundary is pinned, not just the far side.
+    smaller = df.iloc[:-1]
+    assert (
+        "dataLabels"
+        in build_options(smaller, "waterfall", "step", ["delta"])["plotOptions"][
+            "waterfall"
+        ]
+    )
+
+
+def test_waterfall_tooltip_names_the_category_not_the_point():
+    # {point.name} would render BLANK: the points are positional, their names living in
+    # xAxis.categories. {point.category} is what reads them back — bubble's non-numeric-x
+    # tooltip resolves the same way, for the same reason.
+    opts = build_options(_bridge(), "waterfall", "step", ["delta"])
+    fmt = opts["tooltip"]["pointFormat"]
+    assert "{point.category}" in fmt
+    assert "{point.name}" not in fmt
+    assert "{point.y}" in fmt  # on the appended bar this is the summed total
+    # The empty header suppresses Highcharts' default header row, which would repeat the
+    # category the pointFormat already names (treemap and sankey suppress theirs the same
+    # way). Pinned, or dropping it silently restores the duplicate.
+    assert opts["tooltip"]["headerFormat"] == ""
+
+
+def test_waterfall_uses_only_first_y_col():
+    df = _bridge()
+    df["other"] = [9.0, 9.0, 9.0, 9.0]
+    opts = build_options(df, "waterfall", "step", ["delta", "other"])
+    assert len(opts["series"]) == 1
+    assert opts["series"][0]["name"] == "delta"
+
+
+def test_waterfall_rejects_x_in_y():
+    # Its x_col is a category axis, so it joins X_IN_Y_GUARD_TYPES (with heatmap/boxplot).
+    with pytest.raises(ValueError, match="cannot also be a y series"):
+        build_options(_bridge(), "waterfall", "step", ["step"])
+
+
+def test_waterfall_numeric_step_labels_coerce_to_strings():
+    df = pd.DataFrame({"step": [1, 2], "delta": [1.0, -1.0]})
+    opts = build_options(df, "waterfall", "step", ["delta"])
+    assert opts["xAxis"]["categories"] == ["1", "2", "Total"]
+
+
+def test_waterfall_serializes_and_pulls_in_the_more_module():
+    # End to end: isSum must survive the point model (highcharts-core accepts plenty it then
+    # silently drops — boxplot's fillColor, sankey's nodeFormat), and the module must resolve
+    # to highcharts-more, which waterfall shares with bubble, radar and boxplot rather than
+    # having a modules/*.js of its own.
+    from highcharts_builder import make_chart
+
+    chart = make_chart(_bridge(), "waterfall", "step", ["delta"])
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'waterfall'" in js
+    compact = "".join(js.split())
+    assert "isSum:true" in compact  # the sum point survived
+    assert "upColor:'#16a34a'" in compact  # so did the semantic hues
+    assert "inside:true" in compact  # and the in-bar labels
+    tags = chart.get_script_tags(as_str=True)
+    assert "highcharts-more" in tags  # bubble/radar/boxplot's module, shared
+    assert "modules/" not in tags  # waterfall has no module of its own
+
+
+def test_waterfall_light_mode_shape():
+    # Mirrors the treemap/sankey/boxplot light-mode tests: pin the choices nothing else
+    # guards, and prove the dark-only keys are absent (so the dark test below is meaningful).
+    opts = build_options(_bridge(), "waterfall", "step", ["delta"])
+    assert opts["legend"]["enabled"] is False
+    wf = opts["plotOptions"]["waterfall"]
+    assert set(wf) == {"upColor", "color", "dataLabels"}
+    assert "borderColor" not in wf and "lineColor" not in wf
+
+
+def test_waterfall_dark_mode_themes_the_bars_and_the_connectors():
+    # TWO flips, and neither is column/bar's. Waterfall's bar border and its connector lines
+    # BOTH default to a fixed #333333 (measured off the rendered PNG on either background),
+    # not to the background variable that resolves to white for column/bar — so the bars are
+    # never ringed white, and these flips are not that bug. The border, a crisp definition
+    # line on the white shell, becomes a muddy grey ring one shade off the dark background,
+    # and buys nothing (waterfall's bars never touch), so it is dissolved into the background
+    # as pie/treemap/sankey dissolve their gaps. The CONNECTOR lines — what make a waterfall
+    # read as a running total rather than a row of floating bars — survive on the dark
+    # background only barely, so they are lifted to the axis color. That half is waterfall's
+    # alone: it is the only line Highcharts draws BETWEEN marks.
+    opts = build_options(_bridge(), "waterfall", "step", ["delta"], dark=True)
+    wf = opts["plotOptions"]["waterfall"]
+    assert wf["borderColor"] == "#0f172a"  # == _DARK_CHROME["bg"]
+    assert wf["lineColor"] == "#475569"  # == _DARK_CHROME["axis"]
+    # The bar hues are NOT flipped: like the shared series palette, they read on both
+    # backgrounds, and their meaning is fixed.
+    assert wf["upColor"] == DEFAULT_COLORS[1] and wf["color"] == DEFAULT_COLORS[3]
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+
+
+# --------------------------------------------------------------------------- #
 # Static-PNG failure messages (the export server's three different answers)
 # --------------------------------------------------------------------------- #
 class _FakeResponse:
@@ -2061,6 +2329,31 @@ def test_response_times_sample_builds_a_boxplot_chart():
         assert list(box) == sorted(box)
 
 
+def test_profit_bridge_sample_builds_a_waterfall_chart():
+    # Ties the new waterfall sample to its intended type end to end. It is the only sample
+    # whose numeric column holds signed DELTAS rather than levels — they mean nothing
+    # individually, only cumulatively — so it is also the only one where the built chart has
+    # MORE marks than the frame has rows: the builder appends the closing total.
+    from sample_data import _profit_bridge
+
+    df = _profit_bridge()
+    opts = build_options(df, "waterfall", "step", ["delta"])
+    assert opts["chart"]["type"] == "waterfall"
+    assert opts["series"][0]["name"] == "delta"
+    data = opts["series"][0]["data"]
+    assert len(data) == len(df) + 1 == 7  # 6 deltas + the appended total
+    assert data[:6] == [420.0, -155.0, -120.0, -64.0, 38.0, -40.0]
+    assert data[6]["isSum"] is True
+    assert opts["xAxis"]["categories"][-1] == "Total"
+    # Mixed signs are the point of the type: a same-signed column would just be a column
+    # chart drawn oddly. "Other income" is the one mid-sequence RISE, which is what proves
+    # the up/down coloring keys off each value's sign rather than off its position.
+    assert min(df["delta"]) < 0 < max(df["delta"])
+    assert df.loc[df["step"] == "Other income", "delta"].item() == 38.0
+    # The deltas bridge gross revenue to net profit — the total Highcharts will compute.
+    assert df["delta"].sum() == 79.0
+
+
 # --------------------------------------------------------------------------- #
 # Full app, headless (Streamlit AppTest)
 #
@@ -2259,6 +2552,45 @@ def test_app_boxplot_kpi_shows_boxes(app):
     # The app's default X is the first column, as the X selectbox's default index shows.
     expected = default_df[default_df.columns[0]].nunique()
     assert metrics["Boxes"] == f"{expected:,}"
+
+
+def test_app_switch_to_waterfall_shows_single_select_y_and_regenerates_config(app):
+    # Waterfall reads its Y as one column of signed deltas, so — like pie/treemap/sankey/
+    # boxplot — it swaps the multi-select Y pills for a single selectbox. It needs no EXTRA
+    # column selector (unlike bubble's Size and sankey's Target), so the widget indices are
+    # unchanged. Network-free.
+    app.selectbox[1].set_value("waterfall").run()  # Chart type -> waterfall
+    assert not app.exception
+    assert not app.pills  # single-select Y, so the pills are gone
+    assert any(sb.label == "Step values (signed delta)" for sb in app.selectbox)
+    assert not any(sb.label == "Size (Z)" for sb in app.selectbox)  # no extra selector
+    assert not any(sb.label == "Target (to)" for sb in app.selectbox)
+    _reveal_config(app)
+    assert not app.exception
+    js = app.code[0].value
+    assert "type: 'waterfall'" in js
+    assert "isSum: true" in js  # the appended total reached the chart
+
+
+def test_app_waterfall_kpi_shows_steps_including_the_appended_total(app):
+    # Waterfall is one series of bars, so the KPI swaps "Series plotted" (which would read a
+    # bare 1) for "Steps" — mirroring heatmap's "Cells", treemap's "Tiles", sankey's "Flows"
+    # and boxplot's "Boxes". It is the one KPI that EXCEEDS the row count, because the
+    # appended total is a bar the chart really draws; sourcing it from count_marks is what
+    # keeps that true rather than merely asserted here.
+    from highcharts_builder import count_marks
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("waterfall").run()  # Chart type -> waterfall
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    x_col = default_df.columns[0]  # the app's default X is the first column
+    y_col = default_df.select_dtypes("number").columns[0]  # and Y the first numeric one
+    expected = count_marks(default_df, "waterfall", x_col, [y_col])
+    assert metrics["Steps"] == f"{expected:,}"
+    assert expected == len(default_df) + 1  # every row a step, plus the total
 
 
 def test_app_heatmap_kpi_shows_cells_from_count_marks(app):
