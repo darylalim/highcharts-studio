@@ -529,7 +529,16 @@ def build_options(
         and pd.api.types.is_numeric_dtype(df[x_col])
     )
     if x_is_label:
-        df = df[df[x_col].map(_label_ok)]
+        # `.astype(bool)` is load-bearing, not defensive. `.map()` infers its result dtype
+        # from the values it produced, and on a ROW-LESS frame there are none to infer from,
+        # so it hands back an empty *object* Series rather than an empty *boolean* one. A
+        # DataFrame indexed by a non-boolean Series is not a mask at all — pandas reads it as
+        # a list of COLUMN NAMES — so `df[...]` would select zero columns and the very next
+        # line to touch `df[x_col]` would die with a bare `KeyError: <x_col>`, in every chart
+        # type. An empty frame is a legitimate input (a CSV with headers and no rows), and it
+        # should draw an empty chart, not raise. The cast pins the dtype so the empty case
+        # masks exactly like the populated one.
+        df = df[df[x_col].map(_label_ok).astype(bool)]
 
     title = title or f"{chart_type.title()} chart"
     colors = list(colors) if colors is not None else list(DEFAULT_COLORS)
@@ -1012,16 +1021,26 @@ def count_marks(
     heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``) and a boxplot
     keeps one box per distinct drawable label (an all-missing group included).
     """
-    label_ok = df[x_col].map(_label_ok)
+    # `.astype(bool)` on all three masks, the same cast — and for the same reason —
+    # `build_options`' label filter makes. On a ROW-LESS frame `.map()` has no values to infer
+    # a result dtype from, so it hands back an empty NON-boolean Series (object, or `str` for
+    # an Arrow-backed column), and each line below then breaks differently on it: `.sum()` of
+    # an empty string mask is `''`, so `int()` raises ValueError; `&` between two of them
+    # raises straight out of the Arrow kernel; and `&` between a bool mask and a string one
+    # still "works" today but is deprecated — pandas warns that it will RAISE in pandas 4 and
+    # tells you to cast explicitly, which is exactly what this is. The KPI has to survive a
+    # header-only CSV the way the chart now does: reporting 0 marks over an empty chart.
+    label_ok = df[x_col].map(_label_ok).astype(bool)
     if chart_type in HEATMAP_TYPES:
         return int(label_ok.sum()) * len(y_cols)
     if chart_type in BOXPLOT_TYPES:
         return int(df.loc[label_ok, x_col].nunique())
-    value_ok = df[y_cols[0]].map(_plottable)
+    value_ok = df[y_cols[0]].map(_plottable).astype(bool)
     if chart_type in TREEMAP_TYPES:
         return int((label_ok & value_ok).sum())
     if chart_type in SANKEY_TYPES:
-        return int((label_ok & df[target_col].map(_label_ok) & value_ok).sum())
+        target_ok = df[target_col].map(_label_ok).astype(bool)
+        return int((label_ok & target_ok & value_ok).sum())
     raise ValueError(f"count_marks has no rule for {chart_type!r}")
 
 

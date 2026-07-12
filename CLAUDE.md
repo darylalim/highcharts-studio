@@ -310,6 +310,20 @@ before it runs.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
   in dict configs fed to highcharts-core (`Chart.from_options`), not Python
   `None`.
+- A **row-less** frame (columns, no rows — a CSV with a header and no data) is a legitimate
+  input and must draw an **empty chart, not raise**. Every `Series.map(...)` used as a mask
+  must therefore be `.astype(bool)`-cast: `.map()` infers its result dtype from the values it
+  produced, and with no rows there are none, so it returns an empty **non-boolean** Series
+  (object, or `str` for an Arrow-backed column). That then breaks three different ways —
+  a DataFrame indexed by a non-boolean Series is not masked at all but read as a list of
+  **column names** (this is what made `build_options` die with a bare `KeyError` in every
+  type); `.sum()` of an empty string mask is `''`, so `int()` raises `ValueError`; and
+  `&` between two of them raises out of the Arrow kernel, while `bool & str` merely *warns*
+  today but is deprecated and will raise in pandas 4. The casts live at
+  `build_options`' `_label_ok` filter and on all three of `count_marks`' masks. Two sweeps
+  pin it (`test_row_less_frame_draws_an_empty_chart_in_every_type` over `SUPPORTED_TYPES`,
+  and `test_count_marks_casts_every_mask_not_just_the_label_one`, which promotes warnings to
+  errors — the only way the non-label casts are observable at all).
 - Treat a **non-finite** number as a missing one. `pd.isna(inf)` is `False`, but an
   infinity can't be serialized: `to_js_literal` emits the bare token `inf`, which is not
   a JavaScript identifier (JS spells it `Infinity`), so the chart call dies with a

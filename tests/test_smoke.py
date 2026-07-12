@@ -40,6 +40,14 @@ Layers:
   ``build_chart_html`` gives the iframe body a background that tracks the mode,
   and it pins the chart's ``color-scheme`` so Highcharts' own ``light-dark()``
   defaults resolve to the export server's values rather than the viewer's browser.
+- a row-less frame (columns, no rows — a header-only CSV) draws an EMPTY chart
+  rather than raising, swept over ``SUPPORTED_TYPES`` because the bug was one
+  shared line: an empty ``.map()`` mask comes back non-boolean, and a DataFrame
+  indexed by one is read as a list of COLUMN NAMES, so every type died with a bare
+  ``KeyError``. ``count_marks`` had the same bug in each of its three masks, where
+  it surfaces instead as ``int('')`` and as an Arrow ``&`` kernel error — and, for
+  the non-label masks, only as a pandas deprecation, so that test promotes warnings
+  to errors to see it at all.
 - ``sample_data`` unit tests: every built-in dataset is plottable (fresh,
   non-empty, with a numeric column).
 - Headless ``AppTest`` interaction tests that drive the full Streamlit app's
@@ -55,6 +63,7 @@ Layers:
 """
 
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -248,6 +257,100 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
         assert js and token not in js.lower(), f"{chart_type} kept a '{token}' label"
 
 
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
+    # A frame with columns but NO ROWS is a legitimate input — a CSV with a header and no
+    # data rows parses to exactly this — and it should draw an EMPTY chart, not raise.
+    #
+    # It used to raise, in all of them, from a single line: the shared `_label_ok` filter
+    # `df[df[x_col].map(_label_ok)]`. `.map()` infers its result dtype from the values it
+    # produced, and with no rows there are none, so it returns an empty *object* Series
+    # instead of an empty *boolean* one — and a DataFrame indexed by a non-boolean Series is
+    # not masked at all, it is read as a list of COLUMN NAMES. So the frame lost every
+    # column and the next line to touch df[x_col] died with a bare `KeyError: 'label'`. The
+    # `.astype(bool)` in that filter is what pins the dtype.
+    #
+    # Swept over SUPPORTED_TYPES because the filter is shared by all of them: one line, one
+    # bug, every type — and a newly added type is covered the day it is added. Both
+    # scatter/bubble paths are reached: the object-dtype x below takes the label path (the
+    # filtered one), and the numeric-x frame in the next test takes the branch that skips it.
+    from highcharts_builder import make_chart
+
+    # "target" (not "to") — the name `_target_for` hands the sankey case, as in
+    # `labeled_frame`.
+    empty = pd.DataFrame(
+        {
+            "label": pd.Series([], dtype=object),
+            "target": pd.Series([], dtype=object),
+            "value": pd.Series([], dtype=float),
+        }
+    )
+    opts = build_options(
+        empty,
+        chart_type,
+        "label",
+        ["value"],
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
+    )
+    assert opts["series"][0]["data"] == []  # an empty chart, not a raise
+    # And it must still SERIALIZE — an empty series is only useful if Highcharts gets it.
+    js = make_chart(
+        empty,
+        chart_type,
+        "label",
+        ["value"],
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
+    ).to_js_literal()
+    assert js and f"type: '{_hc_type(chart_type)}'" in js
+
+
+@pytest.mark.parametrize("chart_type", ["treemap", "sankey"])
+def test_count_marks_casts_every_mask_not_just_the_label_one(chart_type):
+    # The two types that AND their masks together (`label_ok & value_ok`, plus sankey's
+    # `target_ok`). On a row-less frame each `.map()` returns a non-boolean Series, and once
+    # the label mask alone is cast, `bool & str` still evaluates — so a missing cast on the
+    # OTHER masks is invisible to an ordinary assertion. It is not harmless: pandas emits a
+    # deprecation saying the operation will RAISE in pandas 4 and that the operand must be
+    # cast explicitly. So promote warnings to errors — that is the only thing that can see it.
+    #
+    # The value/target columns are given a STRING dtype on purpose. A y column is numeric in
+    # the app (the picker draws from select_dtypes("number")), and `bool & float64` neither
+    # warns nor raises; only a non-numeric one — reachable through the pure builder API this
+    # module is — puts the string mask on the right-hand side where the deprecation bites.
+    from highcharts_builder import count_marks
+
+    empty = pd.DataFrame(
+        {
+            "cat": pd.Series([], dtype="str"),
+            "to": pd.Series([], dtype="str"),
+            "v": pd.Series([], dtype="str"),
+        }
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any pandas deprecation here fails the test
+        assert count_marks(empty, chart_type, "cat", ["v"], target_col="to") == 0
+
+
+def test_row_less_frame_with_a_numeric_x_also_draws_an_empty_chart():
+    # The other side of the `x_is_label` branch: scatter/bubble with a NUMERIC x skip the
+    # label filter entirely (x is a coordinate `_plottable` guards per point), so they reach
+    # the row-less frame by a different route and must survive it too.
+    numeric = pd.DataFrame(
+        {"label": pd.Series([], dtype=float), "value": pd.Series([], dtype=float)}
+    )
+    for chart_type in ("scatter", "bubble"):
+        opts = build_options(
+            numeric,
+            chart_type,
+            "label",
+            ["value"],
+            size_col="value" if chart_type == "bubble" else None,
+        )
+        assert opts["series"][0]["data"] == []
+
+
 @pytest.mark.parametrize("chart_type", ["heatmap", "treemap", "sankey", "boxplot"])
 def test_count_marks_matches_the_built_series(chart_type):
     # The app's KPI (heatmap Cells / treemap Tiles / sankey Flows / boxplot Boxes) comes
@@ -269,6 +372,18 @@ def test_count_marks_matches_the_built_series(chart_type):
     built = build_options(df, chart_type, "cat", ["v"], target_col="to")
     drawn = len(built["series"][0]["data"])  # series[0] is the cells/tiles/links/boxes
     assert count_marks(df, chart_type, "cat", ["v"], target_col="to") == drawn
+    # The two must also agree on a ROW-LESS frame (a header-only CSV), where the chart is
+    # empty — so the KPI reads 0 rather than counting marks nobody drew. This is the case
+    # that used to make build_options raise outright (see the row-less sweep above), so the
+    # KPI half was never even reachable to be wrong.
+    empty = df.iloc[:0]
+    assert (
+        build_options(empty, chart_type, "cat", ["v"], target_col="to")["series"][0][
+            "data"
+        ]
+        == []
+    )
+    assert count_marks(empty, chart_type, "cat", ["v"], target_col="to") == 0
     # And the expected value, spelled out, so the cross-check can't pass on a shared bug:
     assert drawn == {"heatmap": 4, "treemap": 2, "sankey": 1, "boxplot": 4}[chart_type]
 
