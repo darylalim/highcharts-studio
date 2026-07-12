@@ -368,21 +368,19 @@ with st.container(horizontal=True):
     # The count comes from the builder's count_marks, which applies the very _label_ok /
     # _plottable drop rules build_options does, so the KPI can't drift from what the chart
     # draws (a missing/non-finite label drops its row in every type; a non-plottable value
-    # drops a tile/flow too; a waterfall's appended Total is a bar, so its count exceeds its
-    # DRAWABLE step count by one — not necessarily its row count, since an undrawable label
-    # drops its step). count_marks reads only the columns each type needs, so it works here
-    # above the empty-y guard, as these metrics always have. See MARK_METRICS.
-    # Sunburst is the one type whose count_marks needs a column the user could have set to
-    # x_col — and, unlike sankey's, its count RESOLVES THE HIERARCHY, so Node == Parent is a
-    # self-cycle in every row. count_marks itself is total (it returns 0 on a contradictory
-    # tree rather than raising, precisely so this row can't blow up), but build_options DOES
-    # raise on that selection, so the guard below is what the user must reach — and this metric
-    # must not pretend to a number. It falls through to "Series plotted", the same useful empty
-    # state an unselected Y already shows before its own guard fires.
-    countable = chart_type in MARK_METRICS and not (
-        chart_type == "sunburst" and x_col == parent_col
-    )
-    if countable:
+    # drops a tile/flow too; a waterfall's appended Total is a bar, and a sunburst's appended
+    # root is a sector, so their counts exceed their DRAWABLE mark count by one — not
+    # necessarily their row count, since an undrawable label drops its row). count_marks reads
+    # only the columns each type needs, so it works here above the empty-y guard, as these
+    # metrics always have. See MARK_METRICS.
+    #
+    # This row runs ABOVE the guards below it, which is why count_marks must be TOTAL: on a
+    # contradictory sunburst (a cyclic CSV, or Node == Parent) it returns 0 rather than raising,
+    # so the page shows "Sectors 0" over the chart it is about to replace with a warning — the
+    # true count, and the same empty state "Series plotted" gives before the empty-Y guard
+    # fires. It needs no special case here; one branch, however many count-adaptive types there
+    # are (the MARK_METRICS property), and sankey's own collision is already treated this way.
+    if chart_type in MARK_METRICS:
         marks = count_marks(
             df, chart_type, x_col, y_cols, target_col=target_col, parent_col=parent_col
         )

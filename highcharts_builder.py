@@ -14,6 +14,7 @@ The flow mirrors the highcharts-core pattern (an options ``dict`` ->
 from __future__ import annotations
 
 import html
+import itertools
 import math
 import warnings
 from typing import Any
@@ -197,8 +198,10 @@ _SUNBURST_ROOT_LABEL = "All"
 # alike, so like the series palette it needs no dark-mode flip.
 _SUNBURST_ROOT_COLOR = "#94a3b8"  # slate: the app's "not a category" grey
 # The root would otherwise take an equal share of the radius as every data ring — on a
-# two-ring tree, half of it: a giant grey disc. Shrink it to a hub.
-_SUNBURST_ROOT_SIZE = {"unit": "percentage", "value": 15}
+# two-ring tree, half of it: a giant grey disc. Shrink it to a hub. A scalar rather than the
+# {"unit", "value"} dict Highcharts wants: a mutable module constant would need a defensive
+# copy at its one use site (the _HEATMAP_GRADIENT rule), and there is nothing to copy here.
+_SUNBURST_ROOT_SIZE_PCT = 15
 _SUNBURST_ROOT_LEVEL = 1  # the synthesized root
 _SUNBURST_BRANCH_LEVEL = 2  # ring 1: the top-level branches, seeded from `colors`
 # Sectors below ring 1 carry no color of their own — they INHERIT their branch's hue, which is
@@ -650,12 +653,13 @@ def _sunburst_tree(
         # Ids run over the SURVIVING rows rather than df.index: build_options passes an
         # already-filtered frame (whose index has gaps) while count_marks passes the raw one,
         # so a counter is what makes the two produce byte-identical ids.
+        key = _node_key(label)
         node = f"{_SUNBURST_NODE_ID_PREFIX}{len(ids)}"
         ids.append(node)
-        name_of[node] = _node_key(label)
+        name_of[node] = key
         value_of[node] = value
         raw_parent[node] = parent
-        by_key.setdefault(_node_key(label), []).append(node)
+        by_key.setdefault(key, []).append(node)
 
     # Resolve each row's parent LABEL to a node id.
     parent_of: dict[
@@ -690,21 +694,23 @@ def _sunburst_tree(
     # the root it hands back each node's level for free. Iterative, not recursive — a
     # 50,000-deep chain is valid input and a 50,000-long cycle is reachable input, and
     # recursion would die on both. O(N): every node is walked once, then settled.
-    walking, dead = 1, 2
-    level: dict[str, int] = {}  # id -> level; ABSENT means unreachable from the root
-    state: dict[str, int] = {}
+    #
+    # It needs exactly TWO bits about a node, and they are easy to conflate: "is it on the path
+    # I am walking RIGHT NOW" (a cycle) versus "was it already settled as unreachable" (it
+    # dangles, or hangs off something that does). Collapsing them loses the ability to tell a
+    # cycle from a walk that merely ran into a known-dead chain. So the second lives in
+    # `settled` — where `None` says unreachable, because "settled at depth N" and "settled,
+    # unreachable" are the same *kind* of fact about a node and belong in one map — and the
+    # first in a set scoped to THIS walk, which is what makes it mean what it says.
+    settled: dict[
+        str, int | None
+    ] = {}  # id -> level, or None: unreachable from the root
     for start in ids:
-        if start in level or state.get(start) == dead:
-            continue
         path: list[str] = []
+        on_path: set[str] = set()  # this walk only, so a stale mark can't fake a cycle
         node: str | None = start
-        while (
-            node is not None
-            and node != _SUNBURST_ROOT_ID
-            and node not in level
-            and state.get(node) != dead
-        ):
-            if state.get(node) == walking:  # stepped back onto THIS path
+        while node is not None and node != _SUNBURST_ROOT_ID and node not in settled:
+            if node in on_path:  # stepped back onto THIS path
                 loop = [*path[path.index(node) :], node]
                 return (
                     [],
@@ -713,26 +719,25 @@ def _sunburst_tree(
                         parent_col=parent_col, chain=_cycle_chain(loop, name_of)
                     ),
                 )
-            state[node] = walking
+            on_path.add(node)
             path.append(node)
             node = parent_of[node]
         if node == _SUNBURST_ROOT_ID:
             base: int | None = _SUNBURST_ROOT_LEVEL
-        elif node is None or state.get(node) == dead:
-            base = None  # dangling, or hanging off something that dangles
+        elif node is None:
+            base = None  # this chain's top row names a parent that is not a node
         else:
-            base = level[node]  # joined a chain already settled by an earlier walk
+            # Joined a chain an earlier walk already settled — whose level is itself None if
+            # that chain was unreachable, which is precisely what keeps the drop TRANSITIVE.
+            base = settled[node]
         # Settle the path just walked, nearest-the-root first. A dangling node's descendants
-        # terminate their own walk on a `dead` node and are marked dead in turn, so the
-        # TRANSITIVE drop falls out for free: reachability-from-the-root IS the dangling rule,
-        # stated once. It has to be transitive — an unmatched `parent` is not left alone by
-        # Highcharts, which silently re-parents it to the root, quietly promoting an orphaned
-        # grandchild into ring 1.
+        # inherit its None, so the transitive drop falls out for free: reachability-from-the-root
+        # IS the dangling rule, stated once. It has to be transitive — an unmatched `parent` is
+        # not left alone by Highcharts, which silently re-parents it to the root, quietly
+        # promoting an orphaned grandchild into ring 1.
         for depth, walked in enumerate(reversed(path), start=1):
-            if base is None:
-                state[walked] = dead
-            else:
-                level[walked] = base + depth
+            settled[walked] = None if base is None else base + depth
+    level = {node: depth for node, depth in settled.items() if depth is not None}
 
     # Prune valueless LEAVES, deepest first. A node's children all sit at level + 1, so
     # descending level is a topological order for a forest: every child is decided before its
@@ -741,16 +746,21 @@ def _sunburst_tree(
     # the rule itself: a node whose only child was dropped BECOMES a leaf, and then its own
     # value is what sizes it.
     kept: dict[str, bool] = {}
-    kept_children: dict[str, list[str]] = {}
+    has_kept_child: set[str] = (
+        set()
+    )  # a SET: nothing ever reads *which* children survived
     for node in sorted(level, key=lambda n: level[n], reverse=True):
         # `_sizable` is evaluated for every node, internal ones included, so a text value
         # column raises ValueError uniformly (through float() inside _plottable) rather than
         # raising or not depending on the tree's shape — boxplot's stated contract.
-        keep = _sizable(value_of[node]) or bool(kept_children.get(node))
+        keep = _sizable(value_of[node]) or node in has_kept_child
         kept[node] = keep
         parent = parent_of[node]
+        # `parent is not None` can never actually be False here — a node whose parent dangles is
+        # unreachable, so it never landed in `level` and never reaches this loop. It narrows the
+        # type for `set[str]`; don't go hunting for the case it guards.
         if keep and parent is not None and parent != _SUNBURST_ROOT_ID:
-            kept_children.setdefault(parent, []).append(node)
+            has_kept_child.add(parent)
 
     points: list[dict[str, object]] = []
     for node in ids:  # ROW order, not level order
@@ -761,7 +771,7 @@ def _sunburst_tree(
             "parent": parent_of[node],
             "name": name_of[node],
         }
-        if not kept_children.get(node):
+        if node not in has_kept_child:
             # Only a LEAF of the DRAWN tree carries a value. An internal node is emitted with
             # none, and Highcharts sums its children into it. That is not deference, it is the
             # only honest option: an explicit parent value OVERRIDES the sum, so emitting a
@@ -796,10 +806,12 @@ def _sunburst_levels(max_level: int) -> list[dict[str, object]]:
     identical before and after a traversal, which is the point of turning traversal on.
     """
     levels: list[dict[str, object]] = [
-        # dict() copies the module constant so nothing downstream can mutate it (the
-        # _HEATMAP_GRADIENT rule). Without it the root takes an equal share of the radius as
-        # every data ring — on a two-ring tree, half of it: a giant slate disc.
-        {"level": _SUNBURST_ROOT_LEVEL, "levelSize": dict(_SUNBURST_ROOT_SIZE)}
+        # Without the levelSize the root takes an equal share of the radius as every data ring
+        # — on a two-ring tree, half of it: a giant slate disc.
+        {
+            "level": _SUNBURST_ROOT_LEVEL,
+            "levelSize": {"unit": "percentage", "value": _SUNBURST_ROOT_SIZE_PCT},
+        }
     ]
     for index, ring in enumerate(range(_SUNBURST_BRANCH_LEVEL + 1, max_level + 1)):
         to = -_SUNBURST_COLOR_VARIATION if index % 2 == 0 else _SUNBURST_COLOR_VARIATION
@@ -1505,15 +1517,13 @@ def build_options(
         #
         # Read from `colors` (not DEFAULT_COLORS): a branch's hue is its arbitrary IDENTITY,
         # like a pie slice's, so a caller may override it — the opposite of waterfall, whose
-        # red-means-loss is semantics. `%` cycles a short custom palette rather than
-        # IndexError-ing (the _BOXPLOT_OUTLIER_COLOR concern), and `or` keeps an empty one from
-        # a ZeroDivisionError.
-        palette = colors or list(DEFAULT_COLORS)
-        branch = 0
+        # red-means-loss is semantics. `cycle` wraps a short custom palette rather than
+        # IndexError-ing (the _BOXPLOT_OUTLIER_COLOR concern); `or` keeps an EMPTY one from
+        # exhausting it on the first `next`.
+        hues = itertools.cycle(colors or DEFAULT_COLORS)
         for point in points:
             if point["parent"] == _SUNBURST_ROOT_ID:
-                point["color"] = palette[branch % len(palette)]
-                branch += 1
+                point["color"] = next(hues)
         if points:
             # The synthesized root, APPENDED — waterfall's Total set the precedent for drawing
             # a mark the frame never held, and appending keeps the real nodes at their row

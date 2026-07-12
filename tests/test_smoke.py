@@ -3324,6 +3324,30 @@ def test_app_sunburst_node_equals_parent_shows_guard_warning(app):
     assert not app.exception  # the guard fires; it does NOT blow up the page
     assert app.warning
     assert "Node and Parent must be different" in app.warning[0].value
+    # The KPI row runs ABOVE that guard, so it still renders — and it must render the SAME way
+    # a cyclic CSV does (below), because they are the same contradiction. This is the assertion
+    # that keeps the KPI from growing a special case: count_marks is total, so it reports the
+    # true count of the chart about to be replaced by the warning. A `chart_type == "sunburst"
+    # and x_col == parent_col` escape hatch here would read "Series plotted 1" instead, making
+    # two identical situations display differently and breaking MARK_METRICS' one-branch
+    # property. Nothing else in the suite would notice.
+    metrics = _metrics(app)
+    assert metrics["Sectors"] == "0"
+    assert "Series plotted" not in metrics
+
+
+def test_app_sunburst_a_contradictory_tree_reads_zero_sectors(app):
+    # The other half of the pair above, on the other contradiction: a cyclic CSV reaches the
+    # same guard block and must reach the same KPI. Pins the two together, so neither can grow
+    # a special case the other doesn't.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        ("cycle.csv", b"node,parent,value\na,b,1\nb,a,2\n", "text/csv")
+    ).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("sunburst").run()
+    assert not app.exception
+    assert _metrics(app)["Sectors"] == "0"
 
 
 def test_app_sunburst_a_cyclic_csv_warns_instead_of_crashing(app):
