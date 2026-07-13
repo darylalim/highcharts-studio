@@ -36,6 +36,9 @@ BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw 
 WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
 SUNBURST_TYPES = ("sunburst",)  # a hierarchy as concentric rings, re-rootable by click
 XRANGE_TYPES = ("xrange",)  # a Gantt timeline: bars spanning [start, end] on lanes
+# concentric rings: one column, reduced to one number, per ring. Named as Highcharts names it,
+# leaving `gauge` free for the needle-on-a-dial chart, which is a different series type.
+GAUGE_TYPES = ("solidgauge",)
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -49,6 +52,7 @@ SUPPORTED_TYPES = (
     + WATERFALL_TYPES
     + SUNBURST_TYPES
     + XRANGE_TYPES
+    + GAUGE_TYPES
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
@@ -81,6 +85,10 @@ CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 # columns of which only one, y_cols[0], is even a y column — so like sankey's and
 # sunburst's it gets a dedicated guard in build_options. x_col in y_cols then merely
 # names each lane by its own start coordinate: scatter's x-in-y tolerance again.
+# Gauge is absent for a FOURTH reason, and it retires the question rather than answering
+# it: the rule reads "x_col cannot ALSO be a y series", and a gauge HAS no x_col. It is the
+# one type with no label channel at all (its x_col is None), so there is no collision to
+# express — not a tolerated one, as scatter's is, but an unstatable one.
 X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES + BOXPLOT_TYPES + WATERFALL_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
@@ -289,6 +297,86 @@ _XRANGE_MIN_POINT_LENGTH = 3
 # render a single bar as a thick slab spanning the plot.
 _XRANGE_POINT_WIDTH = 20
 
+# Gauge is the first type with NO LABEL CHANNEL. Every other type names its marks from a
+# column — a slice, an axis category, a node, a box, a lane — but a gauge's marks are the
+# SELECTED COLUMNS THEMSELVES, each reduced to one number. So `x_col` names nothing and is
+# None, which is why the branch runs ABOVE the shared `_label_ok` filter and why `x_col`
+# widened to `str | None`.
+#
+# It is drawn as an ACTIVITY GAUGE, and the canonical Highcharts recipe for one — a SINGLE
+# series whose N points each carry their own radius — is UNAVAILABLE here: a POINT-level
+# `radius`/`innerRadius` is accepted by `Chart.from_options` and then silently dropped from
+# the emitted JS, while the SERIES-level ones survive (verified on the round-trip). This is the
+# sankey-`nodeFormat` / boxplot-`fillColor` / sunburst-`levels[].colorByPoint` family again, and
+# the first of them to dictate the SHAPE of a whole branch rather than one of its options: each
+# ring MUST be its own series. Forced, not chosen — and that is exactly what makes
+# marks == series == len(y_cols), which is why solidgauge needs no `count_marks` rule and no
+# `MARK_METRICS` entry. The app's default "Series plotted" already IS the ring count.
+#
+# It is named `solidgauge`, Highcharts' own name for it, and NOT the friendlier `gauge` — which
+# radar's precedent (it is `radar` and serializes as a `line` with `chart.polar`) would have
+# licensed. The name is deliberately left free, because `gauge` in Highcharts is a DIFFERENT
+# chart: a needle on a dial, a distinct series type with its own `DialOptions`/`PivotOptions`,
+# which highcharts-core also supports and which this module may well add. Spending the obvious
+# name on the arc would leave the needle nothing to be called. (Whoever adds it should know that
+# `plot_options/gauge.py`'s `top_width` validator lacks `allow_empty=True`, so ANY `dial` dict
+# omitting `topWidth` raises `EmptyValueError` — passing it explicitly works.)
+_GAUGE_OUTER_PCT = 100.0  # the outermost ring's outer edge, in % of the pane radius
+# The empty centre the stacked value labels sit in. Measured, not chosen: the hub scales with
+# the chart, so the labels have least room at the SMALLEST height the app offers (300px), and
+# that is where the gate below has to hold. At a 30% hub a fifth line already overprints the
+# innermost arc there; at 36% five lines sit clear of it.
+_GAUGE_HUB_PCT = 36.0
+_GAUGE_RING_GAP_PCT = 3.0  # the space between two rings, when there is room for one
+_GAUGE_MAX_GAP_FRACTION = (
+    0.25  # ...but never more than a quarter of a band (see _gauge_rings)
+)
+# A ring has to look like a RING. Left to divide the whole radius between them, ONE column draws
+# an arc 61% thick — a fat disc with a pinhole, which reads as a pie with a bite out of it rather
+# than as a gauge (verified by rendering). Only n=1 and n=2 are wide enough to hit this; from
+# three rings up the band is already thinner than the cap and it is inert.
+_GAUGE_MAX_THICKNESS_PCT = 30.0
+_GAUGE_LABEL_LINE_PX = 17  # the leading between two stacked hub labels
+# Gated on ring count, like heatmap's cells, sankey's links, waterfall's steps and sunburst's
+# sectors. Two DIFFERENT failures make this gate necessary, and only the second is about taste.
+# Highcharts hides a data label that collides with another — by rendering the <text> and turning
+# it INVISIBLE, so the element is still in the DOM and every assertion about it still passes
+# while a ring's value is simply absent from the chart. `allowOverlap` below turns that off, at
+# which point the labels all render and the real limit is physical: the hub is a fixed fraction
+# of a radius, the stack grows with the ring count, and past this many lines they print over the
+# arcs. Verified by rendering at 300px, the smallest chart the app can draw.
+_GAUGE_DATALABEL_MAX_RINGS = 5
+# The unfilled remainder of a ring is literally a heatmap's empty cell — "no value here" — so it
+# takes the same color, and flips to the same dark one in `_themed`. No new colors.
+_GAUGE_TRACK_COLOR = _HEATMAP_NULL
+_GAUGE_EMPTY_DIAL = (
+    0.0,
+    100.0,
+)  # nothing to scale: a drawable dial, never a degenerate 0..0
+_GAUGE_NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
+
+# The reductions a gauge may apply. Exported as a public tuple so the app's picker is SOURCED
+# from the builder — `coordinate_columns`' can't-drift rule, applied to a POLICY rather than to
+# a column: the app can never offer a reduction the builder would reject.
+_GAUGE_REDUCERS: dict[str, Any] = {
+    "sum": lambda s: float(s.sum()),
+    "mean": lambda s: float(s.mean()),
+    "median": lambda s: float(s.median()),
+    "min": lambda s: float(s.min()),
+    "max": lambda s: float(s.max()),
+    "last": lambda s: float(
+        s.iloc[-1]
+    ),  # the last KNOWN reading: `_finite_values` ran first
+}
+GAUGE_AGGREGATIONS = tuple(_GAUGE_REDUCERS)
+_GAUGE_DEFAULT_AGG = "sum"
+
+_GAUGE_BAD_AGG = "Unsupported gauge aggregation {agg!r}; expected one of {allowed}"
+_GAUGE_BAD_DIAL = (
+    "The dial's maximum ({high}) must be a finite number above its minimum ({low}): a dial "
+    "with no span makes every ring an undefined fraction of nothing."
+)
+
 # Highcharts >= 13 expresses its own default colors as CSS custom properties wrapped in
 # `light-dark(...)` — e.g. `--highcharts-background-color: light-dark(#ffffff, #141414)`.
 # So every color we do NOT set explicitly resolves against the *browser's*
@@ -448,6 +536,28 @@ def _themed(options: dict, *, dark: bool) -> dict:
         # background (the treemap rule, not pie's), and the branch hues and the root's slate
         # read on both backgrounds like the shared palette.
         options["plotOptions"]["sunburst"]["borderColor"] = t["bg"]
+    if isinstance(options.get("subtitle"), dict):
+        # Beside the title line above. Gauge is the first type to carry a subtitle; any future
+        # one gets this for free.
+        options["subtitle"] = {
+            **options["subtitle"],
+            "style": {"color": t["muted"]},
+        }
+    if options["chart"].get("type") == "solidgauge":
+        # The dial TRACKS — the FIRST `_themed` hook to reach a TOP-LEVEL key rather than
+        # `plotOptions[type]`. Less an exception than a demonstration: a track is CHROME (the
+        # gauge's gridline; the color of "no value here") that happens to belong to exactly one
+        # type, so it lives on the pane, not on the series.
+        #
+        # It is also the ONLY hook this type can have. `borderColor` is impossible —
+        # `SolidGaugeSeries` models no border at any level, and a plotOptions `borderColor` is
+        # silently dropped (boxplot's `fillColor`, exactly) — and the hub labels carry their
+        # ring's palette hue, which reads on both backgrounds like the palette itself. Left
+        # unset, a track takes a Highcharts default that `_LIGHT_COLOR_SCHEME_CSS` pins to its
+        # LIGHT resolution in BOTH themes, so every dial would sit on a pale rail against the
+        # dark shell.
+        for track in options["pane"]["background"]:
+            track["backgroundColor"] = t["grid"]
     return options
 
 
@@ -709,6 +819,189 @@ def _spannable(start: float, end: float) -> bool:
     return _plottable(start) and _plottable(end) and float(end) >= float(start)
 
 
+def _finite_values(values: pd.Series) -> pd.Series:
+    """One column's observations as ``float64``, reduced to the FINITE ones.
+
+    Shared by the module's two AGGREGATING types — ``_box_stats`` and ``_gauge_value`` — which
+    are exactly the two that need it, and need it for one reason. Casting first means a text
+    column raises ``ValueError`` here, as ``float(value)`` does in the pointwise branches,
+    rather than an opaque dtype error out of ``.quantile()`` or ``.sum()``. Dropping the
+    infinities means the arithmetic downstream cannot be poisoned by one (``inf - inf = nan``
+    for a whisker; an ``inf`` summand for a ring) and cannot smuggle the bare token ``inf``
+    into the emitted JS (see ``_plottable``).
+    """
+    numeric = values.astype("float64")
+    return numeric[numeric.abs() != float("inf")].dropna()
+
+
+def _gauge_value(values: pd.Series, agg: str) -> object:
+    """One column reduced to the ONE number its ring draws — or ``EnforcedNull``.
+
+    The EMPTY test runs FIRST, above the reducer, and that order is the whole design
+    (``_coordinates``' ``_COORD_EMPTY`` ordering, for the identical reason).
+    ``pd.Series([], dtype="float64").sum()`` is ``0.0``, not NaN — and so is an all-NaN
+    column's — so pandas hands back the additive IDENTITY. Under ``sum`` an unfilled column
+    would therefore report "the total is zero": a confident CLAIM where the truth is "there is
+    no data", drawn as a real ring sitting at the dial's floor to say so. mean/median/min/max/
+    last all give NaN; only ``sum`` lies, which makes it worse rather than better, because the
+    bug would live in exactly one of the six reductions and look like a rounding quirk in the
+    other five. Testing for empty ABOVE the dispatch makes it unrepresentable rather than a
+    special case somebody has to remember.
+
+    Then ``_num``, not ``float()``: gauge is the second type (after boxplot) that does
+    ARITHMETIC on the values, so it can manufacture a NON-FINITE reading out of finite inputs
+    (``1e308 + 1e308`` is ``inf``, and a 1e308 cell parses out of a plain CSV). Boxplot's
+    overflow lesson, one type over.
+    """
+    clean = _finite_values(values)
+    if clean.empty:
+        return EnforcedNull  # no data — NOT "the total is zero"
+    with warnings.catch_warnings():
+        # A finite column can still overflow the double range while being summed. The overflow
+        # is expected and `_num` handles it; silence the RuntimeWarning rather than let it spam
+        # the server log as if it were an unguarded bug (`_box_stats`' reasoning, same fix).
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return _num(_GAUGE_REDUCERS[agg](clean))
+
+
+def _check_gauge_agg(agg: str) -> None:
+    if agg not in _GAUGE_REDUCERS:
+        raise ValueError(_GAUGE_BAD_AGG.format(agg=agg, allowed=GAUGE_AGGREGATIONS))
+
+
+def _nice_ceiling(value: float) -> float:
+    """Round a positive number UP to the next 1/2/2.5/5/10 x 10**k — 436 -> 500, 79 -> 100.
+
+    A dial ending exactly at the largest reading would draw that ring 100% full whatever it
+    holds, with no headroom and a maximum nobody would choose. "436 of 500" is the only reading
+    a gauge ever gives, so the 500 has to come from somewhere.
+
+    The two fallbacks are not defensive; they are the two ways this arithmetic breaks on real
+    input. A candidate can OVERFLOW (``2.0 * 1e308`` is ``inf``, and one 1.5e308 cell parses
+    fine out of a plain CSV), which would put the bare token ``inf`` in the emitted JS — the
+    ReferenceError-in-the-iframe / HTTP-400 failure this module's whole missing-data doctrine
+    exists to prevent. And the magnitude can UNDERFLOW (``10.0 ** -324`` is ``0.0``), leaving
+    every candidate at zero and the dial with no extent. In both cases the reading itself is
+    finite and positive, so it is its own ceiling.
+    """
+    if not _plottable(value) or value <= 0:
+        return 0.0
+    magnitude = 10.0 ** math.floor(math.log10(value))
+    for step in _GAUGE_NICE_STEPS:
+        candidate = step * magnitude
+        if candidate >= value and _plottable(candidate):
+            return candidate
+    return float(value)
+
+
+def _nice_floor(value: float) -> float:
+    """``_nice_ceiling``'s mirror for a negative reading: -436 -> -500.
+
+    Zero for anything non-negative: a gauge is read FROM zero (see the branch's ``threshold``),
+    so a dial that need not go below it does not.
+    """
+    return 0.0 if value >= 0 else -_nice_ceiling(-value)
+
+
+def gauge_dial(
+    df: pd.DataFrame, y_cols: list[str], agg: str = _GAUGE_DEFAULT_AGG
+) -> tuple[float, float]:
+    """The dial ``(min, max)`` a gauge draws when the caller names none.
+
+    EXPORTED so ``streamlit_app`` can SEED its Dial min/max inputs from the builder instead of
+    recomputing them — ``coordinate_columns``' can't-drift rule, and the first time this module
+    hands the app a VALUE to put in a widget rather than a SET of options to populate one.
+
+    Derived from the READINGS, never from the raw columns, and that is the type's central
+    invariant rather than a nicety. Under ``sum`` a reading EXCEEDS every observation in its own
+    column, so a max derived from the raw column would pin every ring past the end of its own
+    dial — "everyone hit target", drawn confidently, on data that says nothing of the sort.
+    Reducing first, with the very reduction the rings draw, makes a ring that overflows its own
+    derived dial arithmetically unrepresentable.
+
+    TOTAL by construction, like ``count_marks``: it runs ABOVE the app's empty-Y guard, so an
+    empty selection, an all-missing column and a row-less frame each give the empty dial rather
+    than raising — or, worse, a degenerate ``0..0`` that Highcharts would divide by.
+    """
+    _check_gauge_agg(agg)
+    # `isinstance(..., float)` IS the "a reading, or an absence?" question: `_gauge_value`
+    # returns one or the other, and an EnforcedNull is not a number to take a min over.
+    readings = [
+        value
+        for value in (_gauge_value(df[col], agg) for col in y_cols)
+        if isinstance(value, float)
+    ]
+    if not readings:
+        return _GAUGE_EMPTY_DIAL
+    # Anchored at zero on BOTH ends — a gauge is read from zero, so the dial contains it even
+    # when no reading is near it. (`_nice_floor` returns 0.0 for anything non-negative, so a
+    # dial only goes below zero when a reading does.)
+    low = _nice_floor(min(0.0, min(readings)))
+    high = _nice_ceiling(max(0.0, max(readings)))
+    if high <= low:  # every reading is exactly zero — a dial with no extent
+        return _GAUGE_EMPTY_DIAL
+    return low, high
+
+
+def explain_gauge_error(dial: tuple[float, float] | None) -> str | None:
+    """``None`` when a dial has extent; otherwise the reason it hasn't.
+
+    The third of the ``explain_tree_error`` / ``explain_xrange_error`` family, and the first
+    that reads NO FRAME at all: this contradiction is a fact about two numbers the user typed,
+    not about a column or a tree. Same contract, for the same reason — the builder owns the
+    dial, so it owns the diagnosis, and the message it RETURNS here is the very one
+    ``build_options`` RAISES, so the app's warning and the exception it stands in for cannot
+    drift apart. Returned rather than raised because it is reachable from the app (the two
+    number inputs accept any two numbers) and the interactive path does not catch builder
+    errors.
+    """
+    if dial is None:
+        return None  # not an error: "derive it" (see gauge_dial)
+    low, high = dial
+    if _plottable(low) and _plottable(high) and float(high) > float(low):
+        return None
+    return _GAUGE_BAD_DIAL.format(low=low, high=high)
+
+
+def _gauge_rings(count: int) -> list[tuple[float, float]]:
+    """The ``(outer, inner)`` radius of each ring, in percent, OUTERMOST FIRST.
+
+    So ``y_cols[0]`` — the column the user named first — is the headline ring.
+
+    Two caps, each stopping the band from degenerating at one END of the range, and neither is
+    tidiness.
+
+    The GAP is capped at a fraction of the band, for MANY rings. A fixed 3% gap exceeds the band
+    once there are more than ~21 of them, at which point ``inner > outer`` and Highcharts draws
+    garbage — and a wide CSV with 40 numeric columns is one click away. Capping the RING COUNT
+    instead would mean dropping a column the user asked for (the renumbering lie the null ring
+    exists to prevent), so the geometry DEGRADES — thin rings — rather than breaking: thickness
+    stays >= 0.75 x band > 0 for every count >= 1, and the empty-``y_cols`` guard makes 0
+    unreachable. What genuinely stops scaling is the centred LABEL STACK, and that is gated on
+    count (``_GAUGE_DATALABEL_MAX_RINGS``) like every other in-mark label in this module.
+
+    The THICKNESS is capped for FEW rings, and it is the same failure at the other end: with the
+    whole radius to divide between them, one column draws an arc 61% thick — a fat disc with a
+    pinhole, which reads as a pie with a bite out of it rather than as a gauge (verified by
+    rendering). A ring has to look like a ring. Inert from three rings up, where the band is
+    already thinner than the cap.
+    """
+    band = (_GAUGE_OUTER_PCT - _GAUGE_HUB_PCT) / count
+    gap = min(_GAUGE_RING_GAP_PCT, band * _GAUGE_MAX_GAP_FRACTION)
+    thickness = min(band - gap, _GAUGE_MAX_THICKNESS_PCT)
+    return [
+        (
+            _GAUGE_OUTER_PCT - index * band,
+            _GAUGE_OUTER_PCT - index * band - thickness,
+        )
+        for index in range(count)
+    ]
+
+
+def _pct(value: float) -> str:
+    return f"{value:.1f}%"
+
+
 def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
     """Reduce one category's raw observations to a Tukey box, plus its outliers.
 
@@ -756,8 +1049,7 @@ def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
       the mirror case, a group skewed the other way (``[0, 1, 2, 102]`` gives ``q3 = 27``
       while the highest in-fence point is ``2``), is what ``high``'s clamp catches.
     """
-    numeric = values.astype("float64")
-    clean = numeric[numeric.abs() != float("inf")].dropna()
+    clean = _finite_values(values)
     if clean.empty:
         return EnforcedNull, []
     # A huge-but-finite group overflows the double range during aggregation (numpy's
@@ -1170,7 +1462,9 @@ def _in_mark_labels(fmt: str, **extra: object) -> dict[str, object]:
 def build_options(
     df: pd.DataFrame,
     chart_type: str,
-    x_col: str,
+    # `None` for gauge alone — the one type with no label channel, so the column role that
+    # every other type takes for granted stops being universal. Guarded below.
+    x_col: str | None,
     y_cols: list[str],
     *,
     title: str | None = None,
@@ -1180,6 +1474,8 @@ def build_options(
     target_col: str | None = None,
     parent_col: str | None = None,
     end_col: str | None = None,
+    agg: str = _GAUGE_DEFAULT_AGG,
+    dial: tuple[float, float] | None = None,
 ) -> dict:
     """Return a Highcharts options ``dict`` for the given DataFrame and columns.
 
@@ -1250,6 +1546,17 @@ def build_options(
       they read as ISO-8601 dates, linear if they read as numbers. A row missing either
       end is dropped, as is one whose bar runs BACKWARDS; a zero-length one (a milestone)
       is kept and floored to a visible sliver. Pulls in the ``modules/xrange`` module.
+    - ``solidgauge``: concentric rings on one shared dial — an "activity gauge". The only type
+      with NO LABEL CHANNEL: ``x_col`` is unused (and is ``None``), because a gauge's marks
+      are the SELECTED COLUMNS THEMSELVES. Each ``y_cols`` column becomes one ring, showing
+      that column REDUCED to a single number by ``agg`` (see ``GAUGE_AGGREGATIONS``) — so it
+      is the second AGGREGATING type after boxplot, and the first whose marks are not in the
+      frame at all. A column with nothing finite in it keeps its ring as an ``EnforcedNull``
+      (boxplot's all-missing-group rule) rather than being dropped, so the ring count is
+      always ``len(y_cols)``. ``dial`` sets the scale; left ``None`` it is derived from the
+      READINGS by ``gauge_dial``. Serializes as ``chart.type: "solidgauge"`` (radar's
+      precedent) and pulls in ``modules/solid-gauge`` — plus ``highcharts-more``, which only
+      the ``pane`` resolves.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
@@ -1258,9 +1565,12 @@ def build_options(
     ``target_col`` names the destination-node column and is required for
     ``sankey``; ``parent_col`` names the parent-label column and is required for
     ``sunburst``; ``end_col`` names the column each bar ends at and is required for
-    ``xrange``. Each is ignored by the other types.
+    ``xrange``. Each is ignored by the other types. ``agg`` and ``dial`` are read only by
+    ``solidgauge``, and are the first two parameters here that name a POLICY and a SCALE rather
+    than a column.
 
-    Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
+    Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``, a missing
+    ``x_col`` for any type but ``solidgauge`` (the one type with no label channel to name),
     a ``bubble`` chart with no ``size_col``, a ``sankey`` chart with no
     ``target_col`` or whose ``target_col`` is its ``x_col``, a ``sunburst`` chart
     with no ``parent_col``, whose ``parent_col`` is its ``x_col``, or whose parent
@@ -1268,7 +1578,8 @@ def build_options(
     node — see ``explain_tree_error``), an ``xrange`` chart with no ``end_col``, whose
     ``end_col`` is its start column, or whose start/end columns cannot place a bar on
     one axis (either is neither dates nor numbers, or the two disagree about which —
-    see ``explain_xrange_error``), or (for the category-axis types — cartesian,
+    see ``explain_xrange_error``), a ``solidgauge`` chart with an unknown ``agg`` or a ``dial``
+    with no span (see ``explain_gauge_error``), or (for the category-axis types — cartesian,
     radar, heatmap, boxplot, and waterfall) an ``x_col`` that is also one of the
     ``y_cols``.
     """
@@ -1316,6 +1627,20 @@ def build_options(
             f"The start column {y_cols[0]!r} cannot also be the end column for an "
             f"xrange chart"
         )
+    if chart_type not in GAUGE_TYPES and x_col is None:
+        # Every other type NAMES its marks with x_col — a slice, a category, a node, a box, a
+        # lane. Gauge is the first with no label channel at all, so the role stops being
+        # universal and the signature has to admit it. A pure-API caller who omits x_col for a
+        # pie deserves this message rather than a bare KeyError out of pandas.
+        raise ValueError(f"A {chart_type} chart requires an x column via x_col.")
+    if chart_type in GAUGE_TYPES:
+        _check_gauge_agg(agg)
+        problem = explain_gauge_error(dial)
+        if problem:
+            # The very message `explain_gauge_error` returns, so the app's warning and the
+            # exception it stands in for cannot drift apart — sunburst's cycle rule, and
+            # xrange's. Reachable from the app: the two number inputs accept any two numbers.
+            raise ValueError(problem)
     if chart_type in X_IN_Y_GUARD_TYPES and x_col in y_cols:
         raise ValueError(
             f"x_col {x_col!r} cannot also be a y series for a {chart_type} chart"
@@ -1331,6 +1656,236 @@ def build_options(
     # label column, target_col, is handled in its own branch (this filter reaches x_col
     # only). Reassigning df to the filtered frame keeps every branch's position-aligned
     # `zip(..., strict=True)` and category/series builds in lockstep.
+    title = title or f"{chart_type.title()} chart"
+    colors = list(colors) if colors is not None else list(DEFAULT_COLORS)
+
+    if (
+        chart_type in GAUGE_TYPES
+    ):  # concentric rings: one column, reduced to one number, each
+        # Placed ABOVE the shared `_label_ok` filter, and the placement is load-bearing rather
+        # than tidy. Gauge has no label channel — `x_col` is None and names nothing — but the
+        # exception is not merely vacuous, and that is the sharper point: gauge AGGREGATES, and
+        # a row filter above an aggregating branch does not drop a MARK, it silently changes a
+        # NUMBER. Filter three rows out of thirteen because their (unused) label cell happened
+        # to be blank and the total comes back smaller — drawn confidently, with nothing on the
+        # page saying so. Sitting above the filter makes that unreachable rather than unlikely.
+        low, high = dial if dial is not None else gauge_dial(df, y_cols, agg)
+        rings = _gauge_rings(len(y_cols))
+        # A ring's hue is its arbitrary IDENTITY, like a pie slice's, so it reads from the
+        # OVERRIDABLE `colors` (waterfall's semantic red-means-loss is the opposite case),
+        # cycled so a short custom palette WRAPS rather than IndexErrors
+        # (_BOXPLOT_OUTLIER_COLOR's concern). ONE `next()` per ring, then written to THREE
+        # different levels below — the point (the arc), the marker (the legend swatch) and the
+        # data label — because on this type each of those reads a different property and none of
+        # them falls back to another. Taking the hue once makes their agreement a fact rather
+        # than a coincidence maintained in three places.
+        hues = itertools.cycle(colors or DEFAULT_COLORS)
+        labelled = len(y_cols) <= _GAUGE_DATALABEL_MAX_RINGS
+        middle = (
+            len(y_cols) - 1
+        ) / 2  # so the hub's lines are centred about the middle one
+        # A gauge is read FROM ZERO: an arc's LENGTH is its magnitude. Left unset, Highcharts
+        # sweeps each arc from the axis MINIMUM, which INVERTS an all-negative dial — on a
+        # -500..0 dial a -40 would draw a LONGER arc than a -155, so the smallest loss would
+        # look like the biggest. Clamped into the dial so that a custom override excluding zero
+        # still has a base to sweep from.
+        threshold = min(max(0.0, low), high)
+
+        tracks: list[dict[str, object]] = []
+        rings_out: list[dict[str, object]] = []
+        for index, (col, (outer, inner)) in enumerate(zip(y_cols, rings, strict=True)):
+            hue = next(hues)
+            # The TRACK: a ring's unfilled remainder, and the only thing that says how far round
+            # the ring has NOT gone. It is chart furniture, not a mark, so it lives on the PANE
+            # — which is why gauge's dark-mode hook is the first to reach a top-level key.
+            tracks.append(
+                {
+                    "outerRadius": _pct(outer),
+                    "innerRadius": _pct(inner),
+                    "backgroundColor": _GAUGE_TRACK_COLOR,
+                    "borderWidth": 0,
+                }
+            )
+            ring: dict[str, object] = {
+                "name": col,
+                # RADIUS ON THE SERIES, COLOR ON THE POINT — the exact mirror of each other, and
+                # the single nastiest thing about this type. A point-level radius is silently
+                # dropped (see the family constants). And the color is the converse: Highcharts'
+                # solidgauge defaults `colorByPoint: true`, and highcharts-core models no
+                # `color_by_point` at all, so a `colorByPoint: False` at series OR plotOptions
+                # level is silently dropped and the default CANNOT be turned off. Each series'
+                # single point is index 0 of its own colorCounter, so EVERY ring resolves to
+                # `colors[0]`: a series-level `color` serializes perfectly and never reaches an
+                # arc. Verified by rendering — three hues in the JS, three identical blue arcs on
+                # screen, beside pane tracks showing the three TRUE hues, so a reader matches a
+                # green track to a blue arc and reads the wrong ring. Not an error, not a blank
+                # chart: a confident, plausible, wrong one. Two adjacent properties, opposite
+                # levels, each silently wrong on the other's — and one hue, said twice below and
+                # once again on the marker, because all three levels are load-bearing and none
+                # of them substitutes for another.
+                "radius": _pct(outer),
+                "innerRadius": _pct(inner),
+                # And the hue has to be said a THIRD time, on a third level, for the legend
+                # swatch — which is not pedantry but the same drop wearing a third hat. A
+                # series-level `color` serializes perfectly (it is right there in the emitted
+                # JS) and Highcharts renders the legend bullet GREY anyway: `#333333`, for
+                # every ring, beside arcs and hub labels carrying the true hues. Verified by
+                # rendering, and then verified again by taking the series `color` away, which
+                # changed NOTHING — it does no work on this type at all, so carrying it would be
+                # an option that looks load-bearing and isn't. The legend symbol reads the
+                # MARKER, which a solid gauge otherwise never draws (no markers on an arc), so
+                # this is inert everywhere except the one place it is needed. It matters because
+                # the legend is the only thing that names an EMPTY ring (a null point draws no
+                # arc and no label), and a grey bullet cannot be matched back to a band.
+                "marker": {"fillColor": hue, "symbol": "circle"},
+                "threshold": threshold,
+                "showInLegend": True,
+                # A live ring is a one-point dict carrying y + color. An EMPTY one is the BARE
+                # EnforcedNull, not `{"y": EnforcedNull, "color": hue}` — highcharts-core drops a
+                # null `y` OUT of a point dict entirely (verified: it emits `{color: ...}`),
+                # leaving a point with no value at all, while the bare form serializes as
+                # `[[null]]`, a real null point. There is no arc to color anyway. The ring is
+                # KEPT rather than dropped — boxplot's all-missing-group rule — and here that is
+                # geometrically forced: the radii are a function of the SELECTION, so a
+                # data-driven drop would resize and recolor every other ring, and the KPI
+                # ("Series plotted") would count a ring the chart never drew.
+                "data": (
+                    [EnforcedNull]
+                    if (value := _gauge_value(df[col], agg)) is EnforcedNull
+                    else [{"y": value, "color": hue}]
+                ),
+            }
+            if labelled:
+                # One line per ring, stacked in the hub, outermost first. A per-SERIES pixel
+                # offset is the only way to stack them: every ring's label renders at the centre
+                # of the pane, so without this they land on top of each other. In the ring's own
+                # hue, which needs no dark-mode flip (the palette is theme-shared) and is what
+                # binds a line of text to a band on the dial.
+                ring["dataLabels"] = {
+                    "y": round((index - middle) * _GAUGE_LABEL_LINE_PX),
+                    "style": {"color": hue},
+                }
+            rings_out.append(ring)
+
+        return _themed(
+            {
+                "chart": {"type": "solidgauge"},
+                # Genuinely read, not carried for cross-type consistency: every ring seeds from
+                # it (heatmap is the type that carries `colors` without using them).
+                "colors": colors,
+                "title": {"text": title},
+                # The scale is INVISIBLE on the chart — a 360° activity gauge has nowhere to put
+                # an axis — so an arc's fraction cannot be decoded from a downloaded PNG, which
+                # has no tooltip either. Print it, with the aggregation: "436" means nothing
+                # until you know it is a sum of eight weeks rather than one week's reading.
+                "subtitle": {"text": f"{agg} · dial {low:g} – {high:g}"},
+                # THE PANE IS LOAD-BEARING, not decoration. `get_script_tags` emits
+                # highcharts-more ONLY when the options tree carries a `pane` key — verified
+                # against each candidate in isolation: not the series type, not
+                # plotOptions.solidgauge, not a series radius, not yAxis.stops — and a solid
+                # gauge WITHOUT highcharts-more draws an EMPTY SVG in the browser: zero series
+                # paths, no Highcharts error band, no Python-side error, a silently blank chart.
+                # The export server rasterizes it regardless, so dropping the pane would make the
+                # two render modes silently DISAGREE — the class of bug `_LIGHT_COLOR_SCHEME_CSS`
+                # exists to close. Pinned by a test on `get_script_tags`.
+                "pane": {
+                    "startAngle": 0,
+                    "endAngle": 360,  # a full circle: the arc's ANGLE is the value's fraction
+                    "background": tracks,
+                },
+                "yAxis": {
+                    "min": low,
+                    "max": high,
+                    # No axis is drawn (see the subtitle). Silenced with WIDTHS, not with the
+                    # obvious `tickPositions: []`: an empty list is PRUNED before it is emitted,
+                    # and the tick dashes then stay visible ON the tracks even with the labels
+                    # switched off (seen in the rendered PNG).
+                    "lineWidth": 0,
+                    "tickWidth": 0,
+                    "minorTickWidth": 0,
+                    "gridLineWidth": 0,
+                    "labels": {"enabled": False},
+                    # Highcharts titles a value axis "Values" unless it is explicitly CLEARED,
+                    # and None does not clear it — an empty string does (heatmap's rule).
+                    "title": {"text": ""},
+                },
+                # The one type whose legend is not redundant, and it earns its place twice. A
+                # ring whose column is empty draws no arc AND no data label (Highcharts skips a
+                # null point's label entirely), so the legend is the only thing that NAMES it;
+                # and past the label gate it is the only thing naming any ring at all, since a
+                # gauge has no axis and the Static PNG has no tooltip. Its swatch is the series
+                # `color` — the one job that property can still do here.
+                "legend": {"enabled": True},
+                # `{series.name}`, and it is a third answer for a third reason: waterfall needs
+                # `{point.category}` (its points are positional), sunburst and xrange need
+                # `{point.name}` (their categories are on the wrong axis) — and a gauge ring
+                # holds exactly ONE point, so the mark's identity is not on the point at all.
+                # It IS the series.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": "{series.name}: <b>{point.y}</b>",
+                },
+                "plotOptions": {
+                    "solidgauge": {
+                        "rounded": True,
+                        "linecap": "round",
+                        "stickyTracking": False,  # one point per series: hover the ring you mean
+                        # NOT `_in_mark_labels`: that helper exists for `color: contrast`,
+                        # computed against the FILL a label sits on — and these sit in the empty
+                        # hub, on no fill at all. `useHTML` is pinned False because the export
+                        # server silently drops HTML labels, and the two render modes would
+                        # disagree again. `allowOverlap` is pinned True because Highcharts
+                        # otherwise HIDES a colliding label by rendering the <text> and turning
+                        # it invisible — the element stays in the DOM, so every assertion about
+                        # it still passes while a ring's value is simply absent from the chart.
+                        #
+                        # And, unlike heatmap's and column's, a gauge's dataLabels default to ON,
+                        # so past the gate they must be disabled EXPLICITLY: merely omitting the
+                        # key (heatmap's style) would be a gate that did nothing, and twenty
+                        # labels would pile up at one offset.
+                        "dataLabels": (
+                            {
+                                "enabled": True,
+                                "useHTML": False,
+                                "allowOverlap": True,
+                                "borderWidth": 0,
+                                "align": "center",
+                                "verticalAlign": "middle",
+                                "format": "{series.name}: {point.y}",
+                                "style": {
+                                    "textOutline": "none",
+                                    "fontWeight": "normal",
+                                },
+                            }
+                            if labelled
+                            else {"enabled": False}
+                        ),
+                        # No `colorByPoint` (it cannot even be emitted — see the point `color`),
+                        # and no `yAxis.stops`, which is solidgauge's canonical coloring: stops
+                        # are a VALUE ramp, so a ring would go red for being LOW. The data never
+                        # said low was bad. Heatmap's colorAxis-vs-palette split, and gauge sits
+                        # on the palette side of it.
+                    }
+                },
+                "series": rings_out,
+            },
+            dark=dark,
+        )
+
+    assert x_col is not None  # every other type NAMES its marks with it (guarded above)
+
+    # Every type reads x_col as a mark LABEL — a pie slice name, an axis category, a
+    # sankey source node, a boxplot group — EXCEPT scatter/bubble with a numeric x, where
+    # x is a coordinate the per-point `_plottable` already guards. For the label case, a
+    # missing or non-finite label names nothing drawable, so drop its row once, here, in
+    # one place, rather than let each branch stringify it to the literal "nan"/"inf" mark.
+    # This applies the value-column missing-data policy to the label column too, uniformly
+    # (see `_label_ok`); before, only sankey and boxplot dropped such a row. sankey's OTHER
+    # label column, target_col, is handled in its own branch (this filter reaches x_col
+    # only). Reassigning df to the filtered frame keeps every branch's position-aligned
+    # `zip(..., strict=True)` and category/series builds in lockstep. Gauge returned ABOVE
+    # this filter and is the one type it must never reach — it has no label channel, and
+    # filtering rows out of an AGGREGATE changes a number rather than dropping a mark.
     x_is_label = not (
         chart_type in (XY_TYPES + BUBBLE_TYPES)
         and pd.api.types.is_numeric_dtype(df[x_col])
@@ -1346,9 +1901,6 @@ def build_options(
         # and it should draw an empty chart, not raise. The cast pins the dtype so the empty
         # case masks exactly like the populated one.
         df = df[df[x_col].map(_label_ok).astype(bool)]
-
-    title = title or f"{chart_type.title()} chart"
-    colors = list(colors) if colors is not None else list(DEFAULT_COLORS)
 
     if chart_type in SINGLE_VALUE_TYPES:  # pie
         value_col = y_cols[0]
@@ -2122,7 +2674,7 @@ def coordinate_columns(df: pd.DataFrame) -> list[str]:
 def count_marks(
     df: pd.DataFrame,
     chart_type: str,
-    x_col: str,
+    x_col: str | None,
     y_cols: list[str],
     *,
     target_col: str | None = None,
@@ -2149,7 +2701,18 @@ def count_marks(
     than the predicates — and sunburst's, like waterfall's, exceeds its drawable row count, by
     the appended root. Xrange's does not: it appends nothing, so it is one bar per surviving
     row.
+
+    Gauge has no rule here AT ALL, and deliberately: its marks ARE its series — one ring per y
+    column, an empty column kept as a null ring rather than dropped — so ``len(y_cols)`` is an
+    invariant and the app's default "Series plotted" KPI is already exactly the ring count. It
+    is therefore absent from ``MARK_METRICS`` too, and a rule here that only restated
+    ``len(y_cols)`` would be the can't-drift rule run backwards: a second computation of a fact
+    that cannot differ from the first.
     """
+    if chart_type in GAUGE_TYPES or x_col is None:
+        # Bails out ABOVE the shared label mask below, which would otherwise die on `df[None]`
+        # before reaching the same "no rule for this type" message that line/pie/scatter get.
+        raise ValueError(f"count_marks has no rule for {chart_type!r}")
     if chart_type in XRANGE_TYPES:
         # Whole-build reuse, like sunburst's branch below and NOT like treemap's/sankey's
         # predicate masks — and the reason is subtler than sunburst's, which is why it is worth
@@ -2222,7 +2785,7 @@ def count_marks(
 def make_chart(
     df: pd.DataFrame,
     chart_type: str,
-    x_col: str,
+    x_col: str | None,
     y_cols: list[str],
     *,
     container_id: str = "hc_chart",
@@ -2232,6 +2795,8 @@ def make_chart(
     target_col: str | None = None,
     parent_col: str | None = None,
     end_col: str | None = None,
+    agg: str = _GAUGE_DEFAULT_AGG,
+    dial: tuple[float, float] | None = None,
 ) -> Chart:
     """Build and return a highcharts-core ``Chart`` for the given columns."""
     options = build_options(
@@ -2245,6 +2810,8 @@ def make_chart(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        agg=agg,
+        dial=dial,
     )
     chart = Chart.from_options(options)
     chart.container = container_id
@@ -2254,7 +2821,7 @@ def make_chart(
 def build_chart_html(
     df: pd.DataFrame,
     chart_type: str,
-    x_col: str,
+    x_col: str | None,
     y_cols: list[str],
     *,
     container_id: str = "hc_chart",
@@ -2265,6 +2832,8 @@ def build_chart_html(
     target_col: str | None = None,
     parent_col: str | None = None,
     end_col: str | None = None,
+    agg: str = _GAUGE_DEFAULT_AGG,
+    dial: tuple[float, float] | None = None,
 ) -> str:
     """Build a full, self-contained HTML document that renders the chart.
 
@@ -2289,8 +2858,13 @@ def build_chart_html(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        agg=agg,
+        dial=dial,
     )
 
+    # For a gauge this resolves highcharts-more as well as modules/solid-gauge — and it does so
+    # only because the options tree carries a `pane`. Without highcharts-more the chart renders
+    # as an empty SVG here while the PNG path below renders perfectly (see the gauge branch).
     script_tags = chart.get_script_tags(as_str=True)
     chart_js = chart.to_js_literal()
     # Match the iframe body to the chart's own background so there's no light
@@ -2314,11 +2888,14 @@ def build_chart_html(
 def build_chart_png(
     df: pd.DataFrame,
     chart_type: str,
-    x_col: str,
+    x_col: str | None,
     y_cols: list[str],
     *,
     title: str | None = None,
     height: int | None = None,
+    # The IMAGE's pixel-density multiplier, and the reason the gauge's dial kwarg is `dial`
+    # rather than the `scale` it would otherwise want to be called: this one got here first, and
+    # it means something completely different.
     scale: int = 2,
     width: int | None = None,
     timeout: int = 30,
@@ -2327,6 +2904,8 @@ def build_chart_png(
     target_col: str | None = None,
     parent_col: str | None = None,
     end_col: str | None = None,
+    agg: str = _GAUGE_DEFAULT_AGG,
+    dial: tuple[float, float] | None = None,
 ) -> bytes:
     """Render the chart to PNG bytes via the Highcharts export server.
 
@@ -2348,6 +2927,8 @@ def build_chart_png(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        agg=agg,
+        dial=dial,
     )
     if height is not None:
         # highcharts-core types `options` and `options.chart` as Optional, but

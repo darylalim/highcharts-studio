@@ -12,7 +12,13 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   upload), chart-type/column controls (pills for the Y series, falling back to
   `st.multiselect` on wide CSVs, plus the four type-specific extra column
   selectors — Size (Z) for bubble, Target (to) for sankey, Parent for sunburst, End
-  for xrange),
+  for xrange — and gauge's two, which are the first that name a **policy** and a
+  **scale** rather than a column: an aggregation picker sourced from the builder's
+  `GAUGE_AGGREGATIONS`, and a Dial min/max pair *seeded* from its `gauge_dial`. Gauge
+  is also the one type that **removes** a control: it draws no X selectbox at all,
+  the first *subtractive* change here, since a control that does nothing is a lie in
+  the UI and passing a column the builder must ignore is a lie in the call site and
+  in three cache keys),
   caching, a KPI metric row (its third metric adapts to the chart type — series
   plotted, or, for the one-series types, the mark count from the builder's
   `count_marks`: cells for a heatmap, tiles for a treemap, flows for a sankey,
@@ -25,7 +31,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   since an undrawable label drops its row; xrange appends nothing, so its count is
   exactly its surviving rows;
   membership of the `MARK_METRICS` dict is what makes a type count-adaptive, so the
-  KPI stays one branch however many such types there are), the
+  KPI stays one branch however many such types there are — and gauge is the first type
+  whose *absence* from that dict is a decision worth stating: its marks ARE its series
+  (one ring per y column, an empty column kept as a null ring rather than dropped), so
+  "Series plotted" is already literally the ring count, and an entry would force a
+  `count_marks` rule that did nothing but restate `len(y_cols)` — the can't-drift rule
+  run backwards, a second computation of a fact that cannot differ from the first), the
   render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
@@ -54,10 +65,21 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   reachable from the app, since `coordinate_columns` keeps a column of task names out of the
   pickers entirely; the first is reachable only through the pure builder API. (So xrange adds
   exactly one app-reachable builder error, not two: a *date start beside a numeric end*.)
+  Then `explain_gauge_error()`, the third of that family and the first that reads **no frame
+  at all** — a dial whose maximum does not sit above its minimum is a contradiction about two
+  numbers the user typed, not about a column or a tree, and it is reachable from the app because
+  the two number inputs accept any two numbers.
   Then `coordinate_columns()`, the
   builder's own answer to "which columns can place a bar on an axis" — exported so the
   app's Start/End pickers cannot offer a column the builder would refuse, which is the
-  can't-drift rule applied to *which options appear in a widget* — and `count_marks()`, which
+  can't-drift rule applied to *which options appear in a widget* — and its gauge counterparts
+  `GAUGE_AGGREGATIONS` (the same rule applied to a **policy**: the app can never offer a
+  reduction the builder would reject) and `gauge_dial()` (the same rule applied, for the first
+  time, to a widget's **value** rather than to its options: the Dial min/max inputs are *seeded*
+  from the very call `build_options` makes when `dial is None`, so the number the app SHOWS
+  cannot drift from the dial the chart DRAWS — and it must be, because a max recomputed in the
+  app from the raw column would be smaller than every ring under `sum`, pinning them all at 100%
+  with nothing on the page to say why). And `count_marks()`, which
   returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
   tiles, a sankey's flows, a boxplot's boxes, a waterfall's steps, a sunburst's sectors, an
   xrange's bars)
@@ -68,7 +90,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   depends on its *ancestors* and its *descendants*; while xrange's drops *look* per-row but
   are read through a **column**-level fact — the axis kind — and `build_options` reaches its
   branch on the `_label_ok`-*filtered* frame while `count_marks` runs on the *raw* one, so a
-  predicate-only reuse would sniff a different axis than the chart drew).
+  predicate-only reuse would sniff a different axis than the chart drew). Gauge has **no rule**
+  in `count_marks` at all, and raises exactly as `line` does: its marks ARE its series, so
+  `len(y_cols)` is an invariant, and a rule that only restated it would be the can't-drift rule
+  run *backwards* — a second computation of a fact that cannot differ from the first.
   Independently importable and unit-testable.
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
@@ -80,11 +105,17 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   the dropped dangling parent vs. the raised cycle, and the appended root), xrange's
   interval bars (the date-vs-number coordinate sniff and its two silent traps — a numeric
   column reaching a date parser, and an unnormalized epoch view — plus the kept milestone,
-  the dropped backwards bar, and the per-lane hue), the brand
+  the dropped backwards bar, and the per-lane hue), gauge's reduced rings (the empty-column
+  trap, swept over all six reductions because only `sum` lies; the dial derived from the
+  *readings* rather than the raw column; `threshold: 0`; the three levels a ring's hue has to
+  be written to; the pane that alone resolves `highcharts-more`; and the fact that gauge is
+  *excluded* from the label-drop sweep — where it would pass **vacuously**, reading as a pin on
+  a policy it deliberately does not have), the brand
   palette, the validation
   guards including bubble's required size column, sankey's required and distinct
   target column, sunburst's required and distinct parent column, xrange's required end
-  column (distinct from the *start* column, not from `x_col`), and the
+  column (distinct from the *start* column, not from `x_col`), gauge's known aggregation and
+  its dial-with-a-span, and the
   heatmap/boxplot/waterfall x-in-y rule, and
   an end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
@@ -160,6 +191,16 @@ raising `ValueError` if omitted or equal to the *start* column — `y_cols[0]`, 
 `x_col`, which is the one collision of the four that is not against `x_col` at all — and,
 like sunburst, also raising when its columns cannot place a bar on one axis: see
 `explain_xrange_error`).
+
+Gauge takes the fifth and sixth, and they are the first that are **not column names**:
+`agg=` names the reduction each ring applies to its column (one of `GAUGE_AGGREGATIONS`;
+raising `ValueError` otherwise) and `dial=` an explicit `(min, max)` scale, which — left
+`None` — is *derived from the readings* by `gauge_dial` (raising `ValueError` when its
+maximum does not sit above its minimum: see `explain_gauge_error`). Gauge is also why
+`x_col` is now `str | None` on all five signatures: it is the one type with no label
+channel, so every *other* type raises when `x_col` is omitted. (It is not called `scale=`
+because `build_chart_png` already has a `scale: int = 2` — the image's pixel density,
+which means something completely different and got there first.)
 
 Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
 `pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension),
@@ -416,7 +457,134 @@ bar-shaped type, which needs the opposite treatment. That was *measured*, not in
 shared bar base class: waterfall is the standing proof the inference is unsound, its border
 being a fixed `#333333`, while xrange's default border is pure white (the background variable),
 so every bar is ringed white on the dark background until it is dissolved. Pulls in
-`modules/xrange`, and, like sunburst, *not* `highcharts-more`).
+`modules/xrange`, and, like sunburst, *not* `highcharts-more`), and `solidgauge` (concentric
+rings on one shared dial — an "activity gauge", and the only type with **no label channel
+at all**. Every other type names its marks from a column: a slice, an axis category, a
+node, a box, a lane. A gauge's marks are the **selected columns themselves**, each
+*reduced* to one number — so `x_col` names nothing, is `None`, and the column role that
+seventeen types took for granted stops being universal. It is therefore also the first
+type whose marks are neither in the frame (as every pointwise type's are) nor assembled
+from it (as sunburst's tree is) but **reduced** from it: the second aggregating type after
+boxplot, and the first whose row count has no bearing on its mark count at all.
+
+That is the type's organizing fact, and the branch's placement is its first consequence: it
+sits **above** the shared `_label_ok` filter, and the placement is load-bearing rather than
+tidy. The exception is not merely vacuous — that is the sharper point. A row filter above an
+*aggregating* branch does not drop a MARK, it silently changes a **NUMBER**: filter three
+rows out of thirteen because their (unused) label cell happened to be blank, and the total
+comes back smaller, drawn confidently, with nothing on the page saying so.
+
+Each ring is its own **series**, and that is forced rather than chosen. The canonical
+Highcharts activity gauge is ONE series whose N points each carry their own `radius` — and a
+point-level `radius`/`innerRadius` is accepted by `Chart.from_options` and then silently
+dropped from the emitted JS (the sankey-`nodeFormat` / boxplot-`fillColor` /
+sunburst-`levels[].colorByPoint` family, and the first of them to dictate the SHAPE of a
+whole branch rather than one of its options). The series-level ones survive. And that is what
+makes `marks == series == len(y_cols)`, which is why gauge needs no `count_marks` rule and no
+`MARK_METRICS` entry.
+
+**The hue has to be written three times, to three different levels, and none of them
+substitutes for another** — one `next()` off `itertools.cycle`, then said again and again,
+because each is a different silent drop wearing a different hat. The **arc** reads the
+*point*: Highcharts' solidgauge defaults `colorByPoint: true` and highcharts-core models no
+`color_by_point` at all, so the default cannot be turned off, every series' single point is
+index 0 of its own colorCounter, and a series-level `color` therefore serializes perfectly
+and never reaches an arc — three hues in the JS, three identical blue arcs on screen, beside
+pane tracks showing the three TRUE hues, so a reader matches a green track to a blue arc and
+reads the wrong ring (verified by rendering). The **legend swatch** reads the *marker*: the
+series `color` that the arc ignores is ignored here too, and Highcharts draws the bullet grey
+for every ring — verified by rendering, and then verified again by *taking the series color
+away*, which changed nothing at all, so it is not carried (an option that looks load-bearing
+and isn't). A solid gauge draws no markers on an arc, so the marker is inert everywhere else.
+The **hub label** reads its own `style.color`. It is the mirror of the radius, exactly: two
+adjacent properties on opposite levels, each silently wrong on the other's.
+
+The **pane** is load-bearing for a reason that has nothing to do with how it looks:
+`get_script_tags` emits `highcharts-more` **only** when the options tree carries a `pane` key
+— not for the series type, not for `plotOptions.solidgauge`, not for a series radius, not for
+`yAxis.stops` (each tested in isolation) — and a solid gauge without `highcharts-more` draws
+an **empty SVG** in the browser: zero series paths, no Highcharts error band, no Python-side
+error. The export server rasterizes it regardless, so dropping the pane would make the two
+render modes silently **disagree** — the class of bug `_LIGHT_COLOR_SCHEME_CSS` exists to
+close. Pinned by a test on `get_script_tags`.
+
+The **empty column is the type's headline trap**, and it is pandas' doing:
+`pd.Series([], dtype="float64").sum()` is `0.0`, not NaN — and so is an all-NaN column's — so
+pandas hands back the additive **identity**. Under `sum` an unfilled column would report "the
+total is zero": a confident CLAIM where the truth is "there is no data", drawn as a real ring
+sitting at the dial's floor to say so. mean/median/min/max/last all give NaN; **only `sum`
+lies**, which makes it worse rather than better, because the bug would live in exactly one of
+the six reductions and look like a rounding quirk in the other five. So the empty test runs
+**above** the reducer (`_coordinates`' `_COORD_EMPTY` ordering, for the identical reason),
+making it unrepresentable rather than a special case somebody has to remember. The ring is
+then **kept** as an `EnforcedNull` — boxplot's all-missing-group rule, and here geometrically
+forced: the radii are a function of the SELECTION, so a data-driven drop would resize and
+recolour every ring below it. (A bare `EnforcedNull`, not `{"y": EnforcedNull, "color": …}`:
+highcharts-core drops a null `y` out of a point dict entirely, leaving a point with no value
+at all.) A null point draws no arc **and no label**, which is why gauge is the one type whose
+**legend** is not redundant: it is the only thing that names an empty ring.
+
+The **dial is derived from the READINGS, never from the raw columns**, and that is the type's
+central invariant rather than a nicety. Under `sum` a reading *exceeds every observation in
+its own column* (436 against a maximum cell of 63), so a max derived from the raw column would
+pin every ring past the end of its own dial — "everyone smashed target", drawn confidently, on
+data that says nothing of the sort. Reducing first, with the very reduction the rings draw,
+makes a ring that overflows its own dial arithmetically unrepresentable. It is rounded outward
+to a 1/2/2.5/5/10 × 10ᵏ step, because a dial ending exactly at the largest reading draws that
+ring 100% full whatever it holds — "436 of 500" is the only reading a gauge ever gives, so the
+500 has to come from somewhere. `gauge_dial` is **exported**, so the app can *seed* its Dial
+min/max inputs from the builder rather than recompute them: `coordinate_columns`' can't-drift
+rule, applied for the first time to a widget's **value** rather than to its options. It is
+**total** by construction (`count_marks`' contract) — an empty selection, an all-missing column
+and a row-less frame each give a drawable dial rather than raising, or, worse, a degenerate
+`0..0` that Highcharts would divide by. An override with no span raises, via
+`explain_gauge_error` — the third of that family, and the first that reads **no frame at all**:
+this contradiction is a fact about two numbers the user typed.
+
+`threshold: 0` is what makes an all-negative dial honest. A gauge is read **from zero** — an
+arc's LENGTH is its magnitude — and left unset, Highcharts sweeps each arc from the axis
+*minimum*, which **inverts** the reading: on a −200..0 dial a −40 would draw a *longer* arc
+than a −155, so the smallest loss would look like the biggest (verified by rendering).
+
+Its geometry is capped at **both** ends of the range, and each cap stops the band degenerating
+in a different direction. The **gap** is capped for MANY rings (a fixed 3% gap exceeds the band
+past ~21 of them, at which point `inner > outer` and Highcharts draws garbage — and a wide CSV
+with 40 numeric columns is one click away); capping the ring COUNT instead would mean dropping
+a column the user asked for, so the geometry degrades into thin rings rather than breaking. The
+**thickness** is capped for FEW rings: with the whole radius to divide between them, one column
+draws an arc 61% thick — a fat disc with a pinhole, which reads as a pie with a bite out of it
+rather than as a gauge. It labels each ring in the hub with `name: value`, one line per ring in
+that ring's own hue, **gated on ring count** like heatmap's cells, sankey's links, waterfall's
+steps and sunburst's sectors — and the gate has a twist none of theirs has, plus a trap none of
+theirs has. The twist: a gauge's dataLabels default to **ON**, so past the gate they must be
+disabled *explicitly* — merely omitting the key (heatmap's style) would be a gate that did
+nothing. The trap: Highcharts hides a *colliding* label by rendering the `<text>` and turning it
+**invisible**, so the element stays in the DOM and every assertion about it still passes while a
+ring's value is simply **absent from the chart** — hence `allowOverlap: True`, after which the
+real limit is physical (the hub is a fixed fraction of a radius; the stack grows with the ring
+count), and the number is **measured** at 300px, the smallest chart the app can draw. It carries
+a **subtitle** naming the aggregation and the dial, because the scale is invisible on the chart
+(a 360° gauge has nowhere to put an axis) and the Static PNG has no tooltip either, so without it
+a downloaded gauge cannot be decoded at all. Its tooltip is `{series.name}` — a third answer for
+a third reason: waterfall needs `{point.category}` (its points are positional), sunburst and
+xrange need `{point.name}` (their categories are on the wrong axis), and a gauge ring holds
+exactly ONE point, so the mark's identity is not on the point at all; it IS the series. It needs
+**one** `_themed` hook, the pane's background **tracks** — the first hook to reach a **top-level**
+key rather than `plotOptions[type]`, which is less an exception than a demonstration: a track is
+*chrome* (the gauge's gridline, the colour of "no value here", so it takes `_HEATMAP_NULL` and
+flips to the grid colour) that happens to belong to one type. It is also the only hook this type
+*can* have: `borderColor` is impossible, since `SolidGaugeSeries` models no border at any level
+and one would be silently dropped (boxplot's `fillColor` exactly). It is named **`solidgauge`**,
+Highcharts' own name for it, and *not* the friendlier `gauge` — which radar's precedent (called
+`radar`, serialized as a `line` with `chart.polar`) would have licensed, and which is what a
+person actually shops for. The name is deliberately left free, because `gauge` in Highcharts is a
+**different chart**: a needle on a dial, a distinct series type with its own
+`DialOptions`/`PivotOptions`, which highcharts-core also supports and which this module may well
+add. Spending the obvious name on the arc would leave the needle nothing to be called, and radar
+stays the *one* type whose `chart.type` is not its own name. (Whoever adds the needle should know
+that `plot_options/gauge.py`'s `top_width` validator lacks `allow_empty=True`, so **any** `dial`
+dict omitting `topWidth` raises `EmptyValueError` — passing it explicitly works.) Pulls in
+`modules/solid-gauge`, and `highcharts-more`, which only the pane resolves).
 
 ## Run
 
@@ -511,31 +679,59 @@ the `{point.name}` tooltip, since `{point.category}` renders the raw epoch; the 
 dataLabels; the **no-drift pin**, a frame whose only garbage cell sits on a row dropped for its
 label, which a raw-frame sniff would decide differently from the chart; and the one dark-mode
 hook),
+gauge's reduced rings (the **empty-column trap**, swept over all six reductions because only
+`sum` lies — `pd.Series([nan, ...]).sum()` is `0.0`, an additive identity drawn as a real ring
+at the dial's floor — with the assertion that pandas really does say `0.0` standing IN the test
+as the reason; the ring KEPT as a bare `[EnforcedNull]` (`{"y": EnforcedNull, "color": …}` would
+have its `y` dropped out of the dict entirely) and named in the legend, which is the only thing
+that names it; the **dial derived from the readings**, pinned by a frame whose `sum` (436)
+exceeds every observation in its column (63), so a raw-column dial would pin every ring — plus
+the sweep asserting every reading falls inside its own dial under every reduction; the nice
+ceiling and its overflow/underflow holes (`1.5e308` must not emit `inf`; `5e-324` must not
+collapse the dial to nothing); `threshold: 0`, without which the −155 draws a *shorter* arc than
+the −40; the overflow that makes a finite column non-finite (boxplot's lesson, second arithmetic
+type); the **three levels a ring's hue is written to** — the point (the arc), the marker (the
+legend swatch) and the label — with `colorByPoint` asserted to appear NOWHERE and a series-level
+`color` asserted ABSENT, since it does no work here at all; the **pane** that alone resolves
+`highcharts-more`, without which the iframe is silently blank while the PNG renders; ticks
+silenced by *width* rather than by the pruned `tickPositions: []`; the label gate's explicit
+`{"enabled": False}` (a gauge's labels default to ON, so an omitted key would be a gate that did
+nothing); the geometry capped at BOTH ends (never inverted at 40 rings, never a disc at 1); and
+`test_gauge_ignores_x_col_entirely`, which is where the label-drop policy gauge does NOT have is
+pinned — a frame whose label column is entirely undrawable must still aggregate every row),
 the brand palette, the
 light/dark theming (dark-mode chrome — including the tooltip and the heatmap
 colorAxis — vs. the shared palette), and the validation guards (including the
 category-x x-in-y rule, widened to heatmap, boxplot and waterfall, bubble's required
 size column, sankey's required, distinct target column, sunburst's required,
-distinct parent column, and xrange's required end column, distinct from the *start*
-column rather than from `x_col`) —
+distinct parent column, xrange's required end column, distinct from the *start*
+column rather than from `x_col`, gauge's known `agg` and its dial-with-a-span, and — the
+mirror of gauge's own exemption — the `x_col` that every OTHER type now requires) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
 to serialize — bubble, radar, boxplot and waterfall all pulling in the
 `highcharts-more` module,
 heatmap the `modules/heatmap` module, treemap the `modules/treemap` module,
-sankey the `modules/sankey` module, sunburst the `modules/sunburst` module, and xrange the
-`modules/xrange` module (the last two alone among the five extra-module types needing *not*
-`highcharts-more`) — rather than just
+sankey the `modules/sankey` module, sunburst the `modules/sunburst` module, xrange the
+`modules/xrange` module (those two alone among the extra-module types needing *not*
+`highcharts-more`), and gauge `modules/solid-gauge` **plus** `highcharts-more` — which is the
+one module resolution that is not merely proven but *load-bearing*, since it is pulled in by the
+`pane` alone and without it the chart draws an empty SVG in the browser with no error anywhere,
+while the export server renders it perfectly — rather than just
 assumed; sankey's node
 tooltip is pinned in that serialized JS too, since a top-level `nodeFormat` is
 accepted by `Chart.from_options` and then silently dropped, as boxplot's `fillColor`
 is and as sunburst's `levels[].colorByPoint` is, and waterfall's `isSum` is pinned
 there for the same reason — it is a point key
 that *does* survive, which only the emitted JS can show, as sunburst's `id`/`parent`
-and `allowTraversingTree` are, and as xrange's `x2` and `minPointLength` are) and the sample
+and `allowTraversingTree` are, and as xrange's `x2` and `minPointLength` are, and as gauge's
+series-level `radius` is — the *surviving* half of a pair whose point-level half is dropped) and
+the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, treemap,
-sankey's Target (to) control, sunburst's Parent control, xrange's End control, and boxplot's
+sankey's Target (to) control, sunburst's Parent control, xrange's End control, gauge's
+aggregation picker and Dial min/max inputs — and gauge's *absent* X control, the one
+subtractive change — and boxplot's
 and waterfall's
 single-select Y —
 revealing the generated config behind its toggle,
@@ -543,9 +739,23 @@ the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
 the guard messages — including a *cyclic uploaded CSV*, the one builder error a user
 can reach just by uploading a file, which must warn and stop rather than render a
-traceback, and its xrange counterpart, a date start beside a numeric end; plus the
+traceback, its xrange counterpart, a date start beside a numeric end, and its gauge
+counterpart, a dial with no span; plus the
 **type-aware column gate**, driven by an uploaded Gantt CSV with *no numeric columns
 whatsoever*, which must plot as an xrange and must still be refused by `line`).
+
+Gauge's two AppTest halves are worth naming, because together they *define* the keyless-widget
+rule rather than merely obeying it. The Dial inputs carry **no `key=`**, and unlike every other
+picker here that is the intended behaviour, not the bug the constant `index`es guard against.
+The rule those comments were always applying, stated: *fold the default into the widget's
+identity iff the selection depends on the state the default derives from.* Sankey's Target
+derives from another **widget** and stays perfectly valid when Source changes, so re-minting it
+would discard a real answer. A dial derives from the **data under a reduction**, and an override
+of it is meaningless the moment either changes — a max of 500 typed against `sum` (436) would
+leave every ring at ~1% under `mean` (54). A `key=` is precisely how you would *cause* that: with
+a key, `value=` is honoured only on the FIRST render, so the stale number becomes permanent and
+silent. One test pins that a typed dial **survives** an inert rerun (a title edit); its twin pins
+that it is **re-derived** when the aggregation changes.
 
 `tests/test_hooks.py` covers the `.claude/hooks/` scripts: the extracted pure
 functions (`protected_reason`, `is_python_target`, `has_dirty_python`) directly,
@@ -653,7 +863,13 @@ before it runs.
   a cast — because it must produce byte-identical output from the raw frame `count_marks`
   hands it and the filtered one `build_options` does. A row-less coordinate column is also the
   one case `_coordinates` must NOT call a contradiction: nothing parses, but nothing is
-  *present* either, so it is missing data (an empty chart), not a column of the wrong kind. Two sweeps
+  *present* either, so it is missing data (an empty chart), not a column of the wrong kind.
+  Gauge needs no cast either, and for a third reason: it reads no mask at all (it reduces whole
+  columns), and its branch returns above the shared filter. But it is the one type whose empty
+  chart is **not zero marks** — its marks are the selected COLUMNS, not the rows, so a
+  header-only CSV still selects one, and the ring is kept as a **null**. That is not a special
+  case for the row-less frame: it is the ordinary no-data reading, arrived at with no rows rather
+  than with blank ones. Two sweeps
   pin it (`test_row_less_frame_draws_an_empty_chart_in_every_type` over `SUPPORTED_TYPES`,
   and `test_count_marks_casts_every_mask_not_just_the_label_one`, which promotes warnings to
   errors — the only way the non-label casts are observable at all).
@@ -664,22 +880,37 @@ before it runs.
   non-standard JSON literal `Infinity`, answers `400`. So each type applies the same
   missing-data policy to a non-finite **value**: the keep-the-slot types go through `_num`
   (gap = `EnforcedNull`), the drop-the-row types through the shared `_plottable` predicate
-  (pie, treemap, scatter, bubble, and sankey's *weight*), boxplot drops non-finite
-  observations before aggregating — and, because it is the one type that does *arithmetic*
-  on the values, then nulls the whole box (an `EnforcedNull`) if that arithmetic overflows
-  a finite group into a non-finite quantile/fence — and xrange drops the row via
+  (pie, treemap, scatter, bubble, and sankey's *weight*), boxplot and gauge — the two
+  AGGREGATING types, which share `_finite_values` for exactly this reason — drop non-finite
+  observations before reducing, and, because they are the two types that do *arithmetic*
+  on the values, then null the whole mark (an `EnforcedNull`) if that arithmetic overflows
+  a finite column into a non-finite quantile/fence (boxplot) or reading (gauge:
+  `1e308 + 1e308` is `inf`, and a `1e308` cell parses out of a plain CSV) — and xrange drops
+  the row via
   `_spannable`, whose `_plottable`-on-both-ends half exists precisely for this: `end >= start`
   alone accepts `(-inf, 10)`, so the comparison is *not* enough on its own and the finiteness
-  check is what keeps a bare `inf` out of the emitted JS. The same policy governs the **label**
+  check is what keeps a bare `inf` out of the emitted JS. Gauge adds one twist the others have
+  no analogue for, and it is pandas', not Highcharts': an **empty** column is not merely a
+  no-op for `sum`, it is a `0.0` — the additive **identity**, a confident claim of "the total is
+  zero" where the truth is "there is no data" — so `_gauge_value` tests for empty **above** the
+  reducer rather than trusting it (`_coordinates`' `_COORD_EMPTY` ordering; and note that only
+  `sum` lies, which makes it worse rather than better, since the bug would live in exactly one
+  of six reductions). The same policy governs the **label**
   column (the one that NAMES a mark — a slice/category/node/box): a missing or non-finite
   label names nothing drawable, so its row is dropped uniformly via `_label_ok`, filtered
   once at the top of `build_options` (except scatter/bubble with a numeric x, where x is a
   coordinate `_plottable` already guards; sankey's second label column, `target_col`, is
-  checked in its own branch). This replaced an earlier split where most types kept a
+  checked in its own branch; and **solidgauge**, which has no label channel at all — its branch
+  returns *above* the filter, because a row filter over an AGGREGATE does not drop a mark, it
+  silently changes a NUMBER). This replaced an earlier split where most types kept a
   `"nan"`/`"inf"` label and only sankey/boxplot dropped it. Two sweeps pin it:
   `test_no_supported_type_emits_a_non_finite_js_literal` for the value channel and
   `test_missing_or_non_finite_label_drops_the_row_in_every_type` for the label channel, so
-  a new type is covered on both the day it is added. Reachable from a plain CSV: `inf`,
+  a new type is covered on both the day it is added. Gauge is the first type ever *excluded*
+  from the second sweep, and the reason generalizes: it would pass **vacuously** (with a clean
+  value column the assertion holds whatever the type does with its labels), so it would read as
+  a pin on a policy gauge deliberately does not have. A vacuous pass is worse than no test.
+  Reachable from a plain CSV: `inf`,
   `Infinity`, `-inf` and `1e400` (which silently overflows), and a blank cell (`nan`).
 - `build_chart_html` pins the chart's `color-scheme` to `only light`
   (`_LIGHT_COLOR_SCHEME_CSS`, on the `.highcharts-root` `<svg>`, not `html`: Highcharts

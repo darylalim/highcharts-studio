@@ -404,6 +404,47 @@ def _release_plan() -> pd.DataFrame:
     )
 
 
+def _weekly_bookings() -> pd.DataFrame:
+    """Weekly bookings by sales region — four teams, eight weeks of observations.
+
+    Tailored to solidgauge, and to nothing else in this file, on four counts:
+
+    * It is the only sample whose numeric columns are COMPARABLE MEASURES OF ONE THING. Every
+      other multi-column dataset mixes units (revenue against cost, GDP against life
+      expectancy), and concentric rings sharing ONE dial only mean something when the columns
+      share a scale.
+    * It is the only sample meant to be read through an AGGREGATION rather than plotted
+      directly. Every other dataset's numbers are marks; these are observations that mean
+      nothing until they are collapsed — and they collapse six sensible ways: the quarter's
+      total (``sum``: north 436, which the dial rounds out to 500, so the headline ring reads
+      436 OF 500 rather than being 100% full of itself), a typical week (``mean``), the best
+      week (``max``), this week (``last``).
+    * ``emea`` goes unreported in two weeks — an ordinary reporting gap. It puts the drop
+      INSIDE the aggregate: emea's mean is over six weeks, not eight.
+    * ``partner_deals`` is unreported ENTIRELY, and it is the type's headline trap made
+      reachable from the app rather than left to a test. ``pd.Series([nan, ...]).sum()`` is
+      ``0.0``, so a naive reduction would draw that ring an emphatic, entirely fictional ZERO.
+      The builder tests for empty ABOVE the reducer, reads it as no data, and keeps the ring as
+      a null — an empty track, named only in the legend. (``float("nan")``, not ``None``: an
+      all-``None`` column is OBJECT dtype, so the app's numeric picker could never offer it and
+      the trap would be out of reach from the UI.)
+
+    ``week`` is an ordinary category column and the regions ordinary numerics, so the frame is
+    still a good citizen for line/column/heatmap/radar — and ``week`` is the one column a gauge
+    ignores completely, having no label channel to put it in.
+    """
+    blank = float("nan")
+    return pd.DataFrame(
+        {
+            "week": ["W01", "W02", "W03", "W04", "W05", "W06", "W07", "W08"],
+            "north": [42, 51, 47, 58, 61, 55, 63, 59],  # sum 436 -> a 0..500 dial
+            "south": [38, 35, 44, 41, 39, 46, 43, 48],  # sum 334
+            "emea": [22, 27, 25, blank, blank, 31, 34, 36],  # sum 175, over SIX weeks
+            "partner_deals": [blank] * 8,  # nothing reported: a null ring, not a zero
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -419,4 +460,5 @@ SAMPLES = {
     "Quarterly profit bridge (waterfall)": _profit_bridge,
     "Company headcount (sunburst)": _org_headcount,
     "Product release plan (xrange)": _release_plan,
+    "Weekly bookings by region (solidgauge)": _weekly_bookings,
 }

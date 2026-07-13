@@ -100,6 +100,7 @@ Layers:
   the generated config (incl. the brand palette) and the guard messages.
 """
 
+import math
 import sys
 import warnings
 from datetime import date
@@ -116,11 +117,15 @@ from highcharts_builder import (  # noqa: E402
     CARTESIAN_TYPES,
     CATEGORY_X_TYPES,
     DEFAULT_COLORS,
+    GAUGE_AGGREGATIONS,
+    GAUGE_TYPES,
     SUPPORTED_TYPES,
     build_chart_html,
     build_options,
     count_marks,
+    explain_gauge_error,
     explain_xrange_error,
+    gauge_dial,
     make_chart,
 )
 
@@ -196,15 +201,17 @@ def _end_for(chart_type: str) -> str | None:
     return "end" if chart_type == "xrange" else None
 
 
-# Radar is the one "meta" type: Highcharts has no radar series type, so it renders
-# as a polar *line* chart — its chart.type serializes as "line", not "radar".
-# Every other supported type's chart.type equals its own name.
+# Radar remains the ONE "meta" type: Highcharts has no radar series, so it renders as a polar
+# *line* chart and its chart.type serializes as "line". Every other supported type's chart.type
+# equals its own name — solidgauge included, which is why it is called `solidgauge` and not the
+# friendlier `gauge` that radar's precedent would have licensed: `gauge` in Highcharts is a
+# DIFFERENT chart (a needle on a dial), and the name is left free for it.
 _HC_TYPE = {"radar": "line"}
 
 
 def _hc_type(chart_type: str) -> str:
-    """The Highcharts ``chart.type`` a supported type renders as: identity for all
-    but radar, which is a polar line."""
+    """The Highcharts ``chart.type`` a supported type renders as: identity for all but
+    radar, which is a polar line."""
     return _HC_TYPE.get(chart_type, chart_type)
 
 
@@ -317,7 +324,16 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
         assert token not in js, f"{chart_type} emitted a non-finite literal: {token}"
 
 
-@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+# Gauge is EXCLUDED, and vacuously passing here is exactly why it has to be. It has no label
+# channel — `x_col` names nothing — so there is no policy for this sweep to test, and with a
+# clean value column the assertion below ("no nan/inf token in the JS") would hold whatever
+# gauge did with the labels. Worse than untested: it would READ as a pin on a policy gauge
+# deliberately does not have, since a row filter over an AGGREGATE does not drop a mark, it
+# silently changes a NUMBER. What gauge actually promises is the opposite, and it is pinned
+# where it belongs: test_gauge_ignores_x_col_entirely.
+@pytest.mark.parametrize(
+    "chart_type", [t for t in SUPPORTED_TYPES if t not in GAUGE_TYPES]
+)
 def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
     # The counterpart to the value-column sweep above, for the LABEL column (the one that
     # NAMES a mark: a pie slice, an axis category, a sankey node, a boxplot group). A
@@ -416,7 +432,14 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
     )
-    assert opts["series"][0]["data"] == []  # an empty chart, not a raise
+    # An empty chart, not a raise. Gauge is the one type whose empty chart is not zero marks:
+    # its marks are the selected COLUMNS, not the rows, so a header-only CSV still selects one
+    # — and the ring is KEPT, as a null, exactly as an all-missing column is in a populated
+    # frame. (Dropping it would renumber and recolour every other ring, and make the KPI count a
+    # ring the chart never drew.) So the row-less case is not a special case for gauge at all:
+    # it is the ordinary no-data reading, arrived at with no rows rather than with blank ones.
+    expected = [EnforcedNull] if chart_type in GAUGE_TYPES else []
+    assert opts["series"][0]["data"] == expected
     # And it must still SERIALIZE — an empty series is only useful if Highcharts gets it.
     js = make_chart(
         empty,
@@ -3445,6 +3468,465 @@ def test_release_plan_sample_builds_an_xrange_chart():
 
 
 # --------------------------------------------------------------------------- #
+# Gauge — concentric rings, each one COLUMN reduced to one number
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def bookings_frame() -> pd.DataFrame:
+    """Four regions, eight weeks — the shape a gauge reads: comparable measures on one scale.
+
+    ``emea`` has a reporting gap (the drop happens INSIDE the aggregate) and ``partner_deals``
+    is entirely unreported, which is the type's headline trap: pandas sums it to ``0.0``.
+    """
+    blank = float("nan")
+    return pd.DataFrame(
+        {
+            "week": ["W01", "W02", "W03", "W04", "W05", "W06", "W07", "W08"],
+            "north": [42, 51, 47, 58, 61, 55, 63, 59],  # sum 436, mean 54.5, max 63
+            "south": [38, 35, 44, 41, 39, 46, 43, 48],  # sum 334
+            "emea": [22, 27, 25, blank, blank, 31, 34, 36],  # sum 175, over SIX weeks
+            "partner_deals": [blank] * 8,  # nothing reported
+        }
+    )
+
+
+def _gauge(df, y_cols, **kwargs) -> dict:
+    return build_options(df, "solidgauge", None, list(y_cols), **kwargs)
+
+
+def _rings(opts: dict) -> list[dict]:
+    return opts["series"]
+
+
+def _reading(ring: dict):
+    """The one number a ring draws — or EnforcedNull when its column held no data."""
+    (point,) = ring["data"]
+    return point if point is EnforcedNull else point["y"]
+
+
+def test_gauge_draws_one_ring_per_column_reduced_to_one_number(bookings_frame):
+    opts = _gauge(bookings_frame, ["north", "south", "emea"], agg="sum")
+    rings = _rings(opts)
+    assert [r["name"] for r in rings] == ["north", "south", "emea"]
+    assert [_reading(r) for r in rings] == [436.0, 334.0, 175.0]
+    # emea's 175 is over SIX weeks, not eight: the gap drops INSIDE the aggregate.
+    assert opts["chart"]["type"] == "solidgauge"
+
+
+@pytest.mark.parametrize(
+    ("agg", "expected"),
+    [
+        ("sum", 436.0),
+        ("mean", 54.5),
+        ("median", 56.5),
+        ("min", 42.0),
+        ("max", 63.0),
+        ("last", 59.0),
+    ],
+)
+def test_gauge_every_aggregation_reduces_its_column(bookings_frame, agg, expected):
+    # All six, so a new reducer cannot be added without a reading to prove it.
+    assert GAUGE_AGGREGATIONS == ("sum", "mean", "median", "min", "max", "last")
+    (ring,) = _rings(_gauge(bookings_frame, ["north"], agg=agg))
+    assert _reading(ring) == expected
+
+
+@pytest.mark.parametrize("agg", GAUGE_AGGREGATIONS)
+def test_gauge_an_empty_column_is_no_data_not_a_zero_total(bookings_frame, agg):
+    # THE TYPE'S HEADLINE TRAP, swept over every reduction because only ONE of them lies —
+    # which makes it worse, not better: the bug would live in `sum` alone and look like a
+    # rounding quirk in the other five.
+    assert (
+        bookings_frame["partner_deals"].sum() == 0.0
+    )  # <- pandas' answer: the IDENTITY
+    assert pd.Series([], dtype="float64").sum() == 0.0  # <- and for an empty column too
+    # A gauge that believed pandas would draw an emphatic, entirely fictional ZERO ring at the
+    # dial's floor — a confident CLAIM ("we booked nothing") where the truth is "nobody
+    # reported". The empty test runs ABOVE the reducer, so it is unrepresentable, not
+    # special-cased.
+    (ring,) = _rings(_gauge(bookings_frame, ["partner_deals"], agg=agg))
+    assert _reading(ring) is EnforcedNull
+
+
+def test_gauge_an_empty_ring_is_kept_not_dropped(bookings_frame):
+    # boxplot's all-missing-group rule — and here it is geometrically FORCED. The radii are a
+    # function of the SELECTION, so dropping a ring would resize and recolour every ring below
+    # it, and the KPI ("Series plotted") would count a ring the chart never drew. Keeping it is
+    # what makes marks == series == len(y_cols) an invariant, which is why gauge needs no
+    # MARK_METRICS entry and no count_marks rule.
+    cols = ["north", "south", "emea", "partner_deals"]
+    rings = _rings(_gauge(bookings_frame, cols, agg="sum"))
+    assert len(rings) == len(cols)
+    assert [r["name"] for r in rings] == cols
+    assert _reading(rings[3]) is EnforcedNull
+    # The null ring is a BARE EnforcedNull, not {"y": EnforcedNull, ...}: highcharts-core drops
+    # a null `y` out of a point dict entirely, leaving a point with no value at all.
+    assert rings[3]["data"] == [EnforcedNull]
+    js = make_chart(bookings_frame, "solidgauge", None, cols).to_js_literal()
+    assert js and "data:[[null]]" in "".join(js.split())
+
+
+def test_gauge_the_empty_ring_is_still_named_in_the_legend(bookings_frame):
+    # A null point draws no arc AND no data label, so the legend is the ONLY thing that names
+    # it. That is why gauge is the one type whose legend is not redundant.
+    opts = _gauge(bookings_frame, ["north", "partner_deals"])
+    assert opts["legend"]["enabled"] is True
+    assert all(r["showInLegend"] is True for r in _rings(opts))
+
+
+def test_gauge_drops_non_finite_observations_before_reducing():
+    # An inf cannot be summed with anything (it poisons the total), and it cannot be
+    # SERIALIZED: `to_js_literal` emits the bare token `inf`, which is not valid JS.
+    df = pd.DataFrame({"v": [10.0, float("inf"), 20.0, float("nan")]})
+    (ring,) = _rings(_gauge(df, ["v"], agg="sum"))
+    assert _reading(ring) == 30.0  # the two finite ones
+
+
+def test_gauge_a_reduction_that_overflows_becomes_a_null_ring():
+    # Gauge is the SECOND type (after boxplot) that does ARITHMETIC on the values, so it can
+    # manufacture a non-finite reading out of finite inputs — boxplot's overflow lesson, one
+    # type over. 1e308 parses out of a plain CSV.
+    df = pd.DataFrame({"v": [1e308, 1e308]})
+    with (
+        warnings.catch_warnings()
+    ):  # numpy warns on the overflow; that IS the point here
+        warnings.simplefilter("ignore", RuntimeWarning)
+        assert df["v"].sum() == float("inf")  # finite inputs, non-finite output
+    (ring,) = _rings(_gauge(df, ["v"], agg="sum"))
+    assert _reading(ring) is EnforcedNull
+    js = make_chart(df, "solidgauge", None, ["v"], agg="sum").to_js_literal()
+    assert js and "inf" not in js.lower()
+
+
+def test_gauge_last_reads_the_last_KNOWN_reading():
+    # `_finite_values` runs first, so `last` is the last reading that EXISTS, not the last cell
+    # (which may be blank — and `float(nan)` would null the whole ring).
+    df = pd.DataFrame({"v": [5.0, 7.0, float("nan")]})
+    (ring,) = _rings(_gauge(df, ["v"], agg="last"))
+    assert _reading(ring) == 7.0
+
+
+def test_gauge_rejects_a_non_numeric_column_and_an_unknown_aggregation():
+    df = pd.DataFrame({"v": ["x", "y"]})
+    with pytest.raises(ValueError):
+        _gauge(df, ["v"])  # `_finite_values` casts first, as float() does elsewhere
+    with pytest.raises(ValueError, match="aggregation"):
+        _gauge(pd.DataFrame({"v": [1.0]}), ["v"], agg="mode")
+
+
+# --- the dial ------------------------------------------------------------------------ #
+def test_gauge_dial_is_derived_from_the_readings_not_the_raw_column(bookings_frame):
+    # THE OTHER HEADLINE. Under `sum` a reading EXCEEDS every observation in its own column
+    # (436 vs a max cell of 63), so a dial derived from the raw column would end at 100 and pin
+    # every ring past the end of its own scale — "everyone smashed target", drawn confidently.
+    # Reducing FIRST, with the very reduction the rings draw, makes that unrepresentable.
+    cols = ["north", "south", "emea"]
+    assert bookings_frame[cols].max().max() == 63  # the raw column's ceiling
+    opts = _gauge(bookings_frame, cols, agg="sum")
+    assert (opts["yAxis"]["min"], opts["yAxis"]["max"]) == (0.0, 500.0)  # 436 -> 500
+    # And every reading fits inside its own dial, under EVERY reduction.
+    for agg in GAUGE_AGGREGATIONS:
+        low, high = gauge_dial(bookings_frame, cols, agg)
+        readings = [
+            _reading(r)
+            for r in _rings(_gauge(bookings_frame, cols, agg=agg))
+            if _reading(r) is not EnforcedNull
+        ]
+        assert all(low <= v <= high for v in readings), agg
+
+
+@pytest.mark.parametrize(
+    ("value", "ceiling"),
+    [(436.0, 500.0), (79.0, 100.0), (9.0, 10.0), (0.83, 1.0), (100.0, 100.0)],
+)
+def test_gauge_dial_rounds_the_ceiling_outward(value, ceiling):
+    # A dial ending exactly at the largest reading draws that ring 100% full whatever it holds.
+    # "436 of 500" is the only reading a gauge gives, so the 500 has to come from somewhere.
+    _low, high = gauge_dial(pd.DataFrame({"v": [value]}), ["v"], "sum")
+    assert high == ceiling
+
+
+def test_gauge_dial_survives_overflow_and_underflow():
+    # The two ways the nice-ceiling arithmetic breaks on real input. `2.0 * 1e308` is `inf`,
+    # which would put the bare token `inf` in the emitted JS; `10.0 ** -324` is `0.0`, which
+    # would leave the dial with no extent at all. In both cases the reading is finite and
+    # positive, so it is its own ceiling.
+    _low, high = gauge_dial(pd.DataFrame({"v": [1.5e308]}), ["v"], "sum")
+    assert math.isfinite(high)
+    js = make_chart(
+        pd.DataFrame({"v": [1.5e308]}), "solidgauge", None, ["v"]
+    ).to_js_literal()
+    assert js and "inf" not in js.lower()
+    _low, tiny = gauge_dial(pd.DataFrame({"v": [5e-324]}), ["v"], "sum")
+    assert tiny > 0
+
+
+def test_gauge_dial_floors_at_zero_and_an_all_negative_one_sweeps_from_zero():
+    # A gauge is read FROM ZERO: an arc's LENGTH is its magnitude. Left unset, Highcharts sweeps
+    # each arc from the axis MINIMUM, which INVERTS an all-negative dial — on a -200..0 dial the
+    # -40 would draw a LONGER arc than the -155, so the SMALLEST loss would look like the
+    # biggest. `threshold` is what stops that.
+    df = pd.DataFrame({"a": [-155.0], "b": [-40.0]})
+    opts = _gauge(df, ["a", "b"], agg="sum")
+    assert (opts["yAxis"]["min"], opts["yAxis"]["max"]) == (-200.0, 0.0)
+    assert all(r["threshold"] == 0.0 for r in _rings(opts))
+    # A positive frame's dial floors at zero rather than at its smallest reading.
+    up = _gauge(pd.DataFrame({"v": [40.0]}), ["v"])
+    assert up["yAxis"]["min"] == 0.0
+
+
+def test_gauge_dial_of_an_empty_or_all_missing_selection_is_still_drawable():
+    # gauge_dial is TOTAL — it runs above the app's empty-Y guard, like count_marks — and it
+    # must never return a degenerate 0..0, which Highcharts would divide by.
+    df = pd.DataFrame({"v": [float("nan")]})
+    assert gauge_dial(df, [], "sum") == (0.0, 100.0)
+    assert gauge_dial(df, ["v"], "sum") == (0.0, 100.0)
+    assert gauge_dial(pd.DataFrame({"v": [0.0]}), ["v"], "sum") == (0.0, 100.0)
+
+
+def test_gauge_dial_override_replaces_the_derived_one(bookings_frame):
+    opts = _gauge(bookings_frame, ["north"], agg="sum", dial=(0.0, 1000.0))
+    assert (opts["yAxis"]["min"], opts["yAxis"]["max"]) == (0.0, 1000.0)
+
+
+@pytest.mark.parametrize("bad", [(5.0, 5.0), (100.0, 50.0), (0.0, float("inf"))])
+def test_gauge_rejects_a_dial_with_no_span(bookings_frame, bad):
+    with pytest.raises(ValueError) as excinfo:
+        _gauge(bookings_frame, ["north"], dial=bad)
+    # The app's warning IS the exception's message — they cannot drift apart.
+    assert explain_gauge_error(bad) == str(excinfo.value)
+    assert explain_gauge_error(None) is None  # "derive it" is not an error
+    assert explain_gauge_error((0.0, 10.0)) is None
+
+
+# --- the two silent-drop traps, pinned on the EMITTED JS ------------------------------ #
+def test_gauge_arc_colour_rides_the_point_and_the_radius_rides_the_series(
+    bookings_frame,
+):
+    # THE NASTIEST THING ABOUT THIS TYPE: two adjacent properties on OPPOSITE levels, each
+    # silently wrong on the other's.
+    cols = ["north", "south", "emea"]
+    opts = _gauge(bookings_frame, cols)
+    rings = _rings(opts)
+    # The RADIUS must be on the SERIES. A point-level one is accepted by Chart.from_options and
+    # then silently dropped — and it is the canonical Highcharts activity-gauge recipe.
+    assert all("radius" in r and "innerRadius" in r for r in rings)
+    js = make_chart(bookings_frame, "solidgauge", None, cols).to_js_literal()
+    assert js
+    flat = "".join(js.split())
+    assert "radius:'100.0%'" in flat  # survived to the JS
+    # The COLOUR must be on the POINT. Highcharts' solidgauge defaults `colorByPoint: true` and
+    # highcharts-core models no `color_by_point` at all, so the default CANNOT be turned off:
+    # every series' single point is index 0 of its own colorCounter, so a series-level `color`
+    # serializes perfectly and every ring still resolves to colors[0] — three hues in the JS,
+    # three identical blue arcs on screen, beside pane tracks showing the three TRUE hues.
+    for ring, hue in zip(rings, DEFAULT_COLORS, strict=False):
+        assert ring["data"][0]["color"] == hue  # the ARC
+        # And the same hue AGAIN, on the marker, for the LEGEND swatch — the same drop wearing a
+        # third hat. A series-level `color` serializes perfectly and Highcharts renders the
+        # legend bullet grey anyway (verified by rendering; removing the series `color` changed
+        # nothing at all, so it does no work here). The legend is the only thing that names an
+        # EMPTY ring, and a grey bullet cannot be matched back to a band. A solid gauge draws no
+        # markers on an arc, so this is inert everywhere else.
+        assert ring["marker"] == {"fillColor": hue, "symbol": "circle"}
+        assert (
+            "color" not in ring
+        )  # it would be an option that looks load-bearing and isn't
+    for hue in DEFAULT_COLORS[:3]:
+        assert f"color:'{hue}'" in flat
+    # And `colorByPoint` must appear NOWHERE: it cannot be emitted, and the one that would
+    # survive is the wrong one anyway.
+    assert "colorByPoint" not in js
+
+
+def test_gauge_takes_a_custom_palette_and_a_short_one_cycles(bookings_frame):
+    # A ring's hue is its arbitrary IDENTITY (a pie slice's rule, not waterfall's semantic
+    # red-means-loss), so it reads from the OVERRIDABLE palette — and a short one must WRAP
+    # rather than IndexError.
+    rings = _rings(
+        _gauge(
+            bookings_frame, ["north", "south", "emea"], colors=["#111111", "#222222"]
+        )
+    )
+    assert [r["data"][0]["color"] for r in rings] == ["#111111", "#222222", "#111111"]
+
+
+def test_gauge_pane_pulls_in_highcharts_more_without_which_the_chart_is_blank(
+    bookings_frame,
+):
+    # The pane is LOAD-BEARING, not decoration. `get_script_tags` emits highcharts-more ONLY
+    # when the options tree carries a `pane` key — not for the series type, not for
+    # plotOptions.solidgauge, not for a series radius — and a solid gauge WITHOUT
+    # highcharts-more draws an EMPTY SVG in the browser: zero series paths, no error band, no
+    # Python-side error. The export server rasterizes it regardless, so dropping the pane would
+    # make the two render modes silently DISAGREE.
+    chart = make_chart(bookings_frame, "solidgauge", None, ["north"])
+    tags = " ".join(chart.get_script_tags())
+    assert "highcharts-more.js" in tags
+    assert "modules/solid-gauge.js" in tags
+    js = chart.to_js_literal()
+    assert js and "pane" in js
+
+
+def test_gauge_pane_tracks_mirror_the_ring_radii(bookings_frame):
+    cols = ["north", "south", "emea"]
+    opts = _gauge(bookings_frame, cols)
+    tracks = opts["pane"]["background"]
+    rings = _rings(opts)
+    assert len(tracks) == len(rings)
+    for track, ring in zip(tracks, rings, strict=True):
+        assert track["outerRadius"] == ring["radius"]
+        assert track["innerRadius"] == ring["innerRadius"]
+
+
+@pytest.mark.parametrize("count", [1, 2, 5, 12, 40])
+def test_gauge_ring_radii_nest_without_ever_inverting(count):
+    # Two caps, each stopping the band degenerating at one END of the range.
+    # MANY rings: a fixed 3% gap exceeds the band past ~21 of them, at which point inner > outer
+    # and Highcharts draws garbage — and a wide CSV with 40 numeric columns is one click away.
+    # The geometry DEGRADES (thin rings) rather than breaking; capping the RINGS instead would
+    # mean dropping a column the user asked for.
+    df = pd.DataFrame({f"c{i}": [float(i + 1)] for i in range(count)})
+    rings = _rings(_gauge(df, list(df.columns)))
+    assert len(rings) == count
+    radii = [(float(r["radius"][:-1]), float(r["innerRadius"][:-1])) for r in rings]
+    for outer, inner in radii:
+        assert outer > inner  # never inverted
+        # FEW rings: with the whole radius to divide, ONE column would draw an arc 61% thick — a
+        # fat disc with a pinhole, which reads as a pie with a bite out of it, not a gauge.
+        # A ring has to look like a ring.
+        assert outer - inner <= 30.0
+    for (_o1, inner), (outer, _i2) in zip(radii, radii[1:], strict=False):
+        assert inner >= outer  # each ring sits strictly inside the one before it
+
+
+def test_gauge_ticks_are_silenced_by_width_not_by_tick_positions(bookings_frame):
+    # The obvious `tickPositions: []` is PRUNED before it is emitted (an empty list), and the
+    # tick dashes then stay visible ON the tracks even with the labels switched off.
+    axis = _gauge(bookings_frame, ["north"])["yAxis"]
+    assert axis["tickWidth"] == 0 and axis["minorTickWidth"] == 0
+    assert "tickPositions" not in axis
+    assert axis["labels"] == {"enabled": False}
+
+
+def test_gauge_labels_stack_in_the_hub_in_each_rings_own_hue(bookings_frame):
+    cols = ["north", "south", "emea"]
+    opts = _gauge(bookings_frame, cols)
+    labels = [r["dataLabels"] for r in _rings(opts)]
+    # One line per ring, centred about the middle one.
+    assert [lbl["y"] for lbl in labels] == [-17, 0, 17]
+    assert [lbl["style"]["color"] for lbl in labels] == list(DEFAULT_COLORS[:3])
+    shared = opts["plotOptions"]["solidgauge"]["dataLabels"]
+    assert shared["enabled"] is True
+    # `allowOverlap` is load-bearing: Highcharts otherwise HIDES a colliding label by rendering
+    # the <text> and turning it INVISIBLE — the element stays in the DOM, so every assertion
+    # about it still passes while a ring's value is simply absent from the chart.
+    assert shared["allowOverlap"] is True
+    # `useHTML` is pinned False: the export server silently drops HTML labels, so the iframe and
+    # the PNG would disagree.
+    assert shared["useHTML"] is False
+
+
+def test_gauge_many_rings_disable_the_labels_EXPLICITLY():
+    # Gated on ring count, like heatmap's cells and waterfall's steps — but with a twist none of
+    # them has: a gauge's dataLabels default to ON, so merely OMITTING the key (heatmap's style)
+    # would be a gate that did nothing at all, and twenty labels would pile up at one offset.
+    df = pd.DataFrame({f"c{i}": [float(i + 1)] for i in range(6)})
+    opts = _gauge(df, list(df.columns))
+    assert opts["plotOptions"]["solidgauge"]["dataLabels"] == {"enabled": False}
+    assert all("dataLabels" not in r for r in _rings(opts))
+    js = make_chart(df, "solidgauge", None, list(df.columns)).to_js_literal()
+    assert js and "enabled:false" in "".join(js.split())
+
+
+def test_gauge_tooltip_names_the_series_not_the_point_or_the_category(bookings_frame):
+    # A third answer for a third reason: waterfall needs {point.category} (its points are
+    # positional), sunburst and xrange need {point.name} (their categories are on the wrong
+    # axis) — and a gauge ring holds exactly ONE point, so the mark's identity is not on the
+    # point at all. It IS the series.
+    tip = _gauge(bookings_frame, ["north"])["tooltip"]
+    assert "{series.name}" in tip["pointFormat"]
+
+
+def test_gauge_subtitle_states_the_aggregation_and_the_dial(bookings_frame):
+    # The scale is INVISIBLE on the chart (a 360° gauge has nowhere to put an axis) and the
+    # Static PNG has no tooltip, so without this a downloaded gauge cannot be decoded at all:
+    # "436" means nothing until you know it is a sum of eight weeks against a 500 target.
+    opts = _gauge(bookings_frame, ["north"], agg="sum")
+    assert opts["subtitle"]["text"] == "sum · dial 0 – 500"
+
+
+# --- no label channel ----------------------------------------------------------------- #
+def test_gauge_ignores_x_col_entirely(bookings_frame):
+    # Gauge is the first type with NO LABEL CHANNEL, and this is the pin that makes the
+    # `_label_ok` exception more than a formality. Naming a column changes NOTHING...
+    without = make_chart(bookings_frame, "solidgauge", None, ["north"]).to_js_literal()
+    with_x = make_chart(bookings_frame, "solidgauge", "week", ["north"]).to_js_literal()
+    assert without == with_x
+    # ...and — the load-bearing half — a frame whose label column is ENTIRELY undrawable still
+    # aggregates every row. If the shared `_label_ok` filter reached this branch it would drop
+    # all eight rows and the ring would come back null; if it dropped only some, the total would
+    # come back SMALLER, drawn confidently, with nothing on the page saying so. A row filter over
+    # an AGGREGATE does not drop a mark — it silently changes a NUMBER.
+    unlabelled = bookings_frame.assign(week=[float("nan")] * 8)
+    (ring,) = _rings(_gauge(unlabelled, ["north"], agg="sum"))
+    assert _reading(ring) == 436.0  # every row still counted
+
+
+def test_every_other_type_requires_an_x_col(bookings_frame):
+    # The column role stops being universal, so the signature has to admit it — and a pure-API
+    # caller who omits x_col for a pie deserves a message, not a KeyError out of pandas.
+    with pytest.raises(ValueError, match="x column"):
+        build_options(bookings_frame, "line", None, ["north"])
+
+
+def test_count_marks_has_no_rule_for_gauge(bookings_frame):
+    # Its marks ARE its series, so `len(y_cols)` is an invariant and "Series plotted" is already
+    # literally the ring count. A rule here would be the can't-drift rule run backwards: a second
+    # computation of a fact that cannot differ from the first.
+    with pytest.raises(ValueError, match="no rule"):
+        count_marks(bookings_frame, "solidgauge", None, ["north"])
+
+
+def test_gauge_light_mode_shape_and_dark_mode_themes_the_tracks(bookings_frame):
+    cols = ["north", "south"]
+    light = _gauge(bookings_frame, cols, dark=False)
+    # There is no `borderColor` anywhere, and there CANNOT be: SolidGaugeSeries models no border
+    # at any level, so one would be silently dropped (boxplot's fillColor, exactly).
+    assert "borderColor" not in light["plotOptions"]["solidgauge"]
+    assert set(light["plotOptions"]["solidgauge"]) == {
+        "rounded",
+        "linecap",
+        "stickyTracking",
+        "dataLabels",
+    }
+    assert all(t["backgroundColor"] == "#f1f5f9" for t in light["pane"]["background"])
+
+    dark = _gauge(bookings_frame, cols, dark=True)
+    # The ONE hook this type can have, and the first to reach a TOP-LEVEL key rather than
+    # plotOptions: the tracks. Left unset they take a Highcharts default that
+    # _LIGHT_COLOR_SCHEME_CSS pins to its LIGHT resolution in BOTH themes, so every dial would
+    # sit on a pale rail against the dark shell.
+    assert all(t["backgroundColor"] == "#334155" for t in dark["pane"]["background"])
+    # The ring hues are untouched (the palette is theme-shared), and so are the hub labels,
+    # which carry them.
+    assert [r["data"][0]["color"] for r in _rings(dark)] == list(DEFAULT_COLORS[:2])
+    assert dark["subtitle"]["style"]["color"]  # the subtitle follows the chrome
+
+
+def test_weekly_bookings_sample_builds_a_gauge():
+    from sample_data import SAMPLES
+
+    df = SAMPLES["Weekly bookings by region (solidgauge)"]()
+    cols = ["north", "south", "emea", "partner_deals"]
+    opts = _gauge(df, cols, agg="sum")
+    rings = _rings(opts)
+    assert len(rings) == 4
+    assert _reading(rings[0]) == 436.0
+    assert _reading(rings[3]) is EnforcedNull  # the trap, reachable from the app
+    assert opts["yAxis"]["max"] == 500.0
+
+
+# --------------------------------------------------------------------------- #
 # Static-PNG failure messages (the export server's three different answers)
 # --------------------------------------------------------------------------- #
 class _FakeResponse:
@@ -4493,3 +4975,101 @@ def test_app_chart_type_badge_reflects_selection(app):
     app.selectbox[1].set_value("pie").run()  # Chart type -> pie
     assert not app.exception
     assert any("Pie chart" in b for b in badge_texts(app))
+
+
+def _gauge_app(app):
+    """Switch the app to gauge and return it. The default dataset works: its numerics are
+    revenue/cost, which a gauge happily reduces."""
+    app.selectbox[1].set_value("solidgauge").run()  # Chart type -> solidgauge
+    assert not app.exception
+    return app
+
+
+def test_app_switch_to_gauge_hides_the_x_control_and_shows_the_dial_controls(app):
+    # The FIRST SUBTRACTIVE control change in this app: every other type's extra widget is
+    # additive (bubble's Size, sankey's Target, sunburst's Parent, xrange's End), but gauge
+    # REMOVES the X selectbox — it has no label channel, so a control there would do nothing,
+    # and a control that does nothing is a lie in the UI.
+    assert any(sb.label == "Category (X) axis" for sb in app.selectbox)
+    _gauge_app(app)
+    assert not any(sb.label == "Category (X) axis" for sb in app.selectbox)
+    assert any(sb.label == "Reduce each column by" for sb in app.selectbox)
+    assert [n.label for n in app.number_input] == ["Dial min", "Dial max"]
+    # Multi-select Y: each column is one ring.
+    assert app.pills
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'solidgauge'" in app.code[0].value
+    assert "pane" in app.code[0].value  # without which the iframe is silently blank
+
+
+def test_app_gauge_aggregation_picker_offers_exactly_the_builders_reductions(app):
+    # Sourced from the builder, so the app can never offer a reduction the builder rejects —
+    # `coordinate_columns`' can't-drift rule, applied to a POLICY rather than to a column.
+    _gauge_app(app)
+    picker = next(sb for sb in app.selectbox if sb.label == "Reduce each column by")
+    assert list(picker.options) == list(GAUGE_AGGREGATIONS)
+
+
+def test_app_gauge_dial_defaults_come_from_the_builder(app):
+    # The can't-drift rule applied, for the first time, to a widget's VALUE rather than to its
+    # options: the number the app SHOWS is the very dial the chart DRAWS. The app must not
+    # recompute it — a max derived here from the raw column would be smaller than every ring
+    # under `sum`, pinning them all at 100% with nothing on the page to say why.
+    from sample_data import SAMPLES
+
+    _gauge_app(app)
+    df = next(iter(SAMPLES.values()))()
+    y_cols = [p for p in app.pills[0].value]
+    low, high = gauge_dial(df, y_cols, "sum")
+    assert [n.value for n in app.number_input] == [low, high]
+
+
+def test_app_gauge_dial_override_reaches_the_chart_and_survives_an_inert_rerun(app):
+    # HALF ONE of the keyless-widget decision. A typed dial is scoped to its derivation, not to
+    # every rerun: it survives a change that cannot affect it (the title).
+    _gauge_app(app)
+    app.number_input[1].set_value(1000.0).run()
+    assert not app.exception
+    _reveal_config(app)
+    assert "max:1000" in "".join(app.code[0].value.split())  # it reached the chart
+    app.text_input[0].set_value("A different title").run()  # inert w.r.t. the dial
+    assert not app.exception
+    assert app.number_input[1].value == 1000.0  # the override stands
+
+
+def test_app_gauge_dial_re_mints_when_the_aggregation_changes(app):
+    # HALF TWO, and the reason there is NO `key=` on these inputs. A dial derives from the DATA
+    # under a REDUCTION, so an override of it is meaningless the moment either changes: a max of
+    # 500 typed against `sum` would leave every ring at ~1% under `mean`. A `key=` is how you
+    # would CAUSE that — with a key, `value=` is honoured only on the FIRST render, so the stale
+    # number would become permanent and silent. Re-minting is the INTENDED behaviour here, and
+    # it is visible: the box shows the newly derived number.
+    _gauge_app(app)
+    app.number_input[1].set_value(9999.0).run()
+    assert app.number_input[1].value == 9999.0
+    picker = next(sb for sb in app.selectbox if sb.label == "Reduce each column by")
+    picker.set_value("mean").run()  # the derivation changed
+    assert not app.exception
+    assert app.number_input[1].value != 9999.0  # re-derived, not carried over
+
+
+def test_app_gauge_a_dial_with_no_span_warns_instead_of_crashing(app):
+    # The third builder error reachable from this page (after sunburst's cycle and xrange's
+    # axis mismatch), and the first that is not about a COLUMN at all: two number inputs accept
+    # any two numbers, so a max at or below the min is one keystroke away. The interactive path
+    # does not catch builder errors, so this must warn and stop rather than throw a traceback.
+    _gauge_app(app)
+    app.number_input[1].set_value(-10.0).run()  # max below min
+    assert not app.exception
+    assert app.warning
+    assert "must be a finite number above its minimum" in app.warning[0].value
+
+
+def test_app_gauge_kpi_counts_the_rings_as_series(app):
+    # Gauge is deliberately absent from MARK_METRICS: its marks ARE its series, so the default
+    # "Series plotted" is already literally the ring count. An entry would force a count_marks
+    # rule that only restated len(y_cols).
+    _gauge_app(app)
+    metrics = _metrics(app)
+    assert metrics["Series plotted"] == str(len(app.pills[0].value))

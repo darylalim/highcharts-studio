@@ -56,7 +56,9 @@ light/dark theme, which you can toggle from the settings menu.
 - An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
   metric — series plotted, or cells for a heatmap, tiles for a treemap, flows
   for a sankey, boxes for a boxplot, steps for a waterfall, sectors for a
-  sunburst, and bars for an xrange) above
+  sunburst, and bars for an xrange; a gauge needs no entry of its own, since its
+  marks *are* its series — one ring per column — so "series plotted" is already
+  literally the ring count) above
   the chart
   — with the chart type shown as a badge above the chart rather than a metric in
   the row — a side-by-side source-data preview, and a toggle that reveals the
@@ -79,13 +81,20 @@ light/dark theme, which you can toggle from the settings menu.
   one row per node, a **Parent** column naming each node's parent — blank means a
   top-level branch — and a column of *leaf* values. A parent's arc is the **sum** of
   its children's, so a node with children needs no value of its own; a centre
-  sector is added for you; and clicking a sector zooms into that branch), and
+  sector is added for you; and clicking a sector zooms into that branch),
   `xrange` (a Gantt-style timeline, and the only type whose marks have *extent*
   rather than sitting at a point: one row per bar, a **Lane** column naming each
   task — it may repeat, so a lane can hold several bars — plus a **Start** and an
   **End** column. Those two are *coordinates*, so they may be dates (ISO-8601) or
   plain numbers, but both the same kind; a zero-length bar is a **milestone** and
-  still draws, while a backwards one is dropped).
+  still draws, while a backwards one is dropped), and `solidgauge` (concentric rings on
+  one shared dial — an "activity gauge", and the only type with **no X column at
+  all**: a gauge has no labels, only readings. Each selected column becomes one
+  ring, showing that column **collapsed to a single number** by the aggregation you
+  pick — sum / mean / median / min / max / last — so it is the only type whose marks
+  are not in the data but *reduced* from it. The dial is derived from those readings
+  and can be overridden; a column with nothing in it keeps its ring, empty, rather
+  than being drawn as a fictional zero).
 
 ## Files
 
@@ -125,7 +134,12 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
   a date parser, since `pd.to_datetime(12)` silently yields the epoch, and a date
   column's epoch millis must be unit-normalized before the int64 view, or every bar
   lands in 1970; the kept milestone and the dropped backwards bar; and the per-lane
-  hue),
+  hue), gauge's reduced rings (the empty-column trap — `pd.Series([nan, ...]).sum()`
+  is `0.0`, so a naive reduction draws a fictional zero where the truth is "no data";
+  the dial derived from the *readings* rather than the raw column, without which a
+  `sum` pins every ring; `threshold: 0`, without which the bigger loss draws the
+  shorter arc; and the three levels a ring's hue has to be written to, since a
+  point-level radius and a series-level color are each silently dropped),
   the brand palette, the
   light/dark theming including the dark-mode tooltip and the heatmap colorAxis, and
   the validation guards — plus an end-to-end pass driving every supported type
@@ -133,7 +147,10 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
   datasets, plus a headless `AppTest` pass that drives the full app (switching
   controls including the bubble Size (Z), sankey Target (to), sunburst Parent and
   xrange End
-  selectors, radar,
+  selectors, gauge's aggregation picker and its two Dial inputs — whose defaults are
+  seeded *from the builder*, and which deliberately reset when the data or the
+  reduction changes, because a scale carried over from either is a silent lie —
+  radar,
   heatmap, treemap, boxplot, and waterfall, the
   config toggle, the KPI row, the wide-CSV `st.multiselect` fallback, both render
   modes, and the guard messages).

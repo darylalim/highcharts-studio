@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from highcharts_builder import (
+    GAUGE_AGGREGATIONS,
     SUPPORTED_TYPES,
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
@@ -25,8 +26,10 @@ from highcharts_builder import (
     coordinate_columns,
     count_marks,
     explain_export_failure,
+    explain_gauge_error,
     explain_tree_error,
     explain_xrange_error,
+    gauge_dial,
     make_chart,
 )
 from sample_data import SAMPLES
@@ -66,6 +69,12 @@ MARK_METRICS = {
     # bar per surviving row. A zero-length bar (a milestone) IS one of them — the builder
     # floors it to a visible sliver rather than dropping it, so counting it is honest.
     "xrange": "Bars",
+    # Gauge is deliberately ABSENT, and it is the first type whose absence is worth stating.
+    # Its marks ARE its series — one ring per y column, and a column with no data keeps its ring
+    # as a null rather than being dropped — so "Series plotted" is already literally the ring
+    # count. An entry here would force a `count_marks` rule that did nothing but restate
+    # `len(y_cols)`: the can't-drift rule run backwards, a second computation of a fact that
+    # cannot differ from the first. (`count_marks` raises for it, exactly as it does for line.)
 }
 
 st.set_page_config(
@@ -98,6 +107,8 @@ def cached_chart_html(
     target_col,
     parent_col,
     end_col,
+    agg,
+    dial,
 ) -> str:
     return build_chart_html(
         df,
@@ -111,6 +122,8 @@ def cached_chart_html(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        agg=agg,
+        dial=dial,
     )
 
 
@@ -129,6 +142,8 @@ def cached_chart_png(
     target_col,
     parent_col,
     end_col,
+    agg,
+    dial,
 ) -> bytes:
     return build_chart_png(
         df,
@@ -142,6 +157,8 @@ def cached_chart_png(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        agg=agg,
+        dial=dial,
     )
 
 
@@ -157,6 +174,8 @@ def cached_chart_js(
     target_col,
     parent_col,
     end_col,
+    agg,
+    dial,
 ) -> str:
     # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
     # literal string for a built chart.
@@ -171,6 +190,8 @@ def cached_chart_js(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        agg=agg,
+        dial=dial,
     ).to_js_literal()
 
 
@@ -258,6 +279,9 @@ with st.sidebar:
             "dates (ISO-8601, e.g. `2026-01-05`) or plain numbers (sprint 12 → 18) — but "
             "both the same kind. A zero-length bar is a **milestone** and still draws; a "
             "backwards one is dropped\n"
+            "- **solidgauge** — one **ring per numeric column**, each collapsed to a single number "
+            "by the aggregation you choose (sum / mean / …), all read against one shared "
+            "dial. There is **no X column**: a gauge has no labels, only readings\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -317,6 +341,12 @@ with st.sidebar:
         # HOW MUCH. Single-select, like every other extra-column type — a second start column
         # would be a second bar per row, which is a second chart.
         x_label, y_label, multi = "Lane / task labels", "Start", False
+    elif chart_type == "solidgauge":
+        # The only type with NO X control at all (see the selectbox below): its marks are the
+        # SELECTED COLUMNS, each collapsed to one number, so there is no label column to pick.
+        # Multi-select Y — and here the plural is the whole chart, not a convenience: each
+        # column is one ring, which is why gauge needs no MARK_METRICS entry (marks == series).
+        x_label, y_label, multi = "", "Rings (Y) — one or more", True
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     elif chart_type == "heatmap":
@@ -330,7 +360,13 @@ with st.sidebar:
     else:  # cartesian + radar (both a category X axis with one or more Y series)
         x_label, y_label, multi = "Category (X) axis", "Series (Y) — one or more", True
 
-    x_col = st.selectbox(x_label, df.columns)
+    # Gauge draws no X control, and passes None. It is the one type with no label channel — its
+    # marks are the selected COLUMNS — so there is nothing for an X column to name. The two
+    # alternatives are both lies: rendering a control that does nothing lies in the UI, and
+    # passing a column the builder must ignore lies in the call site AND in three cache keys
+    # (the chart would re-render on a change that cannot affect it). `build_options` takes
+    # `str | None` precisely so this can be honest.
+    x_col = None if chart_type == "solidgauge" else st.selectbox(x_label, df.columns)
 
     # Sankey's second node column, sitting next to Source so the two ends of a link
     # read as a pair. Drawn from every column, not numeric_cols like bubble's
@@ -434,6 +470,43 @@ with st.sidebar:
     if chart_type == "bubble":
         size_col = st.selectbox("Size (Z)", numeric_cols, index=len(numeric_cols) - 1)
 
+    # Gauge's two controls, and the first here that name a POLICY and a SCALE rather than a
+    # column. They sit BELOW the Y control because the dial is derived from the SELECTED columns
+    # under the SELECTED reduction. Inert for every other type.
+    agg, dial = GAUGE_AGGREGATIONS[0], None
+    if chart_type == "solidgauge":
+        agg = st.selectbox(
+            "Reduce each column by",
+            GAUGE_AGGREGATIONS,  # from the builder: it can never offer one the builder rejects
+            index=0,  # a CONSTANT index, like every other keyless picker in this sidebar
+            help="Each ring shows its column collapsed to **one** number.",
+        )
+        # The default dial comes FROM THE BUILDER — the very `gauge_dial` call `build_options`
+        # makes when `dial is None` — so the number the app SHOWS can never drift from the dial
+        # the chart DRAWS. The app must not recompute it: a max derived here from the raw column
+        # would be smaller than every ring under `sum` (a total exceeds each of its parts), so
+        # every ring would sit pinned at 100% and nothing on the page would say why. Total above
+        # the empty-Y guard below, like count_marks.
+        low, high = gauge_dial(df, y_cols, str(agg))
+        # DELIBERATELY KEYLESS, and this is the one widget on this page where the re-mint is the
+        # INTENDED behaviour rather than the bug the constant `index`es above exist to prevent.
+        # The rule those comments were always applying, stated: fold the default into the
+        # widget's identity iff the selection DEPENDS on the state the default derives from.
+        # Sankey's Target derives from another WIDGET and stays perfectly valid when Source
+        # changes, so re-minting it would discard a real answer. A dial derives from the DATA
+        # under a REDUCTION, and an override of it is meaningless the moment either changes: a
+        # max of 500 typed against `sum` (436) leaves every ring at ~1% under `mean` (54), and
+        # one carried over from another dataset saturates them all. A `key=` is how you would
+        # CAUSE that — with a key, `value=` is honoured only on the FIRST render, so the stale
+        # number becomes permanent and silent. The re-mint is also visible (the box shows the
+        # new derived number) and is scoped to the derivation, not to every rerun: a typed dial
+        # survives a title edit, a height drag and a render-mode switch.
+        dial_min, dial_max = st.columns(2)
+        dial = (
+            float(dial_min.number_input("Dial min", value=float(low))),
+            float(dial_max.number_input("Dial max", value=float(high))),
+        )
+
     # A stable key keeps a typed title across reruns; an empty field falls back
     # to a per-chart-type default (shown as the placeholder, applied in
     # build_options) instead of silently resetting when the chart type changes.
@@ -510,11 +583,14 @@ with right.container(border=True, height="stretch"):
     column_config = {
         col: st.column_config.NumberColumn(format="localized") for col in numeric_cols
     }
-    column_config[x_col] = (
-        st.column_config.NumberColumn(format="localized", pinned=True)
-        if x_col in numeric_cols
-        else st.column_config.Column(pinned=True)
-    )
+    # A gauge has no X column to pin — its marks are the selected columns themselves — so
+    # nothing is pinned and the table simply scrolls.
+    if x_col is not None:
+        column_config[x_col] = (
+            st.column_config.NumberColumn(format="localized", pinned=True)
+            if x_col in numeric_cols
+            else st.column_config.Column(pinned=True)
+        )
     st.dataframe(
         df, height=min(height, 360), hide_index=True, column_config=column_config
     )
@@ -560,7 +636,9 @@ with left.container(border=True, height="stretch"):
     # can reach just by uploading a CSV. The interactive path doesn't catch, so it has to be
     # stopped here. The message comes from the builder (explain_tree_error), so this warning
     # cannot drift from the exception it stands in for.
-    if chart_type == "sunburst" and parent_col is not None:
+    # (`x_col is not None` is true by construction here — gauge is the only type that passes
+    # None, and it is not sunburst — but it is the narrowing the widened signature now needs.)
+    if chart_type == "sunburst" and parent_col is not None and x_col is not None:
         problem = explain_tree_error(df, x_col, parent_col, y_cols[0])
         if problem:
             st.warning(problem, icon=":material/warning:")
@@ -589,8 +667,19 @@ with left.container(border=True, height="stretch"):
     # call: the builder owns the diagnosis, and asking it the whole question here (rather than
     # re-deriving which half is reachable) is what keeps this warning from drifting from the
     # exception it stands in for.
-    if chart_type == "xrange" and end_col is not None:
+    if chart_type == "xrange" and end_col is not None and x_col is not None:
         problem = explain_xrange_error(df, x_col, y_cols[0], end_col)
+        if problem:
+            st.warning(problem, icon=":material/warning:")
+            st.stop()
+    # And gauge's own contradiction, the third builder error reachable from this page and the
+    # first that is not about a COLUMN at all: a dial with no span. The two number inputs accept
+    # any two numbers, so a max at or below the min is one keystroke away — and it makes every
+    # ring an undefined fraction of nothing, which has no right drawing. Same contract as the
+    # two above: the message comes from the builder (explain_gauge_error), so it cannot drift
+    # from the exception it stands in for.
+    if chart_type == "solidgauge":
+        problem = explain_gauge_error(dial)
         if problem:
             st.warning(problem, icon=":material/warning:")
             st.stop()
@@ -627,6 +716,8 @@ with left.container(border=True, height="stretch"):
                 target_col,
                 parent_col,
                 end_col,
+                agg,
+                dial,
             )
         except Exception as exc:  # build error or export-server failure
             # The three causes need three different answers, and the builder owns the
@@ -663,6 +754,8 @@ with left.container(border=True, height="stretch"):
             target_col,
             parent_col,
             end_col,
+            agg,
+            dial,
         )
         # The HTML is embedded in a sandboxed iframe with a FIXED height — it
         # does not auto-grow to its content, so size it to the chart.
@@ -692,5 +785,7 @@ with left.container(border=True, height="stretch"):
             target_col,
             parent_col,
             end_col,
+            agg,
+            dial,
         )
         st.code(chart_js, language="javascript")
