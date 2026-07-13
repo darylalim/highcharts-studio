@@ -22,9 +22,11 @@ from highcharts_builder import (
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
     build_chart_png,
+    coordinate_columns,
     count_marks,
     explain_export_failure,
     explain_tree_error,
+    explain_xrange_error,
     make_chart,
 )
 from sample_data import SAMPLES
@@ -60,6 +62,10 @@ MARK_METRICS = {
     "boxplot": "Boxes",
     "waterfall": "Steps",  # counts the appended Total, as the chart draws it
     "sunburst": "Sectors",  # likewise counts the appended root — the other appending type
+    # Xrange appends nothing, so unlike those two its count never exceeds its row count: one
+    # bar per surviving row. A zero-length bar (a milestone) IS one of them — the builder
+    # floors it to a visible sliver rather than dropping it, so counting it is honest.
+    "xrange": "Bars",
 }
 
 st.set_page_config(
@@ -81,7 +87,17 @@ def load_csv(file) -> pd.DataFrame:
 
 @st.cache_data(show_spinner="Rendering Highcharts…", max_entries=128)
 def cached_chart_html(
-    df, chart_type, x_col, y_cols, height, title, dark, size_col, target_col, parent_col
+    df,
+    chart_type,
+    x_col,
+    y_cols,
+    height,
+    title,
+    dark,
+    size_col,
+    target_col,
+    parent_col,
+    end_col,
 ) -> str:
     return build_chart_html(
         df,
@@ -94,6 +110,7 @@ def cached_chart_html(
         size_col=size_col,
         target_col=target_col,
         parent_col=parent_col,
+        end_col=end_col,
     )
 
 
@@ -101,7 +118,17 @@ def cached_chart_html(
     show_spinner="Rendering PNG via the Highcharts export server…", max_entries=64
 )
 def cached_chart_png(
-    df, chart_type, x_col, y_cols, height, title, dark, size_col, target_col, parent_col
+    df,
+    chart_type,
+    x_col,
+    y_cols,
+    height,
+    title,
+    dark,
+    size_col,
+    target_col,
+    parent_col,
+    end_col,
 ) -> bytes:
     return build_chart_png(
         df,
@@ -114,12 +141,22 @@ def cached_chart_png(
         size_col=size_col,
         target_col=target_col,
         parent_col=parent_col,
+        end_col=end_col,
     )
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
 def cached_chart_js(
-    df, chart_type, x_col, y_cols, title, dark, size_col, target_col, parent_col
+    df,
+    chart_type,
+    x_col,
+    y_cols,
+    title,
+    dark,
+    size_col,
+    target_col,
+    parent_col,
+    end_col,
 ) -> str:
     # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
     # literal string for a built chart.
@@ -133,6 +170,7 @@ def cached_chart_js(
         size_col=size_col,
         target_col=target_col,
         parent_col=parent_col,
+        end_col=end_col,
     ).to_js_literal()
 
 
@@ -173,11 +211,14 @@ with st.sidebar:
         df = load_csv(uploaded)
 
     numeric_cols = df.select_dtypes("number").columns.tolist()
-    if not numeric_cols:
-        st.error(
-            "This dataset has no numeric columns to plot.", icon=":material/error:"
-        )
-        st.stop()
+    # The columns that can place an xrange bar on an axis: numbers OR dates. A superset of
+    # numeric_cols, and sourced from the builder (see `coordinate_columns`) so a picker can
+    # never offer a column the builder would refuse. A date column is object dtype, so it is
+    # invisible to `select_dtypes("number")` — which is exactly why the gate below could not
+    # stay where it was: the canonical Gantt CSV (`task,start,end`, all dates) has NO numeric
+    # columns at all, and the old gate stopped the app dead before the chart-type picker was
+    # ever drawn. The gate has to know which type is being asked for, so it now runs AFTER it.
+    coord_cols = coordinate_columns(df)
 
     st.header(":material/bar_chart: 2 · Chart")
     chart_type = st.selectbox(
@@ -211,10 +252,34 @@ with st.sidebar:
             "numeric column of *leaf* values. Each ring is a level, and a parent's arc is "
             "the **sum** of its children — so a node with children needs no value of its "
             "own. Every node needs its own row, and click a sector to zoom into it\n"
+            "- **xrange** — a Gantt-style timeline, one row per bar: a **Lane** column "
+            "naming the task (it may repeat — a lane can hold several bars), plus a "
+            "**Start** and an **End** column. Those two are *coordinates*, so they may be "
+            "dates (ISO-8601, e.g. `2026-01-05`) or plain numbers (sprint 12 → 18) — but "
+            "both the same kind. A zero-length bar is a **milestone** and still draws; a "
+            "backwards one is dropped\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
     )
+
+    # The no-plottable-columns gate. It runs HERE, below the chart-type picker, because the
+    # answer depends on the type: every other type needs a NUMBER, but xrange's start/end are
+    # coordinates and may be dates — and a date column is object dtype, so a real Gantt CSV
+    # (`task,start,end`, all dates) has no numeric columns whatsoever. Gating on numeric_cols
+    # before the picker was drawn refused that file at the door, with a message about a
+    # requirement xrange does not have.
+    if chart_type == "xrange" and not coord_cols:
+        st.error(
+            "This dataset has no date or number columns to place a bar on.",
+            icon=":material/error:",
+        )
+        st.stop()
+    if chart_type != "xrange" and not numeric_cols:
+        st.error(
+            "This dataset has no numeric columns to plot.", icon=":material/error:"
+        )
+        st.stop()
 
     if chart_type == "pie":
         x_label, y_label, multi = "Slice labels", "Slice values", False
@@ -244,6 +309,14 @@ with st.sidebar:
         # node with children needs no value of its own: its arc is the sum of theirs, which is
         # why the label says "leaf". Single-select Y like pie/treemap/sankey/boxplot/waterfall.
         x_label, y_label, multi = "Node labels", "Leaf values", False
+    elif chart_type == "xrange":
+        # Long/tidy like boxplot — the X column's values REPEAT — but for a different reason:
+        # boxplot's repeats are observations to AGGREGATE into one box, while each of these is
+        # its own bar, so one lane can hold several. The Y control carries the bar's START,
+        # which is why it is labelled as a coordinate rather than a value: it says WHEN, not
+        # HOW MUCH. Single-select, like every other extra-column type — a second start column
+        # would be a second bar per row, which is a second chart.
+        x_label, y_label, multi = "Lane / task labels", "Start", False
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     elif chart_type == "heatmap":
@@ -312,12 +385,46 @@ with st.sidebar:
         else:
             y_cols = st.multiselect(y_label, numeric_cols, default=default)
     else:
-        y_cols = [st.selectbox(y_label, numeric_cols)]
+        # Xrange is the one type whose Y control is NOT sourced from numeric_cols. Its Y is a
+        # bar's START — a coordinate, which may be a date, and a date column is object dtype,
+        # so `select_dtypes("number")` cannot see it. Widened to coord_cols rather than to
+        # df.columns, which matters: coord_cols is the builder's OWN answer to "can this place
+        # a bar on an axis" (see `coordinate_columns`), so the picker cannot offer a column of
+        # task names that the builder would only turn around and reject. That is what keeps
+        # `_plottable`'s documented invariant — the app never hands the builder a column it
+        # can't coerce — true after the widening.
+        y_cols = [
+            st.selectbox(
+                y_label, coord_cols if chart_type == "xrange" else numeric_cols
+            )
+        ]
     # Normalize the widgets' loosely-typed return (pills/multiselect/selectbox) to a
     # concrete list[str] — the column names already are strings, so this only pins the
     # type, letting the uncached `count_marks` type-check without threading everything
     # through a cache wrapper. An empty selection stays empty for the main-panel guard.
     y_cols = [str(col) for col in y_cols]
+
+    # Xrange's second coordinate column, sitting right after Start so the two ends of a bar
+    # read as the pair they are (Lane -> Start -> End, the order a plan is written in). Drawn
+    # from coord_cols, like Start and for Start's reason: an end is a coordinate, not a label
+    # (sankey's Target and sunburst's Parent are drawn from every column because THOSE are
+    # labels). The index is a CONSTANT, exactly as theirs are: these widgets are keyless, so
+    # Streamlit folds `index` into their identity, and the tempting "the column after Start"
+    # default would re-mint this widget and silently reset the user's End every time they
+    # changed Start. min() clamps a single-column frame. Start == End is caught by the guard
+    # in the main panel, and the columns' own contradictions by the one below it.
+    end_col = None
+    if chart_type == "xrange":
+        end_col = st.selectbox(
+            "End",
+            coord_cols,
+            index=min(1, len(coord_cols) - 1),
+            help=(
+                "Each bar's end — the **same kind** of value as Start (both dates, or both "
+                "numbers). A bar that ends where it starts is a **milestone** and still "
+                "draws; one that ends before it starts is dropped."
+            ),
+        )
 
     # Bubble encodes a third dimension as marker size; pick the numeric column
     # that drives it. Only shown for bubble (None otherwise, and ignored by the
@@ -382,7 +489,13 @@ with st.container(horizontal=True):
     # are (the MARK_METRICS property), and sankey's own collision is already treated this way.
     if chart_type in MARK_METRICS:
         marks = count_marks(
-            df, chart_type, x_col, y_cols, target_col=target_col, parent_col=parent_col
+            df,
+            chart_type,
+            x_col,
+            y_cols,
+            target_col=target_col,
+            parent_col=parent_col,
+            end_col=end_col,
         )
         st.metric(MARK_METRICS[chart_type], f"{marks:,}", border=True)
     else:
@@ -452,6 +565,35 @@ with left.container(border=True, height="stretch"):
         if problem:
             st.warning(problem, icon=":material/warning:")
             st.stop()
+    # Xrange's own collision, the third of these: a bar's two ends. Like sankey's and
+    # sunburst's it is not the x-in-y rule — the End column isn't among the Y series at all
+    # (see X_IN_Y_GUARD_TYPES). It has to be caught rather than tolerated because it fails
+    # SILENTLY: every bar would be zero-length, so the chart would come back as a column of
+    # milestone slivers rather than as anything anyone asked for.
+    if chart_type == "xrange" and y_cols[0] == end_col:
+        st.warning(
+            "Start and End must be different columns — every bar would have zero length.",
+            icon=":material/warning:",
+        )
+        st.stop()
+    # And the columns' own contradiction, the one reachable from HERE: a date start beside a
+    # numeric end. Both ends of a bar sit on one axis, so they must be the same kind. It is not
+    # missing data — that is dropped, silently and correctly, a row at a time — and it has no
+    # right drawing, so build_options RAISES; the interactive path doesn't catch, so it has to
+    # be stopped here. The sunburst rule, and the second builder error a user can reach without
+    # writing any code.
+    #
+    # explain_xrange_error also reports a SECOND contradiction — a column that is neither dates
+    # nor numbers — which cannot be reached through these pickers at all, because both are
+    # sourced from `coordinate_columns` and so never offer one. That is not a reason to skip the
+    # call: the builder owns the diagnosis, and asking it the whole question here (rather than
+    # re-deriving which half is reachable) is what keeps this warning from drifting from the
+    # exception it stands in for.
+    if chart_type == "xrange" and end_col is not None:
+        problem = explain_xrange_error(df, x_col, y_cols[0], end_col)
+        if problem:
+            st.warning(problem, icon=":material/warning:")
+            st.stop()
 
     badge_label, badge_icon, badge_color = MODE_BADGES[render_mode]
     with st.container(horizontal=True):
@@ -484,6 +626,7 @@ with left.container(border=True, height="stretch"):
                 size_col,
                 target_col,
                 parent_col,
+                end_col,
             )
         except Exception as exc:  # build error or export-server failure
             # The three causes need three different answers, and the builder owns the
@@ -519,6 +662,7 @@ with left.container(border=True, height="stretch"):
             size_col,
             target_col,
             parent_col,
+            end_col,
         )
         # The HTML is embedded in a sandboxed iframe with a FIXED height — it
         # does not auto-grow to its content, so size it to the chart.
@@ -547,5 +691,6 @@ with left.container(border=True, height="stretch"):
             size_col,
             target_col,
             parent_col,
+            end_col,
         )
         st.code(chart_js, language="javascript")

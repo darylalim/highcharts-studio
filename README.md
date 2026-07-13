@@ -55,8 +55,8 @@ light/dark theme, which you can toggle from the settings menu.
   keeps its palette color.
 - An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
   metric — series plotted, or cells for a heatmap, tiles for a treemap, flows
-  for a sankey, boxes for a boxplot, steps for a waterfall, and sectors for a
-  sunburst) above
+  for a sankey, boxes for a boxplot, steps for a waterfall, sectors for a
+  sunburst, and bars for an xrange) above
   the chart
   — with the chart type shown as a badge above the chart rather than a metric in
   the row — a side-by-side source-data preview, and a toggle that reveals the
@@ -75,11 +75,17 @@ light/dark theme, which you can toggle from the settings menu.
   `waterfall` (a cumulative bridge: a step-label column plus a column of
   signed *deltas*, so each bar floats where the last one ended, showing how a
   starting value becomes an ending one — rises green, falls red, and a closing
-  **Total** bar added for you), and `sunburst` (a hierarchy as concentric rings:
+  **Total** bar added for you), `sunburst` (a hierarchy as concentric rings:
   one row per node, a **Parent** column naming each node's parent — blank means a
   top-level branch — and a column of *leaf* values. A parent's arc is the **sum** of
   its children's, so a node with children needs no value of its own; a centre
-  sector is added for you; and clicking a sector zooms into that branch).
+  sector is added for you; and clicking a sector zooms into that branch), and
+  `xrange` (a Gantt-style timeline, and the only type whose marks have *extent*
+  rather than sitting at a point: one row per bar, a **Lane** column naming each
+  task — it may repeat, so a lane can hold several bars — plus a **Start** and an
+  **End** column. Those two are *coordinates*, so they may be dates (ISO-8601) or
+  plain numbers, but both the same kind; a zero-length bar is a **milestone** and
+  still draws, while a backwards one is dropped).
 
 ## Files
 
@@ -114,13 +120,19 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
   semantic up/down/total bar colors, sunburst's assembled hierarchy (synthesized
   node ids, so two leaves named the same stay two sectors rather than colliding;
   valueless internal nodes, so Highcharts' sum is authoritative; a dropped dangling
-  parent vs. a raised cycle; and the appended root),
+  parent vs. a raised cycle; and the appended root), xrange's interval bars (the
+  date-vs-number column sniff and its two traps — a numeric column must never reach
+  a date parser, since `pd.to_datetime(12)` silently yields the epoch, and a date
+  column's epoch millis must be unit-normalized before the int64 view, or every bar
+  lands in 1970; the kept milestone and the dropped backwards bar; and the per-lane
+  hue),
   the brand palette, the
   light/dark theming including the dark-mode tooltip and the heatmap colorAxis, and
   the validation guards — plus an end-to-end pass driving every supported type
   through the real `Chart.from_options` → `to_js_literal` pipeline) and the sample
   datasets, plus a headless `AppTest` pass that drives the full app (switching
-  controls including the bubble Size (Z), sankey Target (to) and sunburst Parent
+  controls including the bubble Size (Z), sankey Target (to), sunburst Parent and
+  xrange End
   selectors, radar,
   heatmap, treemap, boxplot, and waterfall, the
   config toggle, the KPI row, the wide-CSV `st.multiselect` fallback, both render

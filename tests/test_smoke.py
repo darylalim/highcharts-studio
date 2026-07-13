@@ -102,6 +102,7 @@ Layers:
 
 import sys
 import warnings
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -118,6 +119,9 @@ from highcharts_builder import (  # noqa: E402
     SUPPORTED_TYPES,
     build_chart_html,
     build_options,
+    count_marks,
+    explain_xrange_error,
+    make_chart,
 )
 
 
@@ -134,6 +138,13 @@ def labeled_frame() -> pd.DataFrame:
     and "b"/"c" hang off it — so the sweeps exercise sunburst's internal-node path as well
     as its leaves. Note the consequence for the value sweeps: "a" has children, so its
     value is never read at all (an internal node's arc is the sum of its children's).
+
+    The fourth column ("end") is for xrange alone, whose bars need a coordinate at each end.
+    It is the one extra that IS numeric, so — unlike "target"/"parent" — it is not inert:
+    it is a second numeric column, and "value" is no longer the only one. Every sweep names
+    the columns it reads, so nothing is perturbed, but a new test that reaches for "the
+    numeric column" must now say which. Its values sit strictly above "value"'s, so for
+    xrange every row is spannable (``value`` is the START and ``end`` the END).
     """
     return pd.DataFrame(
         {
@@ -141,6 +152,7 @@ def labeled_frame() -> pd.DataFrame:
             "target": ["x", "y", "z"],
             "parent": [None, "a", "a"],
             "value": [1.0, 2.0, 3.0],
+            "end": [2.0, 4.0, 6.0],
         }
     )
 
@@ -148,8 +160,9 @@ def labeled_frame() -> pd.DataFrame:
 def _size_for(chart_type: str) -> str | None:
     """The size column the SUPPORTED_TYPES-parametrized tests pass for the bubble
     case: bubble requires one (its marker-size dimension); other types ignore it,
-    so it's None. The shared ``labeled_frame`` has "value" as its only numeric
-    column, so it doubles as the size."""
+    so it's None. The shared ``labeled_frame``'s "value" doubles as the size (it is not
+    the only numeric column any more — "end" is one too — but it is the one every sweep
+    plots)."""
     return "value" if chart_type == "bubble" else None
 
 
@@ -170,6 +183,17 @@ def _parent_for(chart_type: str) -> str | None:
     with a required companion column adapts its input rather than dropping out of the
     sweeps."""
     return "parent" if chart_type == "sunburst" else None
+
+
+def _end_for(chart_type: str) -> str | None:
+    """The end column those same sweeps pass for the xrange case: xrange requires one (the
+    far end of every bar); other types ignore it, so it's None. The fourth of the
+    ``_size_for``/``_target_for``/``_parent_for`` family — see ``_target_for``.
+
+    Note what xrange does with the sweeps' ``y_cols=["value"]``: it reads it as the bar's
+    START, not as a magnitude. So the pair is ("value", "end"), and the fixtures keep "end"
+    strictly above "value" so the bars are drawable."""
+    return "end" if chart_type == "xrange" else None
 
 
 # Radar is the one "meta" type: Highcharts has no radar series type, so it renders
@@ -197,6 +221,7 @@ def test_supported_type_builds(labeled_frame, chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     )
     assert opts["chart"]["type"] == _hc_type(chart_type)
     assert opts["series"]  # at least one series/data set was produced
@@ -225,6 +250,7 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -239,13 +265,20 @@ def non_finite_frame() -> pd.DataFrame:
     For sunburst the tree is "a" over "b"/"c", so the frame reaches its branch three ways at
     once: "a" is INTERNAL, so its ``inf`` is never even read (a parent's arc is the sum of its
     children's); "b"'s ``-inf`` fails ``_sizable`` and drops that leaf; and "c" survives. No
-    infinity can reach the JS by any of the three routes."""
+    infinity can reach the JS by any of the three routes.
+
+    For xrange "value" is each bar's START, so the two infinities fail ``_spannable`` and drop
+    their rows while "c" (9 -> 10) survives and draws. "end" is kept FINITE here on purpose:
+    it is the one channel this fixture cannot reach, since an infinite end would drop the only
+    surviving row and leave an empty chart that passes the sweep trivially. It is covered
+    directly instead — see ``test_xrange_drops_a_non_finite_start_or_end``."""
     return pd.DataFrame(
         {
             "label": ["a", "b", "c"],
             "target": ["x", "y", "z"],
             "parent": [None, "a", "a"],
             "value": [float("inf"), float("-inf"), 9.0],
+            "end": [2.0, 4.0, 10.0],
         }
     )
 
@@ -275,6 +308,7 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     ).to_js_literal()
     assert js
     # `Infinity` is capitalized, so a lowercase "inf" can only be the broken token. None
@@ -306,6 +340,9 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             # so the undrawable middle row is the only one dropped.
             "parent": [None, "a", "a"],
             "value": [1.0, 2.0, 3.0],
+            # xrange's second coordinate column, above "value" so every row is spannable —
+            # leaving the LABEL the only reason a row can drop, which is what this sweep tests.
+            "end": [2.0, 4.0, 6.0],
         }
     )
     inf_df = pd.DataFrame(
@@ -318,6 +355,7 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             # the chart. Here they must meet.
             "parent": [float("nan"), 1.0, 1.0],
             "value": [1.0, 2.0, 3.0],
+            "end": [2.0, 4.0, 6.0],
         }
     )
     for df, token in ((nan_df, "nan"), (inf_df, "inf")):
@@ -329,6 +367,7 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             size_col=_size_for(chart_type),
             target_col="to" if chart_type == "sankey" else None,
             parent_col="parent" if chart_type == "sunburst" else None,
+            end_col=_end_for(chart_type),
         ).to_js_literal()
         assert js and token not in js.lower(), f"{chart_type} kept a '{token}' label"
 
@@ -361,6 +400,10 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
             "target": pd.Series([], dtype=object),
             "parent": pd.Series([], dtype=object),
             "value": pd.Series([], dtype=float),
+            # xrange's end column. A row-less coordinate column is the one case `_coordinates`
+            # must NOT call a contradiction: nothing parses, but nothing is PRESENT either, so
+            # it is missing data (an empty chart), not a column of the wrong kind (a raise).
+            "end": pd.Series([], dtype=float),
         }
     )
     opts = build_options(
@@ -371,6 +414,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     )
     assert opts["series"][0]["data"] == []  # an empty chart, not a raise
     # And it must still SERIALIZE — an empty series is only useful if Highcharts gets it.
@@ -382,6 +426,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -433,7 +478,7 @@ def test_row_less_frame_with_a_numeric_x_also_draws_an_empty_chart():
 
 @pytest.mark.parametrize(
     "chart_type",
-    ["heatmap", "treemap", "sankey", "boxplot", "waterfall", "sunburst"],
+    ["heatmap", "treemap", "sankey", "boxplot", "waterfall", "sunburst", "xrange"],
 )
 def test_count_marks_matches_the_built_series(chart_type):
     # The app's KPI (heatmap Cells / treemap Tiles / sankey Flows / boxplot Boxes /
@@ -453,6 +498,11 @@ def test_count_marks_matches_the_built_series(chart_type):
     # children's); and the root is appended. 3 nodes + root = 4.
     from highcharts_builder import build_options, count_marks
 
+    # Xrange reads the same frame as INTERVALS, "v" being each bar's START rather than a
+    # magnitude, and it exercises three drops at once: the NaN label drops row 3, "b"'s NaN
+    # start drops row 2, and "d"'s `inf` start drops row 4 — leaving "a" (1 -> 2) and "e"
+    # (5 -> 6). Unlike waterfall and sunburst it appends nothing, so its count is exactly its
+    # surviving rows: 2.
     nan, inf = float("nan"), float("inf")
     df = pd.DataFrame(
         {
@@ -460,14 +510,29 @@ def test_count_marks_matches_the_built_series(chart_type):
             "to": ["p", "q", "r", "s", nan],
             "parent": [nan, "a", nan, nan, "d"],
             "v": [1.0, nan, 3.0, inf, 5.0],
+            "end": [2.0, 4.0, 6.0, 8.0, 6.0],
         }
     )
     built = build_options(
-        df, chart_type, "cat", ["v"], target_col="to", parent_col="parent"
+        df,
+        chart_type,
+        "cat",
+        ["v"],
+        target_col="to",
+        parent_col="parent",
+        end_col="end",
     )
     drawn = len(built["series"][0]["data"])  # the cells/tiles/links/boxes/bars/sectors
     assert (
-        count_marks(df, chart_type, "cat", ["v"], target_col="to", parent_col="parent")
+        count_marks(
+            df,
+            chart_type,
+            "cat",
+            ["v"],
+            target_col="to",
+            parent_col="parent",
+            end_col="end",
+        )
         == drawn
     )
     # The two must also agree on a ROW-LESS frame (a header-only CSV), where the chart is
@@ -477,13 +542,25 @@ def test_count_marks_matches_the_built_series(chart_type):
     empty = df.iloc[:0]
     assert (
         build_options(
-            empty, chart_type, "cat", ["v"], target_col="to", parent_col="parent"
+            empty,
+            chart_type,
+            "cat",
+            ["v"],
+            target_col="to",
+            parent_col="parent",
+            end_col="end",
         )["series"][0]["data"]
         == []
     )
     assert (
         count_marks(
-            empty, chart_type, "cat", ["v"], target_col="to", parent_col="parent"
+            empty,
+            chart_type,
+            "cat",
+            ["v"],
+            target_col="to",
+            parent_col="parent",
+            end_col="end",
         )
         == 0
     )
@@ -497,6 +574,7 @@ def test_count_marks_matches_the_built_series(chart_type):
             "boxplot": 4,
             "waterfall": 5,
             "sunburst": 4,
+            "xrange": 2,
         }[chart_type]
     )
 
@@ -591,6 +669,7 @@ def test_default_title_per_type(labeled_frame, chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     )
     assert opts["title"]["text"] == f"{chart_type.title()} chart"
 
@@ -611,6 +690,7 @@ def test_default_palette_applied_per_type(labeled_frame, chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -640,6 +720,7 @@ def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     )
     assert opts["chart"]["backgroundColor"] == "#0f172a"
 
@@ -656,6 +737,7 @@ def test_light_mode_leaves_chart_background_unset(labeled_frame, chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     )
     assert "backgroundColor" not in opts["chart"]
 
@@ -671,6 +753,7 @@ def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -729,6 +812,7 @@ def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
     )
     assert opts["tooltip"]["backgroundColor"] == "#0f172a"
     assert opts["tooltip"]["borderColor"] == "#475569"
@@ -2740,6 +2824,627 @@ def test_sunburst_dark_mode_dissolves_the_sector_borders():
 
 
 # --------------------------------------------------------------------------- #
+# Xrange — a Gantt timeline: bars with EXTENT along x, on lanes down the y axis
+# --------------------------------------------------------------------------- #
+def _plan() -> pd.DataFrame:
+    """Two lanes, one of them holding TWO bars (so the per-lane hue has something to prove),
+    plus a milestone. Dates as ISO-8601 STRINGS — an object column, which is what read_csv
+    hands back and what `_coordinates` must sniff."""
+    return pd.DataFrame(
+        {
+            "lane": ["Design", "Build", "Build", "Launch"],
+            "start": ["2026-01-05", "2026-02-01", "2026-04-01", "2026-06-01"],
+            "end": ["2026-02-10", "2026-03-20", "2026-04-20", "2026-06-01"],
+        }
+    )
+
+
+def _xr(df: pd.DataFrame | None = None, **kwargs) -> dict:
+    return build_options(
+        df if df is not None else _plan(),
+        "xrange",
+        "lane",
+        ["start"],
+        end_col="end",
+        **kwargs,
+    )
+
+
+def _bars(opts: dict) -> list[dict]:
+    return opts["series"][0]["data"]
+
+
+def test_xrange_builds_one_bar_per_row_on_lanes_down_the_y_axis():
+    opts = _xr()
+    assert opts["chart"]["type"] == "xrange"
+    # Lanes are the categories of the Y axis (x_col is NOT an x axis here), in
+    # first-appearance order, deduplicated — "Build" holds two bars but is one lane.
+    assert opts["yAxis"]["categories"] == ["Design", "Build", "Launch"]
+    # A Gantt reads DOWN the page in plan order; Highcharts' own default runs bottom-up.
+    assert opts["yAxis"]["reversed"] is True
+    # Highcharts titles a category y-axis "Values" unless explicitly CLEARED (None does not
+    # do it — verified by rendering); a lane is a name, not a value.
+    assert opts["yAxis"]["title"] == {"text": ""}
+    bars = _bars(opts)
+    assert len(bars) == 4
+    # `y` is a POSITION into `categories`, not a value — boxplot's positional trick.
+    assert [b["y"] for b in bars] == [0, 1, 1, 2]
+    assert [b["name"] for b in bars] == ["Design", "Build", "Build", "Launch"]
+
+
+def test_xrange_iso_date_strings_become_a_datetime_axis_in_epoch_millis():
+    # THE EPOCH PIN, and it guards a regression that is silent and catastrophic. Pandas 3
+    # returns `datetime64[us]` from to_datetime (NOT the `[ns]` that the obvious
+    # `.astype("int64") // 1_000_000` assumes), so that divisor renders 2026-01-05 as
+    # 1970-01-16: every bar in the correct RELATIVE order at hopelessly wrong ABSOLUTE dates,
+    # drawn confidently, with no error anywhere. `_epoch_millis` normalizes the unit BEFORE
+    # taking the int64 view, which is why this number is exact.
+    opts = _xr()
+    assert opts["xAxis"]["type"] == "datetime"
+    bars = _bars(opts)
+    assert bars[0]["x"] == 1767571200000.0  # 2026-01-05T00:00:00Z, to the millisecond
+    assert bars[0]["x2"] == 1770681600000.0  # 2026-02-10
+    assert pd.to_datetime(bars[0]["x"], unit="ms").date() == date(2026, 1, 5)
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        pytest.param(lambda s: pd.Series(s, dtype=object), id="iso_strings"),
+        pytest.param(lambda s: pd.to_datetime(pd.Series(s)), id="datetime64_us"),
+        pytest.param(
+            lambda s: pd.to_datetime(pd.Series(s)).astype("datetime64[s]"), id="dt64_s"
+        ),
+        pytest.param(
+            lambda s: pd.to_datetime(pd.Series(s)).dt.tz_localize("America/New_York"),
+            id="tz_aware",
+        ),
+    ],
+)
+def test_xrange_epoch_millis_are_resolution_independent(make):
+    # The same instant must serialize to the same millis whatever RESOLUTION or timezone the
+    # column arrives in — object strings, datetime64[us] (to_datetime's answer), datetime64[s]
+    # (read_csv's), or a tz-aware column (an ISO CSV carrying an offset, which would raise
+    # outright without the UTC conversion). A hardcoded divisor is right for exactly one of
+    # these and wrong by 1e3 or 1e6 for the others.
+    df = pd.DataFrame(
+        {
+            "lane": ["a"],
+            "start": make(["2026-01-05"]),
+            "end": make(["2026-02-10"]),
+        }
+    )
+    bars = _bars(_xr(df))
+    # tz-aware New York is UTC-5 in January, so its midnight is 05:00Z — the same INSTANT,
+    # correctly shifted to UTC, not the same wall clock reinterpreted.
+    tz_aware = isinstance(df["start"].dtype, pd.DatetimeTZDtype)
+    offset = 5 * 3600 * 1000 if tz_aware else 0
+    assert bars[0]["x"] == 1767571200000.0 + offset
+
+
+def test_xrange_numbers_stay_numbers_and_get_no_datetime_axis():
+    # THE EPOCH TRAP, mirrored — and the reason `_coordinates` is dtype-FIRST. Bare
+    # `pd.to_datetime(12)` does not fail; it returns 1970-01-01T00:00:00.000000012. So a
+    # "try dates, fall back to numbers" sniff would silently move a column of sprint numbers
+    # to an instant at the epoch. A numeric dtype is never shown to a date parser at all.
+    df = pd.DataFrame({"lane": ["a", "b"], "start": [12, 20], "end": [18, 24]})
+    opts = _xr(df)
+    assert "type" not in opts["xAxis"]  # a linear axis, not a datetime one
+    bars = _bars(opts)
+    assert [(b["x"], b["x2"]) for b in bars] == [(12.0, 18.0), (20.0, 24.0)]
+
+
+@pytest.mark.parametrize(
+    ("values", "kind"),
+    [
+        # Numeral STRINGS are numbers, not dates: ISO-8601 rejects "12", so no bespoke regex
+        # is needed to keep them out of the date branch.
+        (["12", "18"], "number"),
+        (["2026-01-05", "2026-02-10"], "date"),
+        # A DST-crossing column: `errors="coerce"` alone RAISES "Mixed timezones detected" on
+        # this (verified), which would be a traceback in count_marks — hence `utc=True`.
+        (["2026-03-06T12:00:00-05:00", "2026-03-10T12:00:00-04:00"], "date"),
+    ],
+)
+def test_coordinates_sniffs_a_column_kind(values, kind):
+    from highcharts_builder import _coordinates
+
+    assert _coordinates(pd.Series(values))[1] == kind
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        # THE LANDING-SAMPLE TRAP. Bare `pd.to_datetime(["Jan","Feb"])` SUCCEEDS, returning
+        # YEAR 1 AD (verified) — and this is `_revenue_vs_cost`'s `month` column, the first
+        # entry in SAMPLES and so the app's landing dataset. A permissive sniff would offer it
+        # as a date axis on the page you see when you open the app. `format="ISO8601"` is what
+        # rejects it.
+        ["Jan", "Feb", "Mar"],
+        [
+            "00:00",
+            "01:00",
+        ],  # ...and these parse to TODAY'S DATE under the default parser
+        ["Engineering", "Design"],
+        ["13/01/2026", "14/01/2026"],  # a real date, but not ISO-8601
+    ],
+)
+def test_coordinates_rejects_a_column_that_is_neither_dates_nor_numbers(values):
+    from highcharts_builder import _COORD_NEITHER, _coordinates
+
+    assert _coordinates(pd.Series(values))[1] == _COORD_NEITHER
+
+
+@pytest.mark.parametrize(
+    ("values", "kind"),
+    [
+        # A MIXED object column is decided by MAJORITY — a column is one kind or the other,
+        # and a few stray cells of the other kind are typos, not a second axis. The losers
+        # coerce to NaN and drop their rows as missing data.
+        (["2026-01-05", "2026-02-01", "12"], "date"),  # 2 dates beat 1 number
+        (["2026-01-05", "12", "13"], "number"),  # 2 numbers beat 1 date
+        # A TIE goes to NUMBER (a strict `>`), and that is the safe way to break it: a date
+        # read as a number leaves a visibly missing bar, while a number read as a date would
+        # silently place it at the epoch — the failure this function's whole ordering exists
+        # to prevent.
+        (["2026-01-05", "12"], "number"),
+    ],
+)
+def test_coordinates_breaks_a_mixed_column_by_majority_and_a_tie_toward_number(
+    values, kind
+):
+    from highcharts_builder import _coordinates
+
+    assert _coordinates(pd.Series(values))[1] == kind
+
+
+@pytest.mark.parametrize(
+    ("values", "kind"),
+    [
+        # Dtypes a real CSV or a hand-built frame can arrive as, none of which may raise or
+        # mis-sniff. An all-missing column is "empty" — NOT the kind its dtype suggests, which
+        # is the trap: an all-NaT column is still datetime64 and an all-NaN one is still
+        # float64, so a dtype-only answer would have them claiming an axis they know nothing
+        # about (see the empty-column test below).
+        (pd.Series([12, 18], dtype="Int64"), "number"),  # pandas nullable
+        (pd.Series(["2026-01-05"], dtype="string[pyarrow]"), "date"),  # arrow-backed
+        (pd.Series([pd.NaT, pd.NaT], dtype="datetime64[ns]"), "empty"),
+        (pd.Series([None, None], dtype=object), "empty"),
+        (pd.Series([], dtype=float), "empty"),  # a row-less frame's column
+    ],
+)
+def test_coordinates_survives_the_dtypes_a_real_frame_arrives_as(values, kind):
+    from highcharts_builder import _coordinates
+
+    assert _coordinates(values)[1] == kind
+
+
+@pytest.mark.parametrize(
+    "blank",
+    [
+        pytest.param(lambda n: [None] * n, id="all_none"),
+        pytest.param(lambda n: [float("nan")] * n, id="all_nan_float64"),
+        pytest.param(
+            lambda n: pd.Series([pd.NaT] * n, dtype="datetime64[ns]"), id="all_nat"
+        ),
+    ],
+)
+def test_xrange_an_empty_coordinate_column_is_missing_data_not_a_contradiction(blank):
+    # An unfilled column is MISSING DATA — every row drops, the chart comes out empty — and it
+    # must not be mistaken for a KIND. The tempting shortcut folds "nothing present" into
+    # `_COORD_NUMBER`, and it is tempting precisely because it looks true: a blank CSV column
+    # arrives as all-NaN float64, so `is_numeric_dtype` says "number" with total confidence.
+    # That phantom number then collides with a real DATE partner and raises the axis-mismatch
+    # message — telling the user their empty End column "reads as numbers", which is both FALSE
+    # and unactionable.
+    #
+    # And it is not a corner case: this is a Gantt template whose end dates nobody has filled in
+    # yet, straight out of read_csv. The bug was also ASYMMETRIC — an empty column beside a
+    # NUMERIC partner agreed by coincidence and worked — so only the date case, the type's
+    # headline use, was broken.
+    for start, end in (
+        (["2026-01-05", "2026-02-01"], blank(2)),  # blank END beside a date start
+        (blank(2), ["2026-01-05", "2026-02-01"]),  # ...and the mirror
+        (blank(2), blank(2)),  # both
+    ):
+        df = pd.DataFrame({"lane": ["a", "b"], "start": start, "end": end})
+        opts = _xr(df)
+        assert _bars(opts) == []  # every row dropped, as missing data
+        assert count_marks(df, "xrange", "lane", ["start"], end_col="end") == 0
+        assert (
+            explain_xrange_error(df, "lane", "start", "end") is None
+        )  # NOT a contradiction
+
+
+def test_xrange_an_empty_column_does_not_hide_a_real_axis_mismatch():
+    # The other side of the fix: an empty column abstains from the vote, it does not veto it.
+    # Two columns that genuinely disagree must still raise.
+    df = pd.DataFrame({"lane": ["a"], "start": ["2026-01-05"], "end": [7]})
+    with pytest.raises(ValueError, match="must be the same kind"):
+        build_options(df, "xrange", "lane", ["start"], end_col="end")
+
+
+def test_xrange_epoch_millis_span_dates_outside_the_nanosecond_range():
+    # `datetime64[ns]` overflows outside 1677..2262, which is why `_epoch_millis` pins the
+    # unit to [ms] rather than leaning on to_datetime's default: a medieval start date and a
+    # far-future end date must both survive, not raise.
+    df = pd.DataFrame({"lane": ["a"], "start": ["1400-01-01"], "end": ["2300-01-01"]})
+    bars = _bars(_xr(df))
+    assert len(bars) == 1
+    assert bars[0]["x"] < 0 < bars[0]["x2"]  # before and after the epoch
+
+
+def test_xrange_builds_under_warnings_as_errors():
+    # Pins `format="ISO8601"` from the other side: the bare `pd.to_datetime` this replaced
+    # emits a format-inference UserWarning on every object column, which under `-W error`
+    # (or a stricter CI) would fail. The only way this assertion is observable.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert len(_bars(_xr())) == 4
+        assert count_marks(_plan(), "xrange", "lane", ["start"], end_col="end") == 4
+
+
+def test_xrange_keeps_a_zero_length_bar_as_a_milestone_and_floors_it():
+    # A launch date / deadline / same-day task — one of the commonest Gantt rows. Highcharts
+    # draws NOTHING for it unaided (verified by rendering: x == x2 left an empty lane), so
+    # without a floor it would be a mark the KPI counts and the chart never draws. `_sizable`
+    # keeps its zero for the same kind of reason; here the floor is what makes keeping it
+    # honest, and it must survive serialization (this repo has been bitten three times by
+    # options that validate and then silently vanish).
+    opts = _xr()
+    launch = _bars(opts)[-1]
+    assert launch["name"] == "Launch" and launch["x"] == launch["x2"]
+    assert opts["plotOptions"]["xrange"]["minPointLength"] == 3
+    js = make_chart(_plan(), "xrange", "lane", ["start"], end_col="end").to_js_literal()
+    assert js and "minPointLength" in js
+
+
+def test_xrange_drops_a_backwards_bar():
+    # An interval that ends before it begins. Left in, Highcharts draws a bar spanning the
+    # ENTIRE axis (verified by rendering) — not a visible error but a confident, plausible lie
+    # that reads as the longest task in the project. It is the xrange counterpart of
+    # sunburst's silent re-parenting, and it DROPS rather than raises for `_sizable`'s reason:
+    # there is a right drawing (nothing), unlike a cycle, where every alternative is a lie.
+    df = pd.DataFrame(
+        {
+            "lane": ["ok", "backwards"],
+            "start": ["2026-02-01", "2026-05-01"],
+            "end": ["2026-03-01", "2026-01-01"],
+        }
+    )
+    opts = _xr(df)
+    assert [b["name"] for b in _bars(opts)] == ["ok"]
+    # ...and the lane it would have occupied is gone from the axis entirely. A lane holds
+    # 0..n bars, so unlike a boxplot group (which IS its mark, and survives as an
+    # EnforcedNull box) there is nothing to null out: an empty labelled axis row is exactly
+    # the phantom this drop exists to prevent.
+    assert opts["yAxis"]["categories"] == ["ok"]
+    assert count_marks(df, "xrange", "lane", ["start"], end_col="end") == 1
+
+
+def test_xrange_drops_a_non_finite_start_or_end():
+    # `end >= start` ALONE is not enough, and this is the hole it leaves: `10 > -inf` is True,
+    # so a -inf start (reachable from a plain CSV via `1e400`) would sail through and put the
+    # bare token `inf` in the emitted JS — the ReferenceError / HTTP-400 the whole non-finite
+    # doctrine exists to prevent. Both ends must be `_plottable` BEFORE they are compared.
+    # The END channel is the one `non_finite_frame` cannot reach (an infinite end would drop
+    # its only surviving row), so it is covered here.
+    inf = float("inf")
+    df = pd.DataFrame(
+        {
+            "lane": ["neg_inf_start", "pos_inf_end", "nan_start", "ok"],
+            "start": [-inf, 1.0, float("nan"), 5.0],
+            "end": [10.0, inf, 4.0, 9.0],
+        }
+    )
+    opts = _xr(df)
+    assert [b["name"] for b in _bars(opts)] == ["ok"]
+    js = make_chart(df, "xrange", "lane", ["start"], end_col="end").to_js_literal()
+    assert js and "inf" not in js.lower()
+
+
+def test_xrange_drops_an_unparseable_date_cell_but_keeps_the_column():
+    # One typo must not condemn the column. An unparseable cell coerces to NaT -> NaN, which
+    # is missing DATA and drops its row — while a column where NOTHING parses is a column of
+    # the wrong KIND and is a contradiction (see the raise tests below). That is
+    # `_sunburst_tree`'s split, applied to a coordinate column.
+    df = pd.DataFrame(
+        {
+            "lane": ["ok", "typo"],
+            "start": ["2026-01-05", "2026-13-45"],
+            "end": ["2026-02-10", "2026-03-01"],
+        }
+    )
+    opts = _xr(df)
+    assert opts["xAxis"]["type"] == "datetime"  # still a date column
+    assert [b["name"] for b in _bars(opts)] == ["ok"]
+
+
+def test_spannable_decides_the_four_boundary_pairs():
+    from highcharts_builder import _spannable
+
+    assert _spannable(1.0, 2.0)  # a real bar
+    assert _spannable(2.0, 2.0)  # a milestone: KEPT (floored to a sliver)
+    assert not _spannable(2.0, 1.0)  # backwards: dropped
+    assert not _spannable(float("-inf"), 10.0)  # the finiteness hole
+    assert not _spannable(10.0, float("inf"))
+    assert not _spannable(float("nan"), 1.0)
+
+
+def test_xrange_colors_every_bar_in_a_lane_alike_and_never_uses_color_by_point():
+    # A lane's hue is its arbitrary IDENTITY, like a pie slice's — the opposite of waterfall's
+    # semantic red-means-loss — so it reads from the OVERRIDABLE palette. It must be seeded
+    # per POINT, and here the trap is the mirror of sunburst's: where sunburst's
+    # `levels[].colorByPoint` is silently DROPPED, xrange's series-level one SURVIVES — and is
+    # the wrong option. It would hand every BAR its own hue, so Build's two phases would come
+    # out two colors and the lane would stop reading as one thing.
+    bars = _bars(_xr())
+    design, build_a, build_b, launch = bars
+    assert build_a["color"] == build_b["color"]  # one lane, one hue
+    assert design["color"] == DEFAULT_COLORS[0]
+    assert build_a["color"] == DEFAULT_COLORS[1]
+    assert launch["color"] == DEFAULT_COLORS[2]
+    js = make_chart(_plan(), "xrange", "lane", ["start"], end_col="end").to_js_literal()
+    assert js and "colorByPoint" not in js
+
+
+def test_xrange_takes_a_custom_palette_and_a_short_one_cycles():
+    # A short custom palette must not IndexError (the `_BOXPLOT_OUTLIER_COLOR` concern) — three
+    # lanes over a two-color palette wrap back to the first.
+    bars = _bars(_xr(colors=["#111111", "#222222"]))
+    assert [b["color"] for b in bars] == ["#111111", "#222222", "#222222", "#111111"]
+
+
+def test_xrange_tooltip_names_the_point_and_formats_the_dates():
+    # {point.name}, NOT waterfall's {point.category}. This is not a stylistic echo: it is
+    # waterfall's FIX and xrange's BUG. {point.category} reads the X axis, and an xrange's
+    # categories are on the Y, so it renders the raw x value — a tooltip reading
+    # "1767571200000" (verified by rendering). And a datetime axis must FORMAT its endpoints,
+    # or they print as raw epoch millis too.
+    tip = _xr()["tooltip"]["pointFormat"]
+    assert "{point.name}" in tip and "{point.category}" not in tip
+    assert "{point.x:%Y-%m-%d}" in tip and "{point.x2:%Y-%m-%d}" in tip
+    # A numeric axis has no dates to format, so it prints the bare coordinates.
+    numeric = pd.DataFrame({"lane": ["a"], "start": [12], "end": [18]})
+    assert (
+        _xr(numeric)["tooltip"]["pointFormat"]
+        == "<b>{point.name}</b><br/>{point.x} → {point.x2}"
+    )
+
+
+def test_xrange_carries_no_data_labels():
+    # The one mark-bearing type that prints nothing in the mark, and needs no gate constant
+    # either. The five that DO print a value in the mark do it because the value can be read
+    # against no axis (an angle, an area, a link's width, a bar floating above an invisible
+    # running total). An xrange bar's two ends BOTH land on a real, ticked x axis that renders
+    # in the Static PNG too — column/bar's case. And there is no second identity to print: the
+    # lane name IS the y-axis category (labelling the bar just repeats it — verified by
+    # rendering).
+    assert "dataLabels" not in _xr()["plotOptions"]["xrange"]
+
+
+def test_xrange_requires_an_end_column():
+    with pytest.raises(ValueError, match="requires an end column"):
+        build_options(_plan(), "xrange", "lane", ["start"])
+
+
+def test_xrange_rejects_the_start_column_as_the_end_column():
+    # A bar's two ends, like sankey's source/target and sunburst's node/parent. It must be a
+    # guard rather than a tolerated oddity because it fails SILENTLY: every bar would be
+    # zero-length, so the chart would come back as a column of milestone slivers.
+    with pytest.raises(ValueError, match="cannot also be the end column"):
+        build_options(_plan(), "xrange", "lane", ["start"], end_col="start")
+
+
+def test_xrange_allows_x_in_y():
+    # x_col IS free to repeat a coordinate column: the lanes are then named by their own start
+    # number — odd, well-defined, drawable. Scatter's x-in-y tolerance, and the reason xrange
+    # stays OUT of X_IN_Y_GUARD_TYPES (its x_col names a lane on the Y axis, and end_col isn't
+    # in y_cols at all, so that rule cannot even express xrange's real collision).
+    df = pd.DataFrame({"start": [1.0, 2.0], "end": [5.0, 6.0]})
+    opts = build_options(df, "xrange", "start", ["start"], end_col="end")
+    assert opts["yAxis"]["categories"] == ["1", "2"]  # _node_key: "1", not "1.0"
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "match"),
+    [
+        ("lane", "end", "neither dates nor numbers"),  # a column of task names
+        ("start", "lane", "neither dates nor numbers"),
+    ],
+)
+def test_xrange_a_non_coordinate_column_raises(start, end, match):
+    with pytest.raises(ValueError, match=match):
+        build_options(_plan(), "xrange", "lane", [start], end_col=end)
+
+
+def test_xrange_a_date_start_beside_a_numeric_end_raises():
+    # Both ends of a bar sit on ONE axis, so they must be the same kind. A contradiction with
+    # no right drawing — a returned message, raised here.
+    df = _plan().assign(sprint=[1, 2, 3, 4])
+    with pytest.raises(ValueError, match="must be the same kind"):
+        build_options(df, "xrange", "lane", ["start"], end_col="sprint")
+
+
+@pytest.mark.parametrize("end", ["lane", "sprint"])
+def test_xrange_explain_returns_the_message_build_options_raises(end):
+    # The `explain_tree_error` contract: the builder owns the coordinate relationship, so it
+    # owns the diagnosis, and the app's warning cannot drift from the exception it stands in
+    # for. Needed because the interactive path does NOT catch builder errors — and picking a
+    # text column for Start, or a date Start beside a numeric End, is reachable through the
+    # app's own pickers.
+    from highcharts_builder import explain_xrange_error
+
+    df = _plan().assign(sprint=[1, 2, 3, 4])
+    problem = explain_xrange_error(df, "lane", "start", end)
+    assert problem
+    with pytest.raises(ValueError) as excinfo:
+        build_options(df, "xrange", "lane", ["start"], end_col=end)
+    assert str(excinfo.value) == problem
+    # count_marks must stay TOTAL over the same contradiction: it runs ABOVE the app's guards,
+    # so a raise here would blow the page up with a traceback before the warning that explains
+    # it could render.
+    assert count_marks(df, "xrange", "lane", ["start"], end_col=end) == 0
+
+
+def test_xrange_explain_is_none_when_the_columns_are_fine():
+    from highcharts_builder import explain_xrange_error
+
+    assert explain_xrange_error(_plan(), "lane", "start", "end") is None
+
+
+def test_a_non_coordinate_column_is_unreachable_from_the_app_pickers():
+    # Pins the scoping claim the builder's docstrings and CLAUDE.md now make: of the TWO
+    # contradictions `explain_xrange_error` reports, only the date-vs-number mismatch is
+    # reachable through the app. The other — a column that is neither dates nor numbers — is
+    # kept out of the Start/End pickers by `coordinate_columns`, so it is reachable only
+    # through the pure builder API.
+    #
+    # This is a documentation invariant with teeth: if `coordinate_columns` ever started
+    # admitting a text column, the app would grow a traceback path AND three prose claims would
+    # silently become false at once. Nothing else in the suite would notice.
+    import itertools
+
+    from highcharts_builder import coordinate_columns, explain_xrange_error
+
+    offerable = coordinate_columns(_plan())
+    assert "lane" not in offerable  # the text column the builder would refuse
+    for start, end in itertools.product(offerable, repeat=2):
+        if start == end:
+            continue  # the Start == End collision, guarded separately
+        problem = explain_xrange_error(_plan(), "lane", start, end)
+        # Whatever the pickers CAN produce is either drawable or a same-kind mismatch —
+        # never the "neither dates nor numbers" message.
+        assert problem is None or "must be the same kind" in problem
+
+
+def test_xrange_count_marks_agrees_with_the_chart_on_the_raw_frame():
+    # THE NO-DRIFT PIN, and the subtlest bug in the type. A row's survival LOOKS per-row, so
+    # xrange looks like it belongs on count_marks' shared-predicate mask path with
+    # treemap/sankey. It does not. The AXIS KIND is a COLUMN-level fact that every row's
+    # start/end is read THROUGH — and the two callers do not hold the same column:
+    # build_options reaches its branch on the `_label_ok`-FILTERED frame, while count_marks
+    # and explain_xrange_error run on the RAW one.
+    #
+    # This frame is built to expose exactly that. The ONLY garbage cell ("oops") sits on the
+    # row whose LANE is missing — so it is dropped for its label before the sniff ever sees
+    # it. On the filtered frame the start column is 2 clean dates; on the raw frame it is 2
+    # dates and one piece of junk. A raw-frame sniff still calls it a date column (2 date hits
+    # beats 0 numeric hits), so the counts happen to agree — but `explain_xrange_error` would
+    # be deciding on different evidence than the chart. `_xrange_bars` re-applies `_label_ok`
+    # itself and sniffs the SURVIVORS only, which is what makes the two frames byte-identical.
+    df = pd.DataFrame(
+        {
+            "lane": ["a", "b", None],
+            "start": ["2026-01-01", "2026-02-01", "oops"],
+            "end": ["2026-01-15", "2026-02-15", "2026-03-01"],
+        }
+    )
+    built = _bars(_xr(df))
+    assert len(built) == 2
+    assert count_marks(df, "xrange", "lane", ["start"], end_col="end") == len(built)
+    # And the guard must PASS on this frame, not report a contradiction the builder won't raise.
+    from highcharts_builder import explain_xrange_error
+
+    assert explain_xrange_error(df, "lane", "start", "end") is None
+
+
+def test_xrange_uses_only_first_y_col():
+    opts = build_options(_plan(), "xrange", "lane", ["start", "end"], end_col="end")
+    assert len(_bars(opts)) == 4
+
+
+def test_coordinate_columns_offers_numbers_and_dates_but_not_text():
+    # Sourced from `_coordinates` itself, so the app's Start/End pickers cannot offer a column
+    # the builder would refuse — the can't-drift rule applied to which options appear in a
+    # widget. It is what lets the app widen those controls past select_dtypes("number")
+    # (invisible to a date column, which is object dtype) without reintroducing the hazard
+    # that filter exists to prevent.
+    from highcharts_builder import coordinate_columns
+
+    df = pd.DataFrame(
+        {
+            "lane": ["a", "b"],  # text: not a coordinate
+            "month": ["Jan", "Feb"],  # the landing-sample trap: NOT a date
+            "start": ["2026-01-05", "2026-02-10"],  # ISO strings: a date
+            "parsed": pd.to_datetime(
+                ["2026-01-05", "2026-02-10"]
+            ),  # datetime64: a date
+            "sprint": [12, 18],  # a number
+        }
+    )
+    assert coordinate_columns(df) == ["start", "parsed", "sprint"]
+    # A superset of the numeric columns, which is the whole point.
+    assert set(df.select_dtypes("number")) <= set(coordinate_columns(df))
+
+
+def test_xrange_serializes_and_resolves_the_xrange_module():
+    chart = make_chart(_plan(), "xrange", "lane", ["start"], end_col="end")
+    js = chart.to_js_literal()
+    assert js
+    # x2 is the whole type — a mark with EXTENT — and unlike sankey's nodeFormat, boxplot's
+    # fillColor and sunburst's levels[].colorByPoint, it DOES survive. Only the emitted JS can
+    # show that, which is why it is pinned here rather than on the options dict.
+    for token in ("type: 'xrange'", "x2:", "reversed", "minPointLength", "pointWidth"):
+        assert token in js, f"{token} did not survive serialization"
+    assert "type: 'datetime'" in js
+    # The module is resolved by highcharts-core itself, from the options shape — nothing in
+    # this repo registers it. And xrange needs no highcharts-more (unlike bubble, radar,
+    # boxplot and waterfall).
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/xrange.js" in tags
+    assert "highcharts-more" not in tags
+
+
+def test_xrange_light_mode_shape():
+    # Pin the choices nothing else guards, and prove the dark-only key is absent (so the dark
+    # test below is meaningful).
+    opts = _xr()
+    assert opts["legend"]["enabled"] is False
+    xr = opts["plotOptions"]["xrange"]
+    assert set(xr) == {"pointWidth", "minPointLength"}
+    assert "borderColor" not in xr
+
+
+def test_xrange_dark_mode_dissolves_the_bar_borders():
+    # Xrange joins column/bar here and NOT waterfall — the other bar-shaped type, which needs
+    # the opposite treatment. That was MEASURED, not inferred from the shared bar base class:
+    # waterfall is the standing proof the inference is unsound, its border being a fixed
+    # #333333. Pixel-scanning a dark-mode xrange PNG off the export server puts its default
+    # border at pure #ffffff — the background variable, exactly column/bar's case — so every
+    # bar is ringed white until it is dissolved into the dark background.
+    opts = _xr(dark=True)
+    assert (
+        opts["plotOptions"]["xrange"]["borderColor"] == "#0f172a"
+    )  # _DARK_CHROME["bg"]
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    # The lane hues are unchanged: like the shared palette, they read on both backgrounds.
+    assert _bars(opts)[0]["color"] == DEFAULT_COLORS[0]
+
+
+def test_release_plan_sample_builds_an_xrange_chart():
+    from sample_data import _release_plan
+
+    df = _release_plan()
+    opts = build_options(df, "xrange", "workstream", ["start"], end_col="end")
+    assert opts["xAxis"]["type"] == "datetime"
+    # Backend and Frontend each run twice, with a gap — so the sample proves the per-lane hue.
+    assert opts["yAxis"]["categories"] == [
+        "Discovery",
+        "Design",
+        "Backend",
+        "Frontend",
+        "QA",
+        "Launch",
+    ]
+    bars = _bars(opts)
+    assert len(bars) == 8  # every row draws, the milestone included
+    backend = [b["color"] for b in bars if b["name"] == "Backend"]
+    assert len(backend) == 2 and len(set(backend)) == 1
+    assert count_marks(df, "xrange", "workstream", ["start"], end_col="end") == 8
+
+
+# --------------------------------------------------------------------------- #
 # Static-PNG failure messages (the export server's three different answers)
 # --------------------------------------------------------------------------- #
 class _FakeResponse:
@@ -3388,6 +4093,165 @@ def test_app_sunburst_kpi_shows_sectors_including_the_appended_root(app):
     )
     assert metrics["Sectors"] == f"{expected:,}"
     assert expected == len(df) + 1 == 16  # every node a sector, plus the root
+
+
+# A real Gantt CSV: a lane column and two DATE columns, and so NOT ONE numeric column. This
+# is the file the app used to refuse at the door — `select_dtypes("number")` is empty, and
+# the no-numeric-columns gate ran ABOVE the chart-type picker and st.stop()ped the page.
+_GANTT_CSV = (
+    b"task,start,end\n"
+    b"Design,2026-01-05,2026-02-10\n"
+    b"Build,2026-02-01,2026-04-20\n"
+    b"QA,2026-04-10,2026-05-15\n"
+)
+
+
+def _pick_xrange_sample(app):
+    """Select the xrange sample dataset and switch the chart type to xrange.
+
+    The DEFAULT dataset (monthly revenue vs cost) has no coordinate pair to span — and its
+    `month` column is the very one that must NOT sniff as a date (see `_coordinates`) — so
+    the KPI test needs the release plan to have bars to count.
+    """
+    from sample_data import SAMPLES
+
+    label = next(key for key in SAMPLES if "(xrange)" in key)
+    app.selectbox[0].set_value(label).run()  # Dataset
+    app.selectbox[1].set_value("xrange").run()  # Chart type
+    return SAMPLES[label]()
+
+
+def test_app_switch_to_xrange_shows_end_control_and_regenerates_config(app):
+    # Xrange is the fourth type with a required extra column (after bubble's Size, sankey's
+    # Target and sunburst's Parent): it reveals an "End" selectbox no other type shows, and
+    # drives the config through the end_col plumbing. Network-free.
+    assert not any(sb.label == "End" for sb in app.selectbox)  # absent
+    _pick_xrange_sample(app)
+    assert not app.exception
+    assert len([sb for sb in app.selectbox if sb.label == "End"]) == 1  # now present
+    # Single-select Y — and it is labelled as a COORDINATE ("Start"), not a value, because it
+    # says WHEN rather than HOW MUCH.
+    assert any(sb.label == "Start" for sb in app.selectbox)
+    assert not app.pills
+    _reveal_config(app)
+    assert not app.exception
+    js = app.code[0].value
+    assert "type: 'xrange'" in js
+    assert "x2:" in js  # the extent survived to the chart
+    assert "type: 'datetime'" in js  # ...and the ISO date strings became a time axis
+
+
+def test_app_xrange_start_and_end_pickers_offer_only_coordinate_columns(app):
+    # Both are sourced from the builder's `coordinate_columns`, so a picker cannot offer a
+    # column the builder would only turn around and reject. `workstream` is text — it names a
+    # lane, it cannot place a bar on an axis — so it must not appear in either.
+    _pick_xrange_sample(app)
+    start = next(sb for sb in app.selectbox if sb.label == "Start")
+    end = next(sb for sb in app.selectbox if sb.label == "End")
+    for picker in (start, end):
+        assert "workstream" not in picker.options
+        assert set(picker.options) == {"start", "end", "headcount"}
+
+
+def test_app_xrange_end_survives_a_lane_change(app):
+    # The keyless-widget trap the End selectbox's constant `index` guards against, exactly as
+    # sankey's Target and sunburst's Parent do. A default derived from the Start column (the
+    # tempting "the column after Start") would re-mint the widget whenever Start changed,
+    # silently discarding the user's End. A dynamic index makes this fail — nothing else in
+    # the suite would notice.
+    _pick_xrange_sample(app)  # columns: workstream, start, end, headcount
+    end = next(sb for sb in app.selectbox if sb.label == "End")
+    end.set_value("headcount").run()  # not the default
+    assert not app.exception
+    app.selectbox[2].set_value("start").run()  # Lane: workstream -> start
+    assert not app.exception
+    end = next(sb for sb in app.selectbox if sb.label == "End")
+    assert end.value == "headcount"  # not reset to the default
+
+
+def test_app_xrange_start_equals_end_shows_guard_warning(app):
+    # Xrange's own collision, the third of these: a bar's two ends. Not the x-in-y rule (the
+    # End column is never among the Y series). It must be GUARDED rather than tolerated
+    # because it fails silently — every bar would be zero-length, so the chart would come back
+    # as a column of milestone slivers rather than as anything anyone asked for.
+    _pick_xrange_sample(app)
+    end = next(sb for sb in app.selectbox if sb.label == "End")
+    end.set_value("start").run()  # == the Start column
+    assert not app.exception  # the guard fires; it does NOT blow up the page
+    assert app.warning
+    assert "Start and End must be different" in app.warning[0].value
+
+
+def test_app_xrange_a_date_start_beside_a_numeric_end_warns_instead_of_crashing(app):
+    # The SECOND builder error a user can reach without writing any code (sunburst's cyclic CSV
+    # was the first). The interactive path doesn't catch, so the app has to stop on it — and
+    # the KPI row runs ABOVE that guard, which is why count_marks returns 0 on a contradictory
+    # column pair rather than raising. If it raised, this page would be a traceback.
+    #
+    # A TEXT start is the other contradiction, but it is unreachable from the app by
+    # construction: `coordinate_columns` keeps a column of task names out of both pickers (see
+    # the test above), which is the point of sourcing them from the builder. The date-beside-a-
+    # number mismatch is the one a user CAN still select, so that is the one to drive here.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        (
+            "mixed.csv",
+            b"task,start,end,sprint\nDesign,2026-01-05,2026-02-10,3\n",
+            "text/csv",
+        )
+    ).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("xrange").run()
+    end = next(sb for sb in app.selectbox if sb.label == "End")
+    end.set_value("sprint").run()  # a NUMBER beside a DATE start
+    assert not app.exception  # NOT a traceback
+    assert app.warning
+    # The message is the builder's own — explain_xrange_error returns the very string
+    # build_options raises — so the warning can't drift from the exception it stands in for.
+    assert "must be the same kind" in app.warning[0].value
+    # ...and the KPI reports the true count of the chart about to be replaced by that warning.
+    assert _metrics(app)["Bars"] == "0"
+
+
+def test_app_xrange_plots_a_csv_with_no_numeric_columns_at_all(app):
+    # THE GATE. A real Gantt CSV is a lane column and two DATE columns — and a date column is
+    # object dtype, so `select_dtypes("number")` finds NOTHING in it. The no-numeric-columns
+    # gate used to run above the chart-type picker and st.stop() the page, so this file — the
+    # single most natural input for this chart type — was refused before xrange could even be
+    # chosen. The gate now runs BELOW the picker and asks the question the type actually has.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("gantt.csv", _GANTT_CSV, "text/csv")).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("xrange").run()
+    assert not app.exception
+    assert not app.error  # NOT "this dataset has no numeric columns to plot"
+    metrics = _metrics(app)
+    assert metrics["Numeric columns"] == "0"  # ...and yet
+    assert metrics["Bars"] == "3"  # ...it plots
+
+    # The gate stays honest in the other direction: the same file on a type that really does
+    # need a number must still be refused.
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("line").run()
+    assert app.error
+    assert "no numeric columns" in app.error[0].value
+
+
+def test_app_xrange_kpi_shows_bars(app):
+    # Xrange is one series of bars, so the KPI swaps "Series plotted" (which would read a bare
+    # 1) for "Bars" — mirroring heatmap's "Cells", treemap's "Tiles", sankey's "Flows",
+    # boxplot's "Boxes", waterfall's "Steps" and sunburst's "Sectors". Unlike the last two it
+    # appends nothing, so its count is exactly its surviving rows — the milestone included,
+    # because the builder floors that bar to a visible sliver rather than dropping it.
+    df = _pick_xrange_sample(app)
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    expected = count_marks(df, "xrange", "workstream", ["start"], end_col="end")
+    assert metrics["Bars"] == f"{expected:,}"
+    assert (
+        expected == len(df) == 8
+    )  # every row a bar; nothing appended, nothing dropped
 
 
 def test_app_heatmap_kpi_shows_cells_from_count_marks(app):

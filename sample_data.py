@@ -344,6 +344,66 @@ def _org_headcount() -> pd.DataFrame:
     )
 
 
+def _release_plan() -> pd.DataFrame:
+    """A product release plan as INTERVALS — one row per scheduled bar, each on a workstream
+    lane, spanning a start date and an end date.
+
+    Tailored to xrange, and to nothing else in this file, on four counts:
+
+    * It is the only sample whose value columns are COORDINATES rather than magnitudes. Every
+      other dataset answers "how much"; these two answer "when". So it is also the only one
+      carrying DATES, and they are written as ISO-8601 *strings* on purpose: that is what
+      ``pd.read_csv`` hands back for a date column, so the sample exercises the real
+      ``_coordinates`` sniff (an object column parsed to a datetime axis) rather than a
+      pre-parsed ``datetime64`` a CSV upload would never produce.
+    * Its label column REPEATS, like ``_response_times``' does — but for a different reason.
+      A boxplot's repeats are observations to be aggregated into one box; here each repeat is
+      its own bar, so ``Backend`` and ``Frontend`` each run twice with a GAP between them
+      (build, then a later hardening pass). That is what proves the per-lane hue: a lane's two
+      bars must come back the same color, or a workstream stops reading as one thing.
+    * ``Launch`` is a zero-length row — a MILESTONE, the commonest Gantt row after a task, and
+      the one Highcharts draws nothing for unaided. It is here so the sample renders the
+      ``minPointLength`` floor rather than leaving it to a test.
+    * ``headcount`` is a genuine numeric column, so the dataset is still usable by the other
+      chart types (and so the app's no-numeric-columns gate has something to find).
+    """
+    return pd.DataFrame(
+        {
+            "workstream": [
+                "Discovery",
+                "Design",
+                "Backend",
+                "Frontend",
+                "Backend",
+                "Frontend",
+                "QA",
+                "Launch",
+            ],
+            "start": [
+                "2026-01-05",
+                "2026-01-26",
+                "2026-02-16",
+                "2026-03-02",
+                "2026-04-27",  # the second Backend bar, after a gap
+                "2026-05-04",  # the second Frontend bar, after a gap
+                "2026-05-11",
+                "2026-06-01",  # the milestone: start == end
+            ],
+            "end": [
+                "2026-01-23",
+                "2026-02-20",
+                "2026-04-17",
+                "2026-04-24",
+                "2026-05-08",
+                "2026-05-15",
+                "2026-05-29",
+                "2026-06-01",
+            ],
+            "headcount": [2, 3, 5, 4, 2, 2, 3, 1],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -358,4 +418,5 @@ SAMPLES = {
     "Service response times (boxplot)": _response_times,
     "Quarterly profit bridge (waterfall)": _profit_bridge,
     "Company headcount (sunburst)": _org_headcount,
+    "Product release plan (xrange)": _release_plan,
 }

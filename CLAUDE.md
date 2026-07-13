@@ -10,23 +10,34 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
-  `st.multiselect` on wide CSVs, plus the three type-specific extra column
-  selectors — Size (Z) for bubble, Target (to) for sankey, Parent for sunburst),
+  `st.multiselect` on wide CSVs, plus the four type-specific extra column
+  selectors — Size (Z) for bubble, Target (to) for sankey, Parent for sunburst, End
+  for xrange),
   caching, a KPI metric row (its third metric adapts to the chart type — series
   plotted, or, for the one-series types, the mark count from the builder's
   `count_marks`: cells for a heatmap, tiles for a treemap, flows for a sankey,
-  boxes for a boxplot, steps for a waterfall, sectors for a sunburst — sourced there
+  boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
+  xrange — sourced there
   rather than recomputed
   here so it can't drift from what the chart draws; waterfall's and sunburst's are the
   two that *exceed* their drawable mark count, by one, since each appends a mark the
   frame never held (a total bar, a root sector) — not necessarily their row count,
-  since an undrawable label drops its row;
+  since an undrawable label drops its row; xrange appends nothing, so its count is
+  exactly its surviving rows;
   membership of the `MARK_METRICS` dict is what makes a type count-adaptive, so the
   KPI stays one branch however many such types there are), the
   render-mode
   selector (interactive iframe / static PNG), reading the active light/dark theme
   (`st.context.theme.type`) so the charts render theme-aware, the chart embed,
   and a toggle that reveals the generated Highcharts config (JS).
+  The **no-plottable-columns gate** runs *below* the chart-type selectbox and is
+  type-aware, which xrange forced: every other type needs a NUMBER, but xrange's
+  start/end are coordinates and may be dates — and a date column is object dtype, so
+  the canonical Gantt CSV (`task,start,end`, all dates) has *no* numeric columns at
+  all and the old `select_dtypes("number")` gate `st.stop()`ped it before the picker
+  was even drawn. Xrange's Start/End pickers are likewise sourced from the builder's
+  `coordinate_columns`, not from `numeric_cols` (which cannot see a date) nor from
+  `df.columns` (which would offer a column of task names the builder can only reject).
 - `highcharts_builder.py` — pure, Streamlit-free helpers that turn a DataFrame
   into a Highcharts options `dict`, a `Chart`, and embeddable HTML or PNG bytes,
   plus `explain_export_failure()`, which turns a failed PNG export into a message
@@ -37,14 +48,28 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   the very message `build_options` raises for a malformed tree, so the app's warning and
   the exception it stands in for cannot drift apart (needed because the interactive path
   does *not* catch builder errors, and a cyclic CSV is the one such error a user can reach
-  just by uploading a file), and `count_marks()`, which
+  just by uploading a file), `explain_xrange_error()`, the same contract for a *column
+  pair* rather than a tree. It reports two contradictions — a start/end column that can place a
+  bar on no axis, and two that disagree about *which* axis — of which only the **second** is
+  reachable from the app, since `coordinate_columns` keeps a column of task names out of the
+  pickers entirely; the first is reachable only through the pure builder API. (So xrange adds
+  exactly one app-reachable builder error, not two: a *date start beside a numeric end*.)
+  Then `coordinate_columns()`, the
+  builder's own answer to "which columns can place a bar on an axis" — exported so the
+  app's Start/End pickers cannot offer a column the builder would refuse, which is the
+  can't-drift rule applied to *which options appear in a widget* — and `count_marks()`, which
   returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
-  tiles, a sankey's flows, a boxplot's boxes, a waterfall's steps, a sunburst's sectors)
+  tiles, a sankey's flows, a boxplot's boxes, a waterfall's steps, a sunburst's sectors, an
+  xrange's bars)
   for the app's KPI
   row — reusing the same `_label_ok`/`_plottable` drop predicates so the count can't
-  drift from the chart (sunburst goes further and reuses the whole `_sunburst_tree` build,
-  since its drops are not a per-row mask at all: a node's fate depends on its *ancestors*
-  and its *descendants*). Independently importable and unit-testable.
+  drift from the chart (sunburst and xrange go further and reuse their *whole* build, for
+  two different reasons: sunburst's drops are not a per-row mask at all, since a node's fate
+  depends on its *ancestors* and its *descendants*; while xrange's drops *look* per-row but
+  are read through a **column**-level fact — the axis kind — and `build_options` reaches its
+  branch on the `_label_ok`-*filtered* frame while `count_marks` runs on the *raw* one, so a
+  predicate-only reuse would sniff a different axis than the chart drew).
+  Independently importable and unit-testable.
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
@@ -52,10 +77,14 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   value matrix, treemap's value-sized tiles, sankey's node-link flows, boxplot's
   aggregated Tukey distributions, waterfall's appended total and semantic bar
   colors, sunburst's assembled hierarchy (synthesized ids, valueless internal nodes,
-  the dropped dangling parent vs. the raised cycle, and the appended root), the brand
+  the dropped dangling parent vs. the raised cycle, and the appended root), xrange's
+  interval bars (the date-vs-number coordinate sniff and its two silent traps — a numeric
+  column reaching a date parser, and an unnormalized epoch view — plus the kept milestone,
+  the dropped backwards bar, and the per-lane hue), the brand
   palette, the validation
   guards including bubble's required size column, sankey's required and distinct
-  target column, sunburst's required and distinct parent column, and the
+  target column, sunburst's required and distinct parent column, xrange's required end
+  column (distinct from the *start* column, not from `x_col`), and the
   heatmap/boxplot/waterfall x-in-y rule, and
   an end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
@@ -122,10 +151,15 @@ drives each marker's area (required for `bubble`, raising `ValueError` if
 omitted; ignored by the other types), threaded through the same renderers,
 sankey charts a `target_col=` naming the destination-node column (required for
 `sankey`, and raising `ValueError` if omitted or equal to `x_col`; likewise
-ignored by the other types), threaded the same way, and sunburst charts a
+ignored by the other types), threaded the same way, sunburst charts a
 `parent_col=` naming the parent-label column (required for `sunburst`, raising
 `ValueError` if omitted or equal to `x_col` — and, unlike the other two, also raising
-when the column it names does not describe a *tree*: see `explain_tree_error`).
+when the column it names does not describe a *tree*: see `explain_tree_error`), and
+xrange charts an `end_col=` naming the column each bar ends at (required for `xrange`,
+raising `ValueError` if omitted or equal to the *start* column — `y_cols[0]`, not
+`x_col`, which is the one collision of the four that is not against `x_col` at all — and,
+like sunburst, also raising when its columns cannot place a bar on one axis: see
+`explain_xrange_error`).
 
 Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
 `pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension),
@@ -294,7 +328,95 @@ name is the only thing identifying a sector (a sunburst has neither axis nor leg
 value is already the *angle*. `allowTraversingTree` makes a click re-root the chart on that
 branch. It needs **one** `_themed` hook — `borderColor`, the white sector rings that pie,
 treemap and sankey each dissolve — and pulls in `modules/sunburst`, and, unlike
-bubble/radar/boxplot/waterfall, *not* `highcharts-more`).
+bubble/radar/boxplot/waterfall, *not* `highcharts-more`), and `xrange` (a Gantt-style
+timeline, and the only type whose mark has **extent** along the x axis rather than sitting at
+a point on it. Each row is one bar, on the **lane** named by `x_col` — and here `x_col` is not
+an x axis at all: the lanes are the categories of the **Y** axis, so its values *repeat*
+(boxplot's long/tidy shape, but a lane holds 0..n bars rather than aggregating into one
+mark), and `y` is a *position* into `yAxis.categories` rather than a value (boxplot's
+positional trick again). The bar spans from the first `y_cols` column to `end_col`.
+
+Those two are the type's real novelty: they are **coordinates**, not magnitudes. Every other
+type's value column answers *how much*; these answer *when*. So the module gains a third
+column role beside the LABEL (`_label_ok`, "this names a mark") and the VALUE (`_plottable`,
+"this sizes a mark") — the COORDINATE (`_coordinates`, "this positions a mark"), which may be
+a **date**. It is sniffed once per column, and the sniff is **dtype-first**, which is not
+fastidiousness but the only safe order: `pd.to_datetime(12)` does not fail, it returns
+`1970-01-01T00:00:00.000000012`, so a "try dates, fall back to numbers" sniff would silently
+move a column of sprint numbers to an instant at the epoch. A numeric dtype is therefore never
+shown to a date parser at all; a `datetime64` dtype is a date; and only an **object** column is
+a genuine question — answered by counting how many cells each coercion recovers, with the date
+parse **pinned to ISO-8601**. That pin is load-bearing too: pandas' default parser is wildly
+permissive on free text, and `pd.to_datetime(["Jan","Feb","Mar"])` *succeeds*, returning **year
+1 AD** — which is `_revenue_vs_cost`'s `month` column, the app's **landing dataset**, so a
+permissive sniff would offer a date axis on the page you see when you open the app. (`utc=True`
+for a third reason: `errors="coerce"` is not total without it — a DST-crossing column raises
+"Mixed timezones detected" even under `coerce`, and this code runs *above* the app's guards.)
+The dates then become epoch **milliseconds** via `_epoch_millis`, which normalizes the
+resolution *before* taking the int64 view rather than dividing after it: `.astype("int64")`
+reads a datetime column in its OWN resolution, and this project's pandas hands back
+`datetime64[us]`, not the `[ns]` an obvious `// 1_000_000` would assume — that divisor renders
+`2024-01-05` as `1970-01-20`, every bar in the correct *relative* order at catastrophically
+wrong *absolute* dates, drawn confidently, with no error anywhere.
+
+`_spannable` is the module's first **two-argument** predicate, because an interval's validity
+is a fact about the **relation** and not about either end — `_sizable` widened to a *pair*
+rather than by one comparison. Both ends must be `_plottable` before they are compared, and
+the finiteness half is load-bearing: `end >= start` alone accepts `(-inf, 10)`, which would
+put a bare `inf` in the emitted JS. Then the comparison decides two *asymmetric* fates. A
+**milestone** (`end == start` — a launch date, a deadline, a same-day task, one of the
+commonest Gantt rows) is **kept**, exactly as `_sizable` keeps its zero; Highcharts draws
+nothing for it unaided (verified by rendering: an empty lane), so it is floored to a visible
+sliver with `minPointLength`, which is what makes *counting* it honest rather than dropping it
+being necessary. A **backwards** bar (`end < start`) is **dropped**: left in, Highcharts draws
+a bar spanning the ENTIRE axis (verified by rendering) — not a visible error but a confident,
+plausible lie that reads as the longest task in the project, the xrange counterpart of
+sunburst's silent re-parenting. It drops rather than raises for `_sizable`'s reason: there IS
+a right drawing (nothing), unlike a cycle, where every alternative is a lie.
+
+The contradictions that *do* raise are **column**-level, decided once, with no per-row right
+answer: a start/end column that is neither dates nor numbers, or two that disagree about which.
+Returned as a message rather than raised (the `_SUNBURST_CYCLE` rule) so `count_marks` stays
+total. Only *one* of the two is reachable from the app — the date-beside-a-number mismatch —
+since `coordinate_columns` keeps a text column out of the pickers; the other is reachable only
+through the pure builder API.
+
+`_coordinates` therefore has a **fourth** answer, `_COORD_EMPTY`, and it is not a kind but the
+absence of one — the fix for a bug the review caught. An unfilled column is missing **data**
+(every row drops, the chart comes out empty), and it must not be allowed to masquerade as a
+kind, because a kind is a claim about an *axis* and an empty column makes no such claim. The
+dtype dispatch cannot tell the difference on its own: a blank CSV column arrives as all-`NaN`
+`float64`, so `is_numeric_dtype` says "number" with total confidence — and that phantom number
+then collides with a real date partner and raises, telling the user their empty End column
+"reads as numbers", which is both false and unactionable. It is not a corner case (it is a
+Gantt template whose end dates nobody has filled in yet, straight out of `read_csv`), and the
+bug was *asymmetric*: an empty column beside a numeric partner agreed by coincidence and worked,
+so only the **date** case — the type's headline use — was broken. Hence the empty test runs
+*first*, above the dtype dispatch, and an empty column abstains from the start-vs-end vote
+rather than vetoing it. A lane whose every row dropped never enters `yAxis.categories` at all — boxplot keeps
+an all-missing group as an `EnforcedNull` box because there the group IS the mark, but a lane
+holds 0..n bars, so there is nothing to null out: pie's drop-the-row family, no ghost lane.
+
+Bars are colored **per lane**, seeded per **point** from the *overridable* `colors` — a lane's
+hue is its arbitrary identity, like a pie slice's (the opposite of waterfall's semantic
+red-means-loss), and every bar in a lane shares it, which is what makes a task's phases read as
+one thing. Here the `colorByPoint` trap is the **mirror** of sunburst's: where sunburst's
+`levels[].colorByPoint` is silently *dropped*, xrange's series-level one *survives perfectly* —
+and is the wrong option, since it would hand every BAR its own hue. It is the one mark-bearing
+type that prints **nothing** in the mark and needs no gate constant either: the five that do
+print a value in the mark do so because the value can be read against no axis (an angle, an
+area, a link's width, a bar floating above an invisible running total), but an xrange bar's two
+ends BOTH land on a real, ticked x axis that renders in the Static PNG too — column/bar's case,
+not waterfall's — and there is no second identity to print, since the lane name IS the y-axis
+category. Its tooltip uses `{point.name}`, which is waterfall's *fix* and xrange's **bug** in
+mirror image: `{point.category}` reads the X axis, and an xrange's categories are on the Y, so
+it renders the raw x value (a tooltip reading `1767571200000` — verified by rendering). It
+needs **one** `_themed` hook, and it joins **column/bar** rather than waterfall — the other
+bar-shaped type, which needs the opposite treatment. That was *measured*, not inferred from the
+shared bar base class: waterfall is the standing proof the inference is unsound, its border
+being a fixed `#333333`, while xrange's default border is pure white (the background variable),
+so every bar is ringed white on the dark background until it is dissolved. Pulls in
+`modules/xrange`, and, like sunburst, *not* `highcharts-more`).
 
 ## Run
 
@@ -372,36 +494,58 @@ empty the chart *silently*; the per-point ring-1 seeding and the `colorByPoint` 
 appear NOWHERE in the emitted JS — dropped from `levels`, and wrong at series level; the
 alternating `colorVariation`; the name-only sector labels and their gate; and the one
 dark-mode hook),
+xrange's interval bars (the **epoch pin** — `2026-01-05` must serialize to exactly
+`1767571200000`, asserted across four column shapes (object ISO strings, `datetime64[us]`,
+`datetime64[s]`, tz-aware), since the obvious `// 1_000_000` divisor is right for exactly one
+of them and renders the rest in 1970; the **epoch trap mirrored** — an int column stays
+numeric and gets *no* datetime axis, because `pd.to_datetime(12)` would silently make it the
+epoch; the sniff table, including the month-name column that `format="ISO8601"` must reject
+*because it is the landing sample's*, and the DST column that raises without `utc=True`; a
+build under `warnings.simplefilter("error")`, the only way the ISO-8601 pin is observable; the
+kept-and-floored milestone with `minPointLength` pinned on the emitted JS, and the dropped
+backwards bar *with its lane gone from the axis*; `_spannable`'s four boundary pairs and the
+`-inf`/`+inf` hole that `end >= start` alone would leave; the per-lane hue, a custom palette,
+a short one that must cycle rather than `IndexError`, and the `colorByPoint` that must appear
+NOWHERE — the mirror of sunburst's, since here the series-level one *survives* and is wrong;
+the `{point.name}` tooltip, since `{point.category}` renders the raw epoch; the absent
+dataLabels; the **no-drift pin**, a frame whose only garbage cell sits on a row dropped for its
+label, which a raw-frame sniff would decide differently from the chart; and the one dark-mode
+hook),
 the brand palette, the
 light/dark theming (dark-mode chrome — including the tooltip and the heatmap
 colorAxis — vs. the shared palette), and the validation guards (including the
 category-x x-in-y rule, widened to heatmap, boxplot and waterfall, bubble's required
-size column, sankey's required, distinct target column, and sunburst's required,
-distinct parent column) —
+size column, sankey's required, distinct target column, sunburst's required,
+distinct parent column, and xrange's required end column, distinct from the *start*
+column rather than from `x_col`) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
 to serialize — bubble, radar, boxplot and waterfall all pulling in the
 `highcharts-more` module,
 heatmap the `modules/heatmap` module, treemap the `modules/treemap` module,
-sankey the `modules/sankey` module, and sunburst the `modules/sunburst` module (and,
-alone among the four extra-module types, *not* `highcharts-more`) — rather than just
+sankey the `modules/sankey` module, sunburst the `modules/sunburst` module, and xrange the
+`modules/xrange` module (the last two alone among the five extra-module types needing *not*
+`highcharts-more`) — rather than just
 assumed; sankey's node
 tooltip is pinned in that serialized JS too, since a top-level `nodeFormat` is
 accepted by `Chart.from_options` and then silently dropped, as boxplot's `fillColor`
 is and as sunburst's `levels[].colorByPoint` is, and waterfall's `isSum` is pinned
 there for the same reason — it is a point key
 that *does* survive, which only the emitted JS can show, as sunburst's `id`/`parent`
-and `allowTraversingTree` are) and the sample
+and `allowTraversingTree` are, and as xrange's `x2` and `minPointLength` are) and the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, treemap,
-sankey's Target (to) control, sunburst's Parent control, and boxplot's and waterfall's
+sankey's Target (to) control, sunburst's Parent control, xrange's End control, and boxplot's
+and waterfall's
 single-select Y —
 revealing the generated config behind its toggle,
 the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
 the guard messages — including a *cyclic uploaded CSV*, the one builder error a user
 can reach just by uploading a file, which must warn and stop rather than render a
-traceback).
+traceback, and its xrange counterpart, a date start beside a numeric end; plus the
+**type-aware column gate**, driven by an uploaded Gantt CSV with *no numeric columns
+whatsoever*, which must plot as an xrange and must still be refused by `line`).
 
 `tests/test_hooks.py` covers the `.claude/hooks/` scripts: the extracted pure
 functions (`protected_reason`, `is_python_target`, `has_dirty_python`) directly,
@@ -499,11 +643,17 @@ before it runs.
   mask is `''`, so `int()` raises `ValueError`; and
   `&` between two of them raises out of the Arrow kernel, while `bool & str` merely *warns*
   today but is deprecated and will raise in pandas 4. The casts live at
-  `build_options`' `_label_ok` filter and on all three of `count_marks`' masks. Sunburst is
+  `build_options`' `_label_ok` filter, on all three of `count_marks`' masks, and on
+  `_xrange_bars`' own `keep` mask. Sunburst is
   the one type that needs no cast of its own: `_sunburst_tree` reads the frame with a plain
   `zip` rather than a mask, so a row-less frame is simply an empty loop, and its `count_marks`
   branch returns *above* the three masks. It still rides the shared `_label_ok` filter, so it
-  is covered by that cast like everything else. Two sweeps
+  is covered by that cast like everything else. Xrange's `count_marks` branch likewise returns
+  above the three masks, but `_xrange_bars` re-applies `_label_ok` *itself* — a mask, and so
+  a cast — because it must produce byte-identical output from the raw frame `count_marks`
+  hands it and the filtered one `build_options` does. A row-less coordinate column is also the
+  one case `_coordinates` must NOT call a contradiction: nothing parses, but nothing is
+  *present* either, so it is missing data (an empty chart), not a column of the wrong kind. Two sweeps
   pin it (`test_row_less_frame_draws_an_empty_chart_in_every_type` over `SUPPORTED_TYPES`,
   and `test_count_marks_casts_every_mask_not_just_the_label_one`, which promotes warnings to
   errors — the only way the non-label casts are observable at all).
@@ -514,10 +664,13 @@ before it runs.
   non-standard JSON literal `Infinity`, answers `400`. So each type applies the same
   missing-data policy to a non-finite **value**: the keep-the-slot types go through `_num`
   (gap = `EnforcedNull`), the drop-the-row types through the shared `_plottable` predicate
-  (pie, treemap, scatter, bubble, and sankey's *weight*), and boxplot drops non-finite
+  (pie, treemap, scatter, bubble, and sankey's *weight*), boxplot drops non-finite
   observations before aggregating — and, because it is the one type that does *arithmetic*
   on the values, then nulls the whole box (an `EnforcedNull`) if that arithmetic overflows
-  a finite group into a non-finite quantile/fence. The same policy governs the **label**
+  a finite group into a non-finite quantile/fence — and xrange drops the row via
+  `_spannable`, whose `_plottable`-on-both-ends half exists precisely for this: `end >= start`
+  alone accepts `(-inf, 10)`, so the comparison is *not* enough on its own and the finiteness
+  check is what keeps a bare `inf` out of the emitted JS. The same policy governs the **label**
   column (the one that NAMES a mark — a slice/category/node/box): a missing or non-finite
   label names nothing drawable, so its row is dropped uniformly via `_label_ok`, filtered
   once at the top of `build_options` (except scatter/bubble with a numeric x, where x is a

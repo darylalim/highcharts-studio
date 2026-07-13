@@ -35,6 +35,7 @@ SANKEY_TYPES = ("sankey",)  # node-link flows: source -> target links sized by w
 BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw rows
 WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
 SUNBURST_TYPES = ("sunburst",)  # a hierarchy as concentric rings, re-rootable by click
+XRANGE_TYPES = ("xrange",)  # a Gantt timeline: bars spanning [start, end] on lanes
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -47,6 +48,7 @@ SUPPORTED_TYPES = (
     + BOXPLOT_TYPES
     + WATERFALL_TYPES
     + SUNBURST_TYPES
+    + XRANGE_TYPES
 )
 
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
@@ -73,6 +75,12 @@ CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 # and its collision is node-vs-parent, so parent_col isn't in y_cols either. x_col in
 # y_cols then merely names every node by its own (numeric) value — odd, well-defined,
 # drawable: scatter's x-in-y tolerance, not heatmap's grid misalignment.
+# Xrange is absent for a THIRD reason, and the strongest of the three: its x_col is not
+# an x axis at all. It names a LANE, and the lanes are the categories of the Y axis (the
+# bars run along x, between a start and an end). Its collision is start-vs-end — two
+# columns of which only one, y_cols[0], is even a y column — so like sankey's and
+# sunburst's it gets a dedicated guard in build_options. x_col in y_cols then merely
+# names each lane by its own start coordinate: scatter's x-in-y tolerance again.
 X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES + BOXPLOT_TYPES + WATERFALL_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
@@ -230,6 +238,57 @@ _SUNBURST_AMBIGUOUS = (
 # A 10,000-node cycle must not print a 10,000-node message.
 _SUNBURST_CYCLE_PREVIEW = 6
 
+# Xrange is the first type whose value columns are COORDINATES rather than magnitudes: a
+# bar's start and end place it ALONG an axis instead of measuring how far it reaches from
+# zero. So a coordinate may be a DATE, and the module gains a third column role beside the
+# LABEL (_label_ok, "this names a mark") and the VALUE (_plottable, "this sizes a mark"):
+# the COORDINATE (_coordinates, "this positions a mark"). These are the three kinds one
+# such column can turn out to be.
+_COORD_NUMBER = "number"
+_COORD_DATE = "date"
+_COORD_NEITHER = "neither"
+# ...and the fourth answer, which is NOT a kind: the column is EMPTY — every cell missing. It
+# has to be told apart from the other three rather than folded into one of them, because a
+# kind is a claim about an AXIS and an empty column makes no such claim. Fold it into
+# `_COORD_NUMBER` (the tempting shortcut — an all-NaN column IS float64, so `is_numeric_dtype`
+# says yes) and a blank End column beside a real date Start reads as a number-vs-date
+# CONTRADICTION and raises, when every row's end is simply missing and the honest answer is the
+# module's own missing-data policy: drop the rows, draw an empty chart. That is not a corner
+# case — it is a Gantt template whose end dates nobody has filled in yet, straight out of
+# `read_csv`. An empty column is therefore compatible with EITHER kind, and contributes no
+# opinion about which axis the bars sit on.
+_COORD_EMPTY = "empty"
+
+# The two ways a start/end PAIR can be a CONTRADICTION rather than merely incomplete —
+# sunburst's split (missing data has a right answer and is dropped; a contradiction has no
+# right drawing and is reported), applied to a column pair instead of a tree. Both are
+# COLUMN-level facts, decided once for the whole frame, with no per-row right answer: a
+# column of task names cannot place a bar on any axis, and a date start beside a numeric end
+# describes no single axis at all. Named here so build_options' raise and streamlit_app's
+# warning are literally the same string (the _SUNBURST_CYCLE rule).
+_XRANGE_NOT_COORDINATE = (
+    "The {col!r} column holds neither dates nor numbers, so it can't place a bar's {end} "
+    "on an axis. Pick a numeric column, or dates written as ISO-8601 (2026-01-05)."
+)
+_XRANGE_AXIS_MISMATCH = (
+    "The start column {start_col!r} reads as {start_kind}s but the end column {end_col!r} "
+    "reads as {end_kind}s. Both ends of a bar sit on ONE axis, so they must be the same kind."
+)
+
+# A zero-duration bar — a milestone: a launch date, a deadline, a same-day task — is a real
+# Gantt row, and one of the commonest. Highcharts draws NOTHING for it (verified by
+# rendering: x == x2 left an empty lane), so without this it would be a mark the KPI counts
+# and the chart never draws — the very drift _sizable drops a negative leaf to avoid. Rather
+# than drop the row, which would delete a launch date from the plan without saying so, give
+# the bar a floor: `minPointLength` renders it as a thin sliver at its date (verified by
+# rendering, and pinned on the emitted JS — this repo has been bitten three times by options
+# that validate and are then silently dropped). The mark is then genuinely drawn, so counting
+# it is honest, and _spannable keeps its zero exactly as _sizable keeps its own.
+_XRANGE_MIN_POINT_LENGTH = 3
+# Bars are drawn at a fixed height rather than filling their lane, so a one-lane chart doesn't
+# render a single bar as a thick slab spanning the plot.
+_XRANGE_POINT_WIDTH = 20
+
 # Highcharts >= 13 expresses its own default colors as CSS custom properties wrapped in
 # `light-dark(...)` — e.g. `--highcharts-background-color: light-dark(#ffffff, #141414)`.
 # So every color we do NOT set explicitly resolves against the *browser's*
@@ -294,7 +353,7 @@ def _themed(options: dict, *, dark: bool) -> dict:
         axis["lineColor"] = t["axis"]
         axis["tickColor"] = t["axis"]
         axis["gridLineColor"] = t["grid"]
-    if options["chart"].get("type") in ("column", "bar"):
+    if options["chart"].get("type") in ("column", "bar", "xrange"):
         # column/bar draw filled shapes with a 1px border that defaults to
         # var(--highcharts-background-color) -> white, which the color-scheme pin
         # keeps white even in dark mode, ringing every bar. Match it to the dark
@@ -303,6 +362,17 @@ def _themed(options: dict, *, dark: bool) -> dict:
         # The cartesian branch emits no plotOptions, so create it here. Restricted to
         # column/bar: line/spline/area/areaspline have no such border (verified: they
         # paint no white against the dark background).
+        #
+        # Xrange joins them, and it belongs HERE rather than with waterfall -- which is
+        # the other bar-shaped type, and which needs the opposite treatment. That was
+        # MEASURED, not inferred from the shared bar base class: waterfall is the standing
+        # proof the inference is unsound, since its border turned out to be a fixed
+        # #333333. Pixel-scanning a dark-mode xrange PNG off the export server puts its
+        # default border at pure #ffffff -- the background var, exactly column/bar's case.
+        # Matching it to the dark background dissolves the ring where a bar meets the
+        # background while KEEPING a visible 1px seam between two bars that abut within one
+        # lane (they are then separated by background, not by white) -- which is precisely
+        # what the white border does on the light shell, so the per-lane hues survive it.
         bar_type = options["chart"]["type"]
         options.setdefault("plotOptions", {}).setdefault(bar_type, {})[
             "borderColor"
@@ -504,6 +574,139 @@ def _is_top_level(parent) -> bool:
     if not _label_ok(parent):
         return True
     return isinstance(parent, str) and not parent.strip()
+
+
+def _epoch_millis(series: pd.Series) -> pd.Series:
+    """A datetime column as epoch MILLISECONDS — the unit Highcharts' ``x``/``x2`` and its
+    ``datetime`` axis read.
+
+    The resolution is NORMALIZED before the int64 view is taken, never divided after it.
+    ``.astype("int64")`` reads a datetime column in ITS OWN resolution, and this project's
+    pandas (3.x) hands back ``datetime64[us]`` from ``to_datetime`` and from
+    ``read_csv(parse_dates=...)`` — not the ``[ns]`` that the obvious ``// 1_000_000`` would
+    assume. That divisor is not merely inexact, it is wrong by a factor of a thousand: it
+    renders ``2024-01-05`` as ``1970-01-20`` (verified by running it). Every bar keeps its
+    correct relative order at catastrophically wrong absolute dates, drawn confidently, with
+    no error anywhere — the silent-lie failure mode this module drops rows to avoid. Pinning
+    the unit first makes the view already the number we want.
+
+    A tz-aware column is converted to UTC and dropped to naive, matching Highcharts' UTC
+    datetime axis; without it the ``astype`` raises on an ordinary ISO CSV column carrying an
+    offset. ``NaT`` views as an int64 sentinel rather than ``NaN``, so it is masked back to
+    ``NaN`` and folds into the one missing-value policy ``_plottable``/``_spannable`` apply
+    everywhere else.
+    """
+    values = series
+    if isinstance(values.dtype, pd.DatetimeTZDtype):
+        values = values.dt.tz_convert("UTC").dt.tz_localize(None)
+    millis = values.astype("datetime64[ms]").astype("int64").astype("float64")
+    return millis.mask(values.isna())
+
+
+def _coordinates(series: pd.Series) -> tuple[pd.Series, str]:
+    """Coerce one start/end column to axis coordinates: ``(floats, kind)``.
+
+    The COORDINATE column role (see ``_COORD_NUMBER``): one float per row — epoch
+    milliseconds for a date column, the column's own numbers otherwise — with ``NaN`` for
+    anything missing or unparseable. That is what lets the drop predicates downstream
+    (``_plottable``, ``_spannable``) meet numbers and never raw text, and it is what makes
+    ``count_marks`` TOTAL *by construction* rather than by an app-side promise about which
+    columns the pickers offer.
+
+    The ORDER of the tests is the whole design:
+
+    - A NUMERIC dtype is a number, full stop, and is never shown to a date parser.
+      ``pd.to_datetime(12)`` does not fail — it returns ``1970-01-01T00:00:00.000000012`` —
+      so a "try dates, fall back to numbers" sniff would silently move a column of sprint
+      numbers to an instant at the epoch.
+    - A ``datetime64`` dtype (naive or tz-aware) is a date, full stop.
+    - Only an OBJECT column is a genuine question, and it is answered by counting how many
+      cells each coercion recovers — the MAJORITY wins, and the minority's cells become
+      ``NaN`` and drop their rows as missing data. A column is one kind or the other; a few
+      stray cells of the other kind are typos, not a second axis. A TIE goes to NUMBER (the
+      test is a strict ``>``), which is the safe way to break it: a date read as a number
+      leaves a visibly missing bar, while a number read as a date would silently place it at
+      the epoch — the failure this whole function is ordered to prevent.
+      The date parse is PINNED to ISO-8601 because pandas'
+      default parser is wildly permissive on free text: ``["Jan","Feb","Mar"]`` parses to
+      YEAR 1 AD and ``["00:00","01:00"]`` to TODAY'S DATE (both verified). The first is not
+      hypothetical — it is ``sample_data._revenue_vs_cost``'s ``month`` column, the app's
+      LANDING dataset, which a permissive sniff would offer as a date axis on the page you
+      see when you open the app. ISO-8601 rejects both, and rejects a numeral string
+      (``"12"``), so the numeric-string case needs no bespoke regex. It also emits no
+      format-inference ``UserWarning`` and does not fall back to per-element ``dateutil``
+      parsing.
+    - ``utc=True`` because ``errors="coerce"`` is NOT total without it: a column crossing a
+      DST boundary (one ``-05:00`` cell, one ``-04:00``) raises "Mixed timezones detected"
+      even under ``coerce`` (verified) — and this function is called from ``count_marks``,
+      which runs ABOVE the app's guards, where a raise becomes a traceback on the page.
+    - Nothing parsed, but something is THERE -> ``_COORD_NEITHER``: a column of task names
+      can't place a bar on an axis, and there is no per-row right answer, so it is a
+      CONTRADICTION (a returned message), not a drop.
+
+    And the EMPTY test comes FIRST, above the dtype dispatch, which is the one ordering
+    constraint that is not about the date parser. A column with nothing in it is missing DATA
+    — every row drops, the chart comes out empty — and it must not be allowed to masquerade as
+    a KIND, because a kind is a claim about an axis and it makes no such claim. The dtype
+    dispatch cannot tell the difference: a blank CSV column arrives as all-``NaN`` ``float64``,
+    so ``is_numeric_dtype`` says "number" with total confidence, and that phantom number then
+    collides with a real DATE partner and raises ``_XRANGE_AXIS_MISMATCH`` — telling the user
+    their empty End column "reads as numbers", which is both false and unactionable. A ROW-LESS
+    frame lands here too (nothing present, nothing to draw), which is why it draws an empty
+    chart rather than reporting a contradiction.
+    """
+    if not bool(series.notna().any()):
+        # Every cell missing (or no cells at all). Not a kind — see `_COORD_EMPTY`. The
+        # coordinates are handed back as all-NaN floats, so every row drops through
+        # `_spannable` exactly as a per-row missing value does.
+        return pd.Series(
+            float("nan"), index=series.index, dtype="float64"
+        ), _COORD_EMPTY
+    if pd.api.types.is_numeric_dtype(series):
+        return series.astype("float64"), _COORD_NUMBER
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return _epoch_millis(series), _COORD_DATE
+    dates = pd.to_datetime(series, format="ISO8601", utc=True, errors="coerce")
+    numbers = pd.to_numeric(series, errors="coerce").astype("float64")
+    if int(dates.notna().sum()) > int(numbers.notna().sum()):
+        return _epoch_millis(dates), _COORD_DATE
+    if int(numbers.notna().sum()):
+        return numbers, _COORD_NUMBER
+    # Something is present and neither coercion recovered any of it.
+    return numbers, _COORD_NEITHER
+
+
+def _spannable(start: float, end: float) -> bool:
+    """True when a coerced ``(start, end)`` pair draws a real bar.
+
+    The one predicate in this module that takes TWO values, because an interval's validity is
+    a fact about the RELATION and not about either end — ``_sizable`` widened to a PAIR,
+    rather than widened by one comparison.
+
+    Both ends must be ``_plottable`` (present, FINITE) before they are compared, and the
+    finiteness half is load-bearing rather than ceremonial: ``end >= start`` alone accepts
+    ``(-inf, 10)`` and ``(10, inf)``, which would put a bare ``inf`` in the emitted JS — the
+    ReferenceError / HTTP-400 the whole non-finite doctrine exists to prevent, and reachable
+    from a plain CSV via ``1e400``. A ``NaT`` end folds in for free, having coerced to ``NaN``
+    in ``_coordinates`` upstream.
+
+    Then, NON-STRICTLY, ``end >= start``. The two failures the comparison decides are not
+    symmetric, and only one of them is a drop:
+
+    - ``end == start`` (a MILESTONE — a launch date, a deadline, a same-day task) is KEPT,
+      exactly as ``_sizable`` keeps its zero: it is a real event, one of the commonest rows a
+      Gantt has, and dropping it would delete a launch date from the plan without saying so.
+      Highcharts draws nothing for it unaided (verified by rendering), so the branch gives it
+      a floor with ``_XRANGE_MIN_POINT_LENGTH`` and the mark is genuinely drawn — which is
+      what keeps counting it honest.
+    - ``end < start`` (INVERTED — an interval that ends before it begins) is DROPPED. Left in,
+      Highcharts draws a bar spanning the ENTIRE axis (verified by rendering): not a visible
+      error but a confident, plausible lie that reads as the longest task in the project. It
+      is the xrange counterpart of sunburst's silent re-parenting, and it drops rather than
+      raises for ``_sizable``'s reason — there IS a right drawing (nothing), unlike a cycle,
+      where every alternative is a lie.
+    """
+    return _plottable(start) and _plottable(end) and float(end) >= float(start)
 
 
 def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
@@ -821,6 +1024,105 @@ def _sunburst_levels(max_level: int) -> list[dict[str, object]]:
     return levels
 
 
+def _xrange_bars(
+    df: pd.DataFrame, x_col: str, start_col: str, end_col: str
+) -> tuple[list[dict[str, object]], list[str], bool, str | None]:
+    """Assemble a frame into an xrange's bars: ``(points, lanes, is_datetime, problem)``.
+
+    The WHOLE build, shared by ``build_options`` and ``count_marks`` — ``_sunburst_tree``'s
+    contract. Xrange reaches for it for a reason that is subtler than sunburst's, and easy to
+    miss: a row's SURVIVAL genuinely does look per-row (its own label, its own start, its own
+    end, and none of them depend on another row), so xrange appears to belong with
+    treemap/sankey on the shared-predicate mask path. It does not. The AXIS KIND is a
+    COLUMN-level fact — decided once, by ``_coordinates``, over the whole column — and every
+    row's start and end is then interpreted THROUGH it. And the two callers do not hold the
+    same column: ``build_options`` reaches its branch on the ``_label_ok``-FILTERED frame (the
+    shared filter reassigns ``df``), while ``count_marks`` and ``explain_xrange_error`` call
+    this on the RAW one. A ``count_marks`` that reused only ``_spannable`` would therefore
+    sniff a different frame than the chart drew, and could count against a different axis —
+    or pass a guard the builder then raises on. Reusing the build instead makes the drift
+    unrepresentable: the KPI is ``len(points)`` by construction.
+
+    Two things make the raw and filtered frames produce byte-identical output: ``_label_ok``
+    is re-applied HERE (idempotent when the caller has already applied it — the explicit
+    ``_sunburst_tree`` contract), and the coercion runs over the SURVIVING rows only, so a
+    garbage cell on a row that is dropped for its label can never sway the sniff.
+
+    ``problem`` is a column-level contradiction (a start/end column that is neither dates nor
+    numbers; two that disagree about which). It is RETURNED, never raised — that is what keeps
+    ``count_marks`` total, and it matters for exactly the reason it matters for sunburst: the
+    app's KPI row runs ABOVE its guards, so a raise here would blow the page up with a
+    traceback before the warning explaining it could render.
+    """
+    # `.astype(bool)`, the row-less cast: on a frame with no rows `.map()` has no values to
+    # infer a result dtype from and hands back a non-boolean Series, which pandas reads as a
+    # list of COLUMN NAMES rather than as a mask. `build_options` has already applied this
+    # filter by the time it calls in; `count_marks` has not.
+    keep = df[x_col].map(_label_ok).astype(bool)
+    labels = df.loc[keep, x_col]
+    starts, start_kind = _coordinates(df.loc[keep, start_col])
+    ends, end_kind = _coordinates(df.loc[keep, end_col])
+
+    for col, kind, end_name in (
+        (start_col, start_kind, "start"),
+        (end_col, end_kind, "end"),
+    ):
+        if kind == _COORD_NEITHER:
+            return [], [], False, _XRANGE_NOT_COORDINATE.format(col=col, end=end_name)
+    # The two ends must agree about which axis they are on — but only the columns that HAVE an
+    # opinion get a vote. An EMPTY column makes no claim (see `_COORD_EMPTY`), so it is
+    # compatible with either kind and cannot manufacture a disagreement: a blank End column
+    # beside a real date Start is a Gantt whose end dates are unfilled, not a contradiction,
+    # and every row drops through `_spannable` as missing data. Comparing the raw kinds instead
+    # would raise, and tell the user their empty column "reads as numbers".
+    kinds = {kind for kind in (start_kind, end_kind) if kind != _COORD_EMPTY}
+    if len(kinds) > 1:
+        return (
+            [],
+            [],
+            False,
+            _XRANGE_AXIS_MISMATCH.format(
+                start_col=start_col,
+                end_col=end_col,
+                start_kind=start_kind,
+                end_kind=end_kind,
+            ),
+        )
+
+    lanes: list[str] = []
+    lane_index: dict[str, int] = {}
+    points: list[dict[str, object]] = []
+    for label, start, end in zip(labels, starts, ends, strict=True):
+        if not _spannable(start, end):
+            continue
+        # `_node_key`, not a bare `str()`: a lane column holding one blank cell is widened to
+        # float64 by pandas, and `str()` would then label lane 1 as "1.0". Nothing has to
+        # MATCH here (unlike sunburst, where the same trap dangles every parent and empties
+        # the chart silently), so this is cosmetic rather than load-bearing — but it is free,
+        # and the two columns that DO have to match are one refactor away.
+        key = _node_key(label)
+        if key not in lane_index:
+            # Lanes are discovered from the SURVIVORS, in first-appearance order (boxplot's
+            # `groupby(sort=False)` rule). A lane whose every row dropped never enters
+            # `yAxis.categories` at all: boxplot keeps an all-missing group as an
+            # `EnforcedNull` box because there the group IS the mark (one group, one box), but
+            # an xrange lane holds 0..n bars, so there is no "the mark for this lane" to null
+            # out. An empty labelled axis row with nothing pinned to it is exactly the phantom
+            # the inverted-bar drop exists to prevent — this is pie/treemap/sankey's
+            # drop-the-row family: no ghost slice, no ghost lane.
+            lane_index[key] = len(lanes)
+            lanes.append(key)
+        points.append(
+            # `y` is a POSITION into `yAxis.categories`, not a value — boxplot's positional
+            # trick. A lane is never a magnitude.
+            {"x": float(start), "x2": float(end), "y": lane_index[key], "name": key}
+        )
+    # Read from the voting columns, not from `start_kind` alone: with an EMPTY start beside a
+    # date end, the axis is still a date axis (no bar draws either way, but the axis should not
+    # claim otherwise). `kinds` holds at most one entry by the check above.
+    return points, lanes, _COORD_DATE in kinds, None
+
+
 def _category_labels(df: pd.DataFrame, x_col: str) -> list[str]:
     """Coerce an x column to string category *labels* (Highcharts categories are
     labels, not values). Shared by the scatter/bubble non-numeric-x, heatmap, and
@@ -877,6 +1179,7 @@ def build_options(
     size_col: str | None = None,
     target_col: str | None = None,
     parent_col: str | None = None,
+    end_col: str | None = None,
 ) -> dict:
     """Return a Highcharts options ``dict`` for the given DataFrame and columns.
 
@@ -938,6 +1241,15 @@ def build_options(
       whose parent names no node is dropped with its descendants, like pie's valueless
       slices; a cycle or an ambiguous parent label is a contradiction and raises. Pulls in
       the ``modules/sunburst`` module.
+    - ``xrange``: a Gantt-style timeline, and the only type whose mark has EXTENT along
+      the x axis rather than sitting at a point on it. Each row is one bar, on the LANE
+      named by ``x_col`` (lanes are the categories of the *Y* axis, so ``x_col``'s values
+      REPEAT — boxplot's long/tidy shape), spanning from the first ``y_cols`` column to
+      ``end_col``. Those two are COORDINATES, not magnitudes, so they may be dates: the
+      pair is sniffed once (see ``_coordinates``) onto one shared axis — ``datetime`` if
+      they read as ISO-8601 dates, linear if they read as numbers. A row missing either
+      end is dropped, as is one whose bar runs BACKWARDS; a zero-length one (a milestone)
+      is kept and floored to a visible sliver. Pulls in the ``modules/xrange`` module.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
@@ -945,14 +1257,18 @@ def build_options(
     ``size_col`` names the marker-size column and is required for ``bubble``;
     ``target_col`` names the destination-node column and is required for
     ``sankey``; ``parent_col`` names the parent-label column and is required for
-    ``sunburst``. Each is ignored by the other types.
+    ``sunburst``; ``end_col`` names the column each bar ends at and is required for
+    ``xrange``. Each is ignored by the other types.
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``,
     a ``bubble`` chart with no ``size_col``, a ``sankey`` chart with no
     ``target_col`` or whose ``target_col`` is its ``x_col``, a ``sunburst`` chart
     with no ``parent_col``, whose ``parent_col`` is its ``x_col``, or whose parent
     column does not describe a tree (a cycle, or a parent label naming more than one
-    node — see ``explain_tree_error``), or (for the category-axis types — cartesian,
+    node — see ``explain_tree_error``), an ``xrange`` chart with no ``end_col``, whose
+    ``end_col`` is its start column, or whose start/end columns cannot place a bar on
+    one axis (either is neither dates nor numbers, or the two disagree about which —
+    see ``explain_xrange_error``), or (for the category-axis types — cartesian,
     radar, heatmap, boxplot, and waterfall) an ``x_col`` that is also one of the
     ``y_cols``.
     """
@@ -982,6 +1298,23 @@ def build_options(
         # Sankey's source-is-target argument: a column can't be both ends of the relation.
         raise ValueError(
             f"x_col {x_col!r} cannot also be the parent column for a sunburst chart"
+        )
+    if chart_type in XRANGE_TYPES and not end_col:
+        raise ValueError("An xrange chart requires an end column via end_col.")
+    if chart_type in XRANGE_TYPES and y_cols[0] == end_col:
+        # Start and end name the two ends of every bar, so one column can't be both —
+        # sankey's source-is-target and sunburst's node-is-parent rule, a third time. This
+        # one has to be a guard rather than a tolerated oddity, because it fails SILENTLY:
+        # every bar would have zero length, so every row would become a milestone, and the
+        # chart would come back as a column of slivers rather than as anything anyone asked
+        # for. (`x_col` IS free to repeat either — the lanes are then named by their own
+        # start or end coordinate: odd, well-defined, drawable, scatter's x-in-y tolerance.
+        # Which is also why xrange stays out of X_IN_Y_GUARD_TYPES: its x_col names a lane
+        # on the Y axis, and end_col isn't in y_cols at all, so that rule cannot express
+        # this collision.) `y_cols[0]` is safe: the empty-y_cols guard above runs first.
+        raise ValueError(
+            f"The start column {y_cols[0]!r} cannot also be the end column for an "
+            f"xrange chart"
         )
     if chart_type in X_IN_Y_GUARD_TYPES and x_col in y_cols:
         raise ValueError(
@@ -1583,6 +1916,104 @@ def build_options(
             dark=dark,
         )
 
+    if (
+        chart_type in XRANGE_TYPES
+    ):  # a Gantt timeline: bars spanning [start, end] on lanes
+        assert end_col is not None  # guarded above for xrange
+        start_col = y_cols[0]
+        points, lanes, is_datetime, problem = _xrange_bars(
+            df, x_col, start_col, end_col
+        )
+        if problem:
+            # A column-level contradiction: a start/end column that can place a bar on no
+            # axis, or two that disagree about which axis they are on. Raised from the very
+            # message `_xrange_bars` RETURNS, rather than one composed here, so this and the
+            # app's warning (`explain_xrange_error`) cannot drift apart — the
+            # `_SUNBURST_CYCLE` rule.
+            raise ValueError(problem)
+
+        # Per-LANE hue, seeded per POINT — sunburst's ring-1 rule, one relation over. A lane's
+        # color is its arbitrary IDENTITY, like a pie slice's (the opposite of waterfall's
+        # semantic red-means-loss), so it reads from the OVERRIDABLE `colors`. It must be
+        # seeded per point rather than by `colorByPoint`, and here the trap is the mirror of
+        # sunburst's: where sunburst's `levels[].colorByPoint` is silently DROPPED, xrange's
+        # series-level one survives perfectly — and is the wrong option. It would hand every
+        # BAR its own hue, so a task's three phases would come out three different colors and
+        # the lane would stop reading as one thing. `cycle` wraps a short custom palette (the
+        # `_BOXPLOT_OUTLIER_COLOR` concern); `or` keeps an empty one from exhausting `next`.
+        # Indexed by the point's LANE POSITION rather than by its name: `y` is already the
+        # index `_xrange_bars` assigned, so this needs no second lookup keyed on a label.
+        hues = itertools.cycle(colors or DEFAULT_COLORS)
+        lane_hues = [next(hues) for _ in lanes]
+        for point in points:
+            point["color"] = lane_hues[int(point["y"])]  # ty: ignore[invalid-argument-type]
+
+        # A datetime axis must FORMAT its endpoints: {point.x} alone prints raw epoch millis
+        # (verified by rendering — a bar labelled "1767571200000").
+        span = (
+            "{point.x:%Y-%m-%d} → {point.x2:%Y-%m-%d}"
+            if is_datetime
+            else "{point.x} → {point.x2}"
+        )
+        x_axis: dict[str, object] = {"title": {"text": f"{start_col} → {end_col}"}}
+        if is_datetime:
+            x_axis["type"] = "datetime"
+
+        return _themed(
+            {
+                "chart": {"type": "xrange"},
+                # Genuinely used, not carried for consistency: the lanes seed from it (pie's,
+                # treemap's and sunburst's categorical use, not heatmap's).
+                "colors": colors,
+                "title": {"text": title},
+                "xAxis": x_axis,
+                "yAxis": {
+                    "categories": lanes,
+                    # First lane at the TOP — a Gantt is read down the page in plan order
+                    # (verified by rendering; Highcharts' own default runs bottom-up).
+                    "reversed": True,
+                    # Highcharts titles a category y-axis "Values" unless it is explicitly
+                    # CLEARED, and `None` does not clear it — an empty string does (verified
+                    # by rendering). A lane is a name, not a value, so the axis needs no title
+                    # at all: the lane labels say everything.
+                    "title": {"text": ""},
+                },
+                # {point.name}, not waterfall's {point.category}: an xrange's points are NAMED
+                # dicts (the sunburst rule), so the lane name rides on the point itself. This
+                # is not a stylistic echo — {point.category} is waterfall's FIX and xrange's
+                # BUG. It reads the X axis, and an xrange's categories are on the Y, so it
+                # renders the raw x value: "1767571200000" (verified by rendering). Highcharts'
+                # own {point.yCategory} would also work, but the name needs no faith in an
+                # untestable internal.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": f"<b>{{point.name}}</b><br/>{span}",
+                },
+                # A single per-point-colored series legends as one useless grey bullet
+                # (verified by rendering), and the lane names are already on the axis:
+                # treemap's, sankey's, boxplot's, waterfall's and sunburst's reasoning.
+                "legend": {"enabled": False},
+                "plotOptions": {
+                    "xrange": {
+                        "pointWidth": _XRANGE_POINT_WIDTH,
+                        "minPointLength": _XRANGE_MIN_POINT_LENGTH,
+                        # No dataLabels, and no gate constant either: the one mark-bearing type
+                        # that needs neither. The five types that print a value IN the mark do
+                        # it because the value can be read against no axis — an angle, an area,
+                        # a link's width, a bar floating above an invisible running total. An
+                        # xrange bar's two ends BOTH land on a real, ticked, gridlined x axis
+                        # that renders in the Static PNG too: it is column/bar's case ("their
+                        # bars stand on the axis"), not waterfall's. And there is no second
+                        # identity left to print — the lane name IS the y-axis category, which
+                        # is exactly what labelling the bar would repeat (verified by
+                        # rendering).
+                    }
+                },
+                "series": [{"name": start_col, "data": points}],
+            },
+            dark=dark,
+        )
+
     # cartesian (line/spline/area/areaspline/column/bar) and radar share the same
     # category-x data shape: x_col labels the axis and each y column is a series.
     categories = _category_labels(df, x_col)
@@ -1645,6 +2076,49 @@ def explain_tree_error(
     return _sunburst_tree(df, x_col, parent_col, value_col)[2]
 
 
+def explain_xrange_error(
+    df: pd.DataFrame, x_col: str, start_col: str, end_col: str
+) -> str | None:
+    """``None`` when an xrange's start and end columns can both place a bar on ONE axis;
+    otherwise the reason they can't — the very message ``build_options`` raises.
+
+    ``explain_tree_error``'s contract, for a column pair rather than a tree: the builder owns
+    the coordinate relationship, so the builder owns the diagnosis, and the app's warning
+    cannot drift from the exception it stands in for.
+
+    Needed for exactly ``explain_tree_error``'s reason — the interactive path does NOT catch
+    builder errors — and xrange adds one more that a user can reach without writing any code:
+    a DATE start beside a NUMERIC end, selectable from the app's own pickers over an ordinary
+    uploaded CSV. So it must warn rather than render a traceback.
+
+    Its sibling contradiction — a start or end column that is neither dates nor numbers — is
+    NOT reachable that way, and deliberately so: the app sources both pickers from
+    ``coordinate_columns``, which is this module's own answer to the same question, so a column
+    of task names is never offered in the first place. That leaves it reachable only through
+    the pure builder API (a hand-built frame, or a caller that does its own column selection),
+    which is precisely why this function reports rather than assumes: the guard in the app is
+    belt, and the returned message is braces.
+    """
+    return _xrange_bars(df, x_col, start_col, end_col)[3]
+
+
+def coordinate_columns(df: pd.DataFrame) -> list[str]:
+    """The columns that can place a bar on an axis — numbers, or dates.
+
+    Exported for the app's xrange pickers, and sourced from ``_coordinates`` itself, so a
+    selectbox can never offer a column the builder would refuse: the can't-drift rule applied
+    to which options appear in a widget.
+
+    It is what lets ``streamlit_app`` widen its Start/End controls past
+    ``select_dtypes("number")`` — which a Gantt needs, since a date column is object dtype and
+    so is invisible to that filter — without reintroducing the hazard that filter exists to
+    prevent, of handing the builder a column of text it can only reject. (And even if one got
+    through, ``_coordinates`` returns a MESSAGE rather than raising, so this is belt and
+    braces rather than load-bearing.)
+    """
+    return [col for col in df.columns if _coordinates(df[col])[1] != _COORD_NEITHER]
+
+
 def count_marks(
     df: pd.DataFrame,
     chart_type: str,
@@ -1653,6 +2127,7 @@ def count_marks(
     *,
     target_col: str | None = None,
     parent_col: str | None = None,
+    end_col: str | None = None,
 ) -> int:
     """The number of marks ``build_options`` will draw, for the app's count-adaptive KPI
     (a heatmap's cells, a treemap's tiles, a sankey's flows, a boxplot's boxes, a
@@ -1669,11 +2144,30 @@ def count_marks(
     heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``), a boxplot
     keeps one box per distinct drawable label (an all-missing group included), and a
     waterfall keeps one bar per drawable label (a missing delta included, as an
-    ``EnforcedNull``) plus its appended total. A sunburst is the one type whose count is not a
-    row filter at all — see its branch, which reuses the whole tree build rather than the
-    predicates — and, like waterfall's, its count exceeds its drawable row count, by the
-    appended root.
+    ``EnforcedNull``) plus its appended total. Sunburst and xrange are the two types whose
+    count is not a row filter at all — see their branches, which reuse the whole build rather
+    than the predicates — and sunburst's, like waterfall's, exceeds its drawable row count, by
+    the appended root. Xrange's does not: it appends nothing, so it is one bar per surviving
+    row.
     """
+    if chart_type in XRANGE_TYPES:
+        # Whole-build reuse, like sunburst's branch below and NOT like treemap's/sankey's
+        # predicate masks — and the reason is subtler than sunburst's, which is why it is worth
+        # spelling out. A row's SURVIVAL is genuinely per-row (its own label, its own start,
+        # its own end), so xrange looks like it belongs on the mask path. But the AXIS KIND is
+        # a COLUMN-level fact that every row's start and end is read THROUGH, and the two
+        # callers do not hold the same column: `build_options` reaches its branch on the
+        # `_label_ok`-FILTERED frame, while this runs on the RAW one. A branch that reused only
+        # `_spannable` could therefore sniff a different axis than the chart drew. Reusing the
+        # build makes that unrepresentable — this IS `len(series[0]["data"])`.
+        assert end_col is not None  # the app only counts what it can also build
+        points, _lanes, _is_datetime, problem = _xrange_bars(
+            df, x_col, y_cols[0], end_col
+        )
+        # A contradictory column pair draws nothing — build_options raises, the app warns and
+        # stops — so it counts nothing. And this must NOT raise, for the reason the sunburst
+        # branch below must not: count_marks runs ABOVE the app's guards.
+        return 0 if problem else len(points)
     if chart_type in SUNBURST_TYPES:
         # Sunburst's drops are not a per-row mask, so this branch sits ABOVE the shared one
         # below and reuses no predicate. A node's fate depends on its ANCESTORS (a dangling
@@ -1737,6 +2231,7 @@ def make_chart(
     size_col: str | None = None,
     target_col: str | None = None,
     parent_col: str | None = None,
+    end_col: str | None = None,
 ) -> Chart:
     """Build and return a highcharts-core ``Chart`` for the given columns."""
     options = build_options(
@@ -1749,6 +2244,7 @@ def make_chart(
         size_col=size_col,
         target_col=target_col,
         parent_col=parent_col,
+        end_col=end_col,
     )
     chart = Chart.from_options(options)
     chart.container = container_id
@@ -1768,6 +2264,7 @@ def build_chart_html(
     size_col: str | None = None,
     target_col: str | None = None,
     parent_col: str | None = None,
+    end_col: str | None = None,
 ) -> str:
     """Build a full, self-contained HTML document that renders the chart.
 
@@ -1791,6 +2288,7 @@ def build_chart_html(
         size_col=size_col,
         target_col=target_col,
         parent_col=parent_col,
+        end_col=end_col,
     )
 
     script_tags = chart.get_script_tags(as_str=True)
@@ -1828,6 +2326,7 @@ def build_chart_png(
     size_col: str | None = None,
     target_col: str | None = None,
     parent_col: str | None = None,
+    end_col: str | None = None,
 ) -> bytes:
     """Render the chart to PNG bytes via the Highcharts export server.
 
@@ -1848,6 +2347,7 @@ def build_chart_png(
         size_col=size_col,
         target_col=target_col,
         parent_col=parent_col,
+        end_col=end_col,
     )
     if height is not None:
         # highcharts-core types `options` and `options.chart` as Optional, but
