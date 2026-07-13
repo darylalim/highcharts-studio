@@ -131,7 +131,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   JS/export server and `highcharts-core`), kept in sync with the README
   `## License` section — plus the README's header badges (pinned to the
   `pyproject.toml` license and Python/Streamlit version floors) and its
-  `## Contents` table of contents (pinned to the real `##` section headings).
+  `## Contents` table of contents (pinned to the real `##` section headings),
+  and `CHANGELOG.md`'s newest entry (pinned to `pyproject.toml`'s `version`).
+  That last one closed the suite's own blind spot: `version` was the single
+  packaging fact with *no second home*, so unlike every other it could neither
+  drift nor be checked — and it duly went stale, five chart types shipping under
+  `0.6.0` because nothing asked the number to move.
 - `.streamlit/config.toml` — project Streamlit theme (brands the app shell in
   both light and dark via `[theme.light]`/`[theme.dark]`, which unlocks the
   in-app light/dark toggle). The chart colors are themed separately (see
@@ -154,6 +159,13 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   the MIT grant. Both files are declared to packaging tools via
   `pyproject.toml`'s `license`/`license-files`; guarded against drift by
   `tests/test_packaging.py`.
+- `CHANGELOG.md` — the release notes, newest first (Keep a Changelog format).
+  Its top `## [x.y.z]` heading is `version`'s **second home**, pinned to
+  `pyproject.toml` by `test_changelog_documents_the_current_version`, so a bump
+  that ships without notes fails the suite. Everything below `0.7.0` — the first
+  version cut as a tag and a GitHub release — is *reconstructed from git
+  history*, which is why the file says so rather than implying the notes were
+  written at the time.
 
 ## How a chart is built
 

@@ -20,15 +20,20 @@ lives can't silently drift apart:
   with an owner/repo slug that agrees between its image and click-through link,
 - the ``README.md`` ``## Contents`` table of contents — pinned to equal the
   real ``##`` section headings, so a renamed, added, or removed section can't
-  leave a dead jump-link.
+  leave a dead jump-link,
+- the ``CHANGELOG.md`` newest entry — pinned to ``pyproject.toml``'s
+  ``[project].version``, which until it had a changelog was the one packaging
+  fact with *no second home*: the badges pin the version *floors*, the SPDX
+  fields pin ``LICENSE``/``NOTICE``, but ``version`` itself was asserted by
+  nothing, so nothing could catch a release that shipped without its notes.
 
 They read the files directly (no build step), mirroring the mechanical-sync
 idea behind ``test_theme_colors_stay_in_sync_with_config`` in
 ``test_smoke.py``: a dropped ``license`` field, a deleted ``LICENSE``, prose
 re-appended onto ``LICENSE`` (which would re-break detection), a notice that
 quietly stops naming one of the proprietary layers, a badge left stale after a
-version bump, or a section renamed out from under the table of contents all fail
-fast here.
+version bump, a section renamed out from under the table of contents, or a
+version bumped without cutting a changelog section all fail fast here.
 """
 
 import re
@@ -52,6 +57,11 @@ def _collapse_ws(text: str) -> str:
 def _readme() -> str:
     """The README.md text."""
     return (ROOT / "README.md").read_text()
+
+
+def _changelog() -> str:
+    """The CHANGELOG.md text."""
+    return (ROOT / "CHANGELOG.md").read_text()
 
 
 def _strip_code_fences(md: str) -> str:
@@ -231,4 +241,29 @@ def test_readme_toc_covers_every_section():
         f"TOC out of sync with sections — "
         f"only in TOC: {toc_anchors - section_slugs}; "
         f"missing from TOC: {section_slugs - toc_anchors}"
+    )
+
+
+def test_changelog_documents_the_current_version():
+    # ``version`` was the one packaging fact this suite left un-cross-checked. The
+    # badges are pinned to the version *floors*, the SPDX fields to LICENSE/NOTICE,
+    # the TOC to the real headings — but ``[project].version`` was asserted by
+    # nothing, so it could neither drift nor be verified: a number with no second
+    # home. That is not a hypothetical gap. Five chart types (sankey, boxplot,
+    # waterfall, sunburst, xrange) all shipped while the version sat at 0.6.0,
+    # because nothing asked it to move. CHANGELOG.md is the second home, and this
+    # is the gate: bump one without the other and the release ships undocumented
+    # (or the notes describe a version nobody cut).
+    version = _project_metadata()["version"]
+
+    # Keep a Changelog is reverse-chronological, so the FIRST ``## [x.y.z]`` heading
+    # is the current release. The pattern only matches a released, numbered section,
+    # which is what lets an ``## [Unreleased]`` heading be kept above it without
+    # being mistaken for one.
+    top = re.search(r"^## \[(\d+\.\d+\.\d+)\]", _changelog(), re.MULTILINE)
+    assert top, "CHANGELOG.md has no released `## [x.y.z]` section"
+    assert top.group(1) == version, (
+        f"CHANGELOG.md's newest entry is {top.group(1)}, but pyproject.toml "
+        f"declares version {version} — one of the two was bumped and the other "
+        f"was not."
     )

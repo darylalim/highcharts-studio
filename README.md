@@ -107,11 +107,12 @@ light/dark theme, which you can toggle from the settings menu.
 | `pyproject.toml` | Dependencies + the `dev` group and the Ruff / ty config. |
 | `tests/test_smoke.py` | Builder and sample-data unit tests plus headless `AppTest` interaction tests. |
 | `tests/test_hooks.py` | Unit tests for the Claude Code hook scripts (pure decision functions + exit-code contract). |
-| `tests/test_packaging.py` | Unit tests guarding the licensing metadata (pyproject `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) — plus the README's own header badges and `## Contents` list — against drift. |
+| `tests/test_packaging.py` | Unit tests guarding the licensing metadata (pyproject `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) — plus the README's own header badges and `## Contents` list, and the `CHANGELOG.md` entry for the current version — against drift. |
 | `.claude/settings.json`, `.claude/hooks/` | Committed Claude Code hooks that mirror the CI gates (see Claude Code hooks below). |
 | `.github/workflows/ci.yml` | GitHub Actions: pytest, Ruff lint/format, and ty on every push to `main` and every PR. |
 | `LICENSE` | MIT license for this project's own code (kept pristine so GitHub detects it as MIT). |
 | `NOTICE` | Third-party notice for the proprietary Highcharts JS / export server and `highcharts-core` dependencies, split out of `LICENSE`. |
+| `CHANGELOG.md` | Release notes, newest first. Its top entry is pinned to the `pyproject.toml` version, so a bump can't ship undocumented. |
 
 ## Test
 
@@ -158,7 +159,9 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
   [Claude Code hooks](#claude-code-hooks)).
 - **`tests/test_packaging.py`** — the licensing metadata (`pyproject.toml`
   `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) plus
-  the README's own header badges and `## Contents` list, guarded against drift.
+  the README's own header badges and `## Contents` list, and `CHANGELOG.md`'s
+  newest entry (pinned to the `pyproject.toml` version, so a bump can't ship
+  without notes), guarded against drift.
 
 ## Lint & format
 
