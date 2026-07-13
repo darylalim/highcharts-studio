@@ -5,12 +5,20 @@ All notable changes to this project are recorded here. The format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) — while
 `0.x`, a minor bump is any new capability and a patch is a fix.
 
-`0.7.0` is the first version cut as a git tag and a GitHub release. Everything
-below it is **reconstructed from git history**: the version in `pyproject.toml`
-was bumped by hand, but nothing pinned it, tagged it, or wrote it down, so those
-entries are read back off the commits rather than quoted from notes taken at the
-time. Two consequences are visible in the dates and worth stating rather than
-tidying away:
+`0.7.0` is the first version cut as a release. Everything below it is
+**reconstructed from git history**: the version in `pyproject.toml` was bumped by
+hand, but nothing pinned it, tagged it, or wrote it down, so those entries are
+read back off the commits rather than quoted from notes taken at the time.
+
+Their `v0.1.0`–`v0.6.0` tags were **backfilled** on 2026-07-13 (the tag objects
+say so, and their creation dates give them away). A tag here asserts only the one
+checkable fact — that the commit it points at declares that version in
+`pyproject.toml` — and not that a release was cut at the time, because none was.
+They exist so the compare links below resolve to something structural rather than
+to hand-typed SHAs.
+
+Two consequences of the un-gated bumping are visible in the dates below, and are
+worth stating rather than tidying away:
 
 - **The bump often trailed the feature.** `0.2.0` was cut *for* areaspline and
   `0.3.0` *for* bubble, but by then both had already landed — so each range
@@ -237,10 +245,10 @@ demo notebooks (archived at the `notebooks-archive` tag) into a Streamlit studio
   at two modes.
 - The project was renamed twice on its way to `highcharts-studio`.
 
-[0.7.0]: https://github.com/darylalim/highcharts-studio/releases/tag/v0.7.0
-[0.6.0]: https://github.com/darylalim/highcharts-studio/compare/87b2239...c8e54e7
-[0.5.0]: https://github.com/darylalim/highcharts-studio/compare/8277705...67402ba
-[0.4.0]: https://github.com/darylalim/highcharts-studio/compare/403fcc9...64e8d9c
-[0.3.0]: https://github.com/darylalim/highcharts-studio/compare/ff6e905...e421df0
-[0.2.0]: https://github.com/darylalim/highcharts-studio/compare/3cada5c...693180b
-[0.1.0]: https://github.com/darylalim/highcharts-studio/commits/7f649d6
+[0.7.0]: https://github.com/darylalim/highcharts-studio/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/darylalim/highcharts-studio/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/darylalim/highcharts-studio/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/darylalim/highcharts-studio/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/darylalim/highcharts-studio/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/darylalim/highcharts-studio/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/darylalim/highcharts-studio/releases/tag/v0.1.0
