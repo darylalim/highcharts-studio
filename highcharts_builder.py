@@ -36,9 +36,23 @@ BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw 
 WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
 SUNBURST_TYPES = ("sunburst",)  # a hierarchy as concentric rings, re-rootable by click
 XRANGE_TYPES = ("xrange",)  # a Gantt timeline: bars spanning [start, end] on lanes
-# concentric rings: one column, reduced to one number, per ring. Named as Highcharts names it,
-# leaving `gauge` free for the needle-on-a-dial chart, which is a different series type.
-GAUGE_TYPES = ("solidgauge",)
+# The GAUGE FAMILY: the two types with NO LABEL CHANNEL, whose marks are the SELECTED COLUMNS
+# themselves, each reduced to one number by `agg` and read against one dial. They differ only in
+# what a mark BECOMES — an arc swept from zero, or a needle pointed at a scale — and share
+# everything above that: the reduction, the readings, the dial, the palette-cycled identity hue.
+#
+# `GAUGE_TYPES` is the name the rest of the module already asks for, and it is asked at exactly
+# the five places where the two are IDENTICAL: the `x_col is None` exemption and the `agg`/`dial`
+# guard in `build_options`, `count_marks`' no-rule raise, and (in the tests) the label-drop
+# sweep's exclusion and the row-less sweep's null expectation. Splitting the tuple in two while
+# keeping their sum under the old name is therefore the whole of the family plumbing: every one of
+# those five sites stays correct for the needle with no edit at all. The two halves exist only for
+# the two BRANCHES, which share no options key worth sharing.
+SOLID_GAUGE_TYPES = (
+    "solidgauge",
+)  # concentric arcs on one shared dial: an activity gauge
+NEEDLE_GAUGE_TYPES = ("gauge",)  # needles pointing at a drawn scale: a speedometer
+GAUGE_TYPES = SOLID_GAUGE_TYPES + NEEDLE_GAUGE_TYPES
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -297,30 +311,57 @@ _XRANGE_MIN_POINT_LENGTH = 3
 # render a single bar as a thick slab spanning the plot.
 _XRANGE_POINT_WIDTH = 20
 
-# Gauge is the first type with NO LABEL CHANNEL. Every other type names its marks from a
-# column — a slice, an axis category, a node, a box, a lane — but a gauge's marks are the
-# SELECTED COLUMNS THEMSELVES, each reduced to one number. So `x_col` names nothing and is
-# None, which is why the branch runs ABOVE the shared `_label_ok` filter and why `x_col`
-# widened to `str | None`.
+# The GAUGE FAMILY has NO LABEL CHANNEL. Every other type names its marks from a column — a
+# slice, an axis category, a node, a box, a lane — but a gauge's marks are the SELECTED COLUMNS
+# THEMSELVES, each reduced to one number. So `x_col` names nothing and is None, which is why both
+# branches run ABOVE the shared `_label_ok` filter and why `x_col` is `str | None`.
 #
-# It is drawn as an ACTIVITY GAUGE, and the canonical Highcharts recipe for one — a SINGLE
-# series whose N points each carry their own radius — is UNAVAILABLE here: a POINT-level
+# `solidgauge` is drawn as an ACTIVITY GAUGE, and the canonical Highcharts recipe for one — a
+# SINGLE series whose N points each carry their own radius — is UNAVAILABLE here: a POINT-level
 # `radius`/`innerRadius` is accepted by `Chart.from_options` and then silently dropped from
 # the emitted JS, while the SERIES-level ones survive (verified on the round-trip). This is the
 # sankey-`nodeFormat` / boxplot-`fillColor` / sunburst-`levels[].colorByPoint` family again, and
 # the first of them to dictate the SHAPE of a whole branch rather than one of its options: each
 # ring MUST be its own series. Forced, not chosen — and that is exactly what makes
-# marks == series == len(y_cols), which is why solidgauge needs no `count_marks` rule and no
-# `MARK_METRICS` entry. The app's default "Series plotted" already IS the ring count.
+# marks == series == len(y_cols), which is why neither gauge needs a `count_marks` rule or a
+# `MARK_METRICS` entry. The app's default "Series plotted" already IS the mark count.
 #
-# It is named `solidgauge`, Highcharts' own name for it, and NOT the friendlier `gauge` — which
-# radar's precedent (it is `radar` and serializes as a `line` with `chart.polar`) would have
-# licensed. The name is deliberately left free, because `gauge` in Highcharts is a DIFFERENT
-# chart: a needle on a dial, a distinct series type with its own `DialOptions`/`PivotOptions`,
-# which highcharts-core also supports and which this module may well add. Spending the obvious
-# name on the arc would leave the needle nothing to be called. (Whoever adds it should know that
-# `plot_options/gauge.py`'s `top_width` validator lacks `allow_empty=True`, so ANY `dial` dict
-# omitting `topWidth` raises `EmptyValueError` — passing it explicitly works.)
+# `gauge` — the NEEDLE — spends the name this comment used to reserve, and it is Highcharts' own
+# name for it, so radar stays the ONE type whose `chart.type` is not its own name. The two are
+# genuinely different series types (the needle has `DialOptions`/`PivotOptions`), not one type
+# with two skins, which is why they get two branches rather than a flag.
+#
+# What the needle does NOT inherit, though every instinct says it should, is the point of the
+# comments below: each of solidgauge's hard-won workarounds is a fix for a pathology that is
+# SPECIFIC TO SOLID GAUGES, and on the needle the same properties fail DIFFERENTLY. The three
+# inversions, all measured on the round-trip and by rendering, never inferred:
+#
+#   * the MODULE. A solid gauge resolves `highcharts-more` ONLY from its `pane` — which is why
+#     that key is load-bearing there, and why dropping it draws an empty SVG in the browser while
+#     the export server renders perfectly. A needle resolves it from `chart.type` ALONE (verified
+#     against the pane, plotOptions and a bare series type in isolation). So the needle's pane is
+#     GEOMETRY, not plumbing, and the scariest trap in the family simply does not exist here.
+#   * the HUE. On a solid gauge a series-level `color` serializes perfectly and reaches NOTHING
+#     (the arc reads the point, because `colorByPoint: true` is a default highcharts-core cannot
+#     express turning off; the legend bullet draws grey and needs a `marker.fillColor`). On a
+#     needle `color` reaches ONLY the legend — the needle itself is BLACK unless
+#     `dial.backgroundColor` says otherwise (rendered: three coloured legend swatches above three
+#     black needles). Same property, opposite failure — and the ring writes its hue to three
+#     places, the needle to two, with NOT ONE of them in common.
+#   * the LABEL. A solid gauge MUST print its readings in the hub: a 360° ring has nowhere to put
+#     an axis, so its value can be read against nothing, and it pays for that with a gate, a
+#     measured leading and a per-series offset. A needle points AT an axis. So it prints NOTHING
+#     in the mark and needs no gate constant either — xrange's rule, reached from xrange's premise
+#     — and the sibling's careful label machinery is not re-tuned here, it is DELETED. (It was
+#     built the other way first; the renders killed it. See the branch's `dataLabels`.)
+#
+# The one trap that IS shared, and the only one: `plot_options/gauge.py`'s `top_width` validator
+# lacks `allow_empty=True`, so ANY `dial` dict omitting `topWidth` raises `EmptyValueError`.
+# It bites at `Chart.from_options`, one layer BELOW `build_options` — so an options-dict test
+# passes while the chart cannot be built at all, and the app's interactive path (which does not
+# catch builder errors) shows a bare traceback naming neither `dial` nor `topWidth`. Hence
+# `_NEEDLE_DIAL`: every dial dict this module emits is spread from it, so the trap is
+# unreachable rather than remembered.
 _GAUGE_OUTER_PCT = 100.0  # the outermost ring's outer edge, in % of the pane radius
 # The empty centre the stacked value labels sit in. Measured, not chosen: the hub scales with
 # the chart, so the labels have least room at the SMALLEST height the app offers (300px), and
@@ -354,6 +395,114 @@ _GAUGE_EMPTY_DIAL = (
     100.0,
 )  # nothing to scale: a drawable dial, never a degenerate 0..0
 _GAUGE_NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
+
+# How BOTH gauges print a reading, in the mark and in the tooltip. A bare `{point.y}` prints the
+# double, and the double is what an AGGREGATION hands you: the mean of nine integer percentages is
+# `66.44444444444444`, which ran off the side of the chart in a colour-matched 20-character smear
+# (verified by rendering — and passed by every unit test in the suite, because the emitted `format`
+# string was right; only the NUMBER it formatted was absurd). It is the one flaw an options-dict
+# assertion can never see, since the value is not in the options at all.
+#
+# This is the FAMILY's format, not the needle's, and fixing the sibling with it is not scope creep
+# but the whole point of the family: `solidgauge` had the identical latent bug — its own sample
+# just happens to divide evenly (436/8 = 54.5), so under `mean` on any other CSV it would have
+# printed the same smear. Two types sharing one reduction must round it one way, or the number a
+# reader compares between them is formatted by whichever branch they happened to open.
+#
+# `.1f` and not a trailing-zero-trimming `g`: Highcharts' format strings run through its own
+# `numberFormat`, which implements `f`/`e`/`s` and NOT `g`. So a `sum` of 436 prints as `436.0`.
+# That is the honest trade — one redundant zero on the integers, against an unreadable chart on
+# every reduction that divides.
+_GAUGE_VALUE_FORMAT = "{point.y:,.1f}"
+
+# ---- the NEEDLE gauge -------------------------------------------------------------------
+# The arc the dial is drawn on. A solid gauge sweeps a full 360° because an arc's LENGTH is its
+# reading and a circle is the most length you can get; a needle's reading is its ANGLE, so the
+# scale has to be legible, and a semicircle is where the tick labels stop crowding. This is also
+# what makes the needle the type that can DROP solidgauge's subtitle-borne dial: the numbers are
+# on the chart.
+_NEEDLE_START_ANGLE = -90
+_NEEDLE_END_ANGLE = 90
+# THE PANE CARRIES NO GEOMETRY AT ALL — no `size`, and no `center` either — and that is a
+# conclusion, not an omission. It is the one place in this module where the right answer turned out
+# to be to stop steering.
+#
+# `size` is a SILENT DROP, and reading the library says exactly why: `options/pane.py`'s setter
+# runs `validators.string(value)`, checks the result for '%', and then FALLS OFF THE END WITHOUT
+# EVER ASSIGNING `self._size` — only the numeric `except` branch writes it. So the `size: "85%"`
+# that every Highcharts gauge demo on the internet sets is accepted and discarded, while
+# `size: 200` (raw pixels, and useless to a chart whose height the user drags) survives. Note
+# `inner_size`, ten lines above it, assigns in BOTH branches: this is one copy-paste slip, not a
+# policy.
+#
+# That leaves `center` as the only lever, and a hand-placed centre CANNOT be made safe, because
+# Highcharts reserves no room for the tick labels outside the pane and the pane's radius scales
+# with the plot box. Every value trades one chart height for another: at 58% the topmost label
+# printed through the subtitle; at 65% it was clean at 300px and 800px and CLIPPED CLEAN OFF THE
+# CANVAS at 420 (verified by rendering all three — the failure is not even monotonic in the
+# height, which is the tell that this is not a number to be tuned).
+#
+# Highcharts' own default — centre ["50%", "50%"], size 85% — is correct at every height the app
+# offers (300, 420, 800: all rendered, all clean), because it is the one placement that knows how
+# much room the labels need. So the pane says only what the CHART is (an arc from here to there)
+# and nothing about where to put it. `_LIGHT_COLOR_SCHEME_CSS`'s rule, one level up: what we do not
+# set, we do not have to keep right.
+# The dial FACE. `shape` must be said out loud: a pane background defaults to a CIRCLE, so an arc
+# gauge left to itself draws a full disc behind its semicircle (and `_themed` would then flip a
+# whole dark disc in). It is the same chrome as a solid gauge's track — "the scale lives here" —
+# so it takes the same color and the same dark-mode hook. No new colors.
+_NEEDLE_FACE_INNER_PCT = "62%"
+_NEEDLE_FACE_OUTER_PCT = "100%"
+# The needles are STAGGERED — longest first, so `y_cols[0]` (the column named first) is the
+# headline needle, exactly as it is the outermost ring. This is not decoration, it is the fix for
+# a real corruption: two columns with EQUAL readings put two needles at the SAME ANGLE, and the
+# later one covers the earlier one COMPLETELY — three series, two visible needles, and the legend
+# still naming three (verified by rendering: a 70 and a 70 drew one needle).
+# `marks == series` is the invariant this whole family rests on, and that made it a lie ON SCREEN.
+# Staggering fixes it because Highcharts draws later series ON TOP and both needles start at the
+# same pivot: the shorter one overlays the longer one's inner portion, leaving its TIP exposed in
+# its own hue (verified: a green needle with a blue tip). Capped at both ends like `_gauge_rings`,
+# and for the same reason — the shortest needle must still reach out of the pivot at 40 columns,
+# and the longest must not overshoot the face at 1.
+_NEEDLE_LONGEST_PCT = 88.0
+_NEEDLE_SHORTEST_PCT = 46.0
+# EVERY dial dict this module emits is spread from this one, which is what makes the `topWidth`
+# trap unreachable (see the family comment above) rather than a thing to remember at four call
+# sites. `rearLength: "0%"` because a needle that pokes out behind its pivot is a clock hand, not
+# an instrument — and with N of them the tails cross each other's faces.
+_NEEDLE_DIAL: dict[str, object] = {
+    "topWidth": 1,  # MANDATORY: omitting it raises EmptyValueError out of highcharts-core
+    "baseWidth": 9,
+    "baseLength": "5%",
+    "rearLength": "0%",
+}
+# How far past the end of the scale a needle may swing, in degrees — and it is the one thing that
+# keeps an OVERRIDDEN dial honest. `gauge_dial` guarantees every reading sits inside the scale it
+# DERIVES, so this is unreachable by default; but the app's two Dial inputs accept any two numbers,
+# so a user who zooms the scale to 0..50 on a column that sums to 436 is one keystroke away.
+#
+# Left unset, Highcharts pegs such a needle EXACTLY ON the final tick — pixel-identical to a true
+# reading of 50 (verified by rendering: the needle sits on the 50 and there is nothing anywhere to
+# say otherwise). That is a confident, plausible, wrong chart, and the Static PNG has no tooltip to
+# contradict it. It is also the ONE place the two gauges would disagree: a solid gauge in the same
+# state fills its arc and PRINTS "north: 436" in the hub, so its reader is told; a needle prints
+# nothing in the mark, so its reader is not. The family must not be honest in one branch and
+# mute in the other.
+#
+# Overshoot is the instrument's own answer, and it needs no words: the needle swings PAST the last
+# tick, which is what a real meter does when it slams its end stop. It cannot say HOW far over the
+# reading is — a dial that stops at 50 cannot draw a 436 — but it says, unmissably, that it IS
+# over, which is the whole of the difference between an under-scaled chart and a lying one. Applies
+# symmetrically at the bottom, so a negative reading on a zero-floored dial swings below it.
+_NEEDLE_OVERSHOOT_DEGREES = 5
+# The hub the needles turn on. ONE color, set once in plotOptions — NOT per series, which is the
+# obvious move and a lie: N needles pivot at the SAME POINT, so N hued pivots draw N discs on top
+# of each other and the reader sees whichever series happened to be last. It is not a mark and it
+# has no identity, so it takes the module's existing off-palette "not a category" slate — the
+# color sunburst's root already uses, whose comment certifies it reads on both backgrounds and
+# needs no dark flip. Left unset it defaults to BLACK, invisible on the dark shell. No new colors.
+_NEEDLE_PIVOT_COLOR = _SUNBURST_ROOT_COLOR
+_NEEDLE_PIVOT_RADIUS = 5
 
 # The reductions a gauge may apply. Exported as a public tuple so the app's picker is SOURCED
 # from the builder — `coordinate_columns`' can't-drift rule, applied to a POLICY rather than to
@@ -543,21 +692,26 @@ def _themed(options: dict, *, dark: bool) -> dict:
             **options["subtitle"],
             "style": {"color": t["muted"]},
         }
-    if options["chart"].get("type") == "solidgauge":
-        # The dial TRACKS — the FIRST `_themed` hook to reach a TOP-LEVEL key rather than
-        # `plotOptions[type]`. Less an exception than a demonstration: a track is CHROME (the
-        # gauge's gridline; the color of "no value here") that happens to belong to exactly one
-        # type, so it lives on the pane, not on the series.
+    if options["chart"].get("type") in GAUGE_TYPES:
+        # The dial FACE — the solid gauge's unfilled ring tracks, the needle gauge's arc behind
+        # the ticks. The FIRST `_themed` hook to reach a TOP-LEVEL key rather than
+        # `plotOptions[type]`, and less an exception than a demonstration: a dial face is CHROME
+        # (the gauge's gridline; the colour of "no value here") that happens to belong to one
+        # family, so it lives on the pane, not on the series.
         #
-        # It is also the ONLY hook this type can have. `borderColor` is impossible —
-        # `SolidGaugeSeries` models no border at any level, and a plotOptions `borderColor` is
-        # silently dropped (boxplot's `fillColor`, exactly) — and the hub labels carry their
-        # ring's palette hue, which reads on both backgrounds like the palette itself. Left
-        # unset, a track takes a Highcharts default that `_LIGHT_COLOR_SCHEME_CSS` pins to its
-        # LIGHT resolution in BOTH themes, so every dial would sit on a pale rail against the
-        # dark shell.
-        for track in options["pane"]["background"]:
-            track["backgroundColor"] = t["grid"]
+        # It is the whole of BOTH types' dark-mode needs, for two different reasons. For the
+        # rings it is the ONLY hook available: `SolidGaugeSeries` models no border at any level
+        # and a plotOptions `borderColor` is silently dropped (boxplot's `fillColor`, exactly).
+        # For the needles it is the only one NEEDED: their axis — labels, ticks, line — is a real
+        # `yAxis` dict, so the generic axis loop above has already themed it, and the needles and
+        # their labels carry palette hues that read on both backgrounds. The pivot takes the
+        # off-palette slate that needs no flip either (`_NEEDLE_PIVOT_COLOR`).
+        #
+        # Left unset, a pane background takes a Highcharts default that `_LIGHT_COLOR_SCHEME_CSS`
+        # pins to its LIGHT resolution in BOTH themes — so every dial would sit on a glaring white
+        # rail against the dark shell (verified by rendering: a white arc, unmissable).
+        for face in options["pane"]["background"]:
+            face["backgroundColor"] = t["grid"]
     return options
 
 
@@ -924,20 +1078,30 @@ def gauge_dial(
     than raising — or, worse, a degenerate ``0..0`` that Highcharts would divide by.
     """
     _check_gauge_agg(agg)
+    return _dial_from_readings([_gauge_value(df[col], agg) for col in y_cols])
+
+
+def _dial_from_readings(readings: list[object]) -> tuple[float, float]:
+    """The dial a set of READINGS is read against — the half of ``gauge_dial`` that cannot cheat.
+
+    Split out for one reason, and it is not tidiness: it makes the family's central invariant a
+    SIGNATURE rather than a rule two branches have to remember. A function that cannot see a
+    DataFrame cannot derive a dial from a raw column, and deriving one from a raw column is the
+    exact bug the invariant exists to forbid (under ``sum`` a reading EXCEEDS every observation in
+    its own column — 436 against a maximum cell of 63 — so a raw-column dial pins every mark past
+    the end of its own scale and draws "everyone smashed target" on data that says nothing of the
+    sort). Both gauges call ``gauge_dial``, so both are held to it by construction.
+    """
     # `isinstance(..., float)` IS the "a reading, or an absence?" question: `_gauge_value`
     # returns one or the other, and an EnforcedNull is not a number to take a min over.
-    readings = [
-        value
-        for value in (_gauge_value(df[col], agg) for col in y_cols)
-        if isinstance(value, float)
-    ]
-    if not readings:
+    known = [value for value in readings if isinstance(value, float)]
+    if not known:
         return _GAUGE_EMPTY_DIAL
     # Anchored at zero on BOTH ends — a gauge is read from zero, so the dial contains it even
     # when no reading is near it. (`_nice_floor` returns 0.0 for anything non-negative, so a
     # dial only goes below zero when a reading does.)
-    low = _nice_floor(min(0.0, min(readings)))
-    high = _nice_ceiling(max(0.0, max(readings)))
+    low = _nice_floor(min(0.0, min(known)))
+    high = _nice_ceiling(max(0.0, max(known)))
     if high <= low:  # every reading is exactly zero — a dial with no extent
         return _GAUGE_EMPTY_DIAL
     return low, high
@@ -996,6 +1160,38 @@ def _gauge_rings(count: int) -> list[tuple[float, float]]:
         )
         for index in range(count)
     ]
+
+
+def _needle_radii(count: int) -> list[float]:
+    """Each needle's length, in percent of the pane radius, LONGEST FIRST.
+
+    ``_gauge_rings``' opposite number, and it exists for a reason that only looks cosmetic. Two
+    columns whose readings are EQUAL put two needles at the SAME ANGLE, and Highcharts draws the
+    later series ON TOP: at one length the second needle covers the first COMPLETELY, so a chart
+    with three series draws two needles while the legend goes on naming
+    three (verified by rendering — a 70 beside a 70 drew one needle). ``marks == series`` is the
+    invariant this whole family rests on, and equal readings are not an edge case (two columns of
+    percentages, a duplicated export, a column compared with its own target); that made the
+    invariant a lie ON SCREEN, in the one place a reader would never think to check.
+
+    Staggering fixes it *because* of the overdraw rather than in spite of it: both needles start at
+    the same pivot, so the shorter one lays over the longer one's inner portion and leaves its TIP
+    exposed in its own hue (verified: a green needle with a blue tip, each matching its legend
+    swatch). The longest is first, so ``y_cols[0]`` — the column named first — is the headline
+    needle, exactly as it is the outermost ring.
+
+    Capped at BOTH ends of the range, like ``_gauge_rings`` and for the same two reasons. With ONE
+    needle there is nothing to stagger and it takes the full length. With MANY, a fixed step would
+    walk the shortest needle back into the pivot (and then past it, to a negative radius Highcharts
+    draws as garbage) — a wide CSV with 40 numeric columns is one click away — so the SPREAD is
+    what degrades, never the count: no column the user asked for is ever dropped, the needles just
+    bunch up. Two needles at 40 columns may be hard to tell apart, but they are both THERE, and the
+    dial they point at is still true.
+    """
+    if count == 1:
+        return [_NEEDLE_LONGEST_PCT]
+    step = (_NEEDLE_LONGEST_PCT - _NEEDLE_SHORTEST_PCT) / (count - 1)
+    return [_NEEDLE_LONGEST_PCT - index * step for index in range(count)]
 
 
 def _pct(value: float) -> str:
@@ -1546,17 +1742,24 @@ def build_options(
       they read as ISO-8601 dates, linear if they read as numbers. A row missing either
       end is dropped, as is one whose bar runs BACKWARDS; a zero-length one (a milestone)
       is kept and floored to a visible sliver. Pulls in the ``modules/xrange`` module.
-    - ``solidgauge``: concentric rings on one shared dial — an "activity gauge". The only type
-      with NO LABEL CHANNEL: ``x_col`` is unused (and is ``None``), because a gauge's marks
-      are the SELECTED COLUMNS THEMSELVES. Each ``y_cols`` column becomes one ring, showing
-      that column REDUCED to a single number by ``agg`` (see ``GAUGE_AGGREGATIONS``) — so it
-      is the second AGGREGATING type after boxplot, and the first whose marks are not in the
-      frame at all. A column with nothing finite in it keeps its ring as an ``EnforcedNull``
-      (boxplot's all-missing-group rule) rather than being dropped, so the ring count is
-      always ``len(y_cols)``. ``dial`` sets the scale; left ``None`` it is derived from the
-      READINGS by ``gauge_dial``. Serializes as ``chart.type: "solidgauge"`` (radar's
-      precedent) and pulls in ``modules/solid-gauge`` — plus ``highcharts-more``, which only
-      the ``pane`` resolves.
+    - ``solidgauge`` and ``gauge``: the GAUGE FAMILY, the two types with NO LABEL CHANNEL.
+      ``x_col`` is unused (and is ``None``) because a gauge's marks are the SELECTED COLUMNS
+      THEMSELVES: each ``y_cols`` column becomes one mark, showing that column REDUCED to a
+      single number by ``agg`` (see ``GAUGE_AGGREGATIONS``). So they are the second and third
+      AGGREGATING types after boxplot, and the only ones whose marks are not in the frame at
+      all. A column with nothing finite in it keeps its mark as an ``EnforcedNull`` (boxplot's
+      all-missing-group rule) rather than being dropped, so the mark count is always
+      ``len(y_cols)``. ``dial`` sets the scale both read against; left ``None`` it is derived
+      from the READINGS by ``gauge_dial``, never from the raw columns.
+
+      They differ only in what a mark BECOMES. ``solidgauge`` sweeps an ARC from zero — an
+      "activity gauge" — over a full 360°, which leaves nowhere to put an axis, so it prints
+      its dial in the subtitle and every reading in the hub. ``gauge`` points a NEEDLE at a
+      scale that is actually DRAWN: a semicircular axis with ticks and labels, which is the
+      whole reason the type exists and why its subtitle carries only the ``agg``. Needles are
+      staggered in length (see ``_needle_radii``) so two equal readings do not draw as one.
+      ``solidgauge`` pulls in ``modules/solid-gauge`` plus ``highcharts-more`` (which only its
+      ``pane`` resolves); ``gauge`` pulls in ``highcharts-more`` from ``chart.type`` alone.
 
     ``colors`` overrides the series palette; it defaults to ``DEFAULT_COLORS``.
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
@@ -1565,12 +1768,13 @@ def build_options(
     ``target_col`` names the destination-node column and is required for
     ``sankey``; ``parent_col`` names the parent-label column and is required for
     ``sunburst``; ``end_col`` names the column each bar ends at and is required for
-    ``xrange``. Each is ignored by the other types. ``agg`` and ``dial`` are read only by
-    ``solidgauge``, and are the first two parameters here that name a POLICY and a SCALE rather
+    ``xrange``. Each is ignored by the other types. ``agg`` and ``dial`` are read only by the
+    GAUGE FAMILY, and are the only two parameters here that name a POLICY and a SCALE rather
     than a column.
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``, a missing
-    ``x_col`` for any type but ``solidgauge`` (the one type with no label channel to name),
+    ``x_col`` for any type outside the GAUGE FAMILY (``solidgauge`` and ``gauge``, the two with
+    no label channel to name),
     a ``bubble`` chart with no ``size_col``, a ``sankey`` chart with no
     ``target_col`` or whose ``target_col`` is its ``x_col``, a ``sunburst`` chart
     with no ``parent_col``, whose ``parent_col`` is its ``x_col``, or whose parent
@@ -1578,7 +1782,7 @@ def build_options(
     node — see ``explain_tree_error``), an ``xrange`` chart with no ``end_col``, whose
     ``end_col`` is its start column, or whose start/end columns cannot place a bar on
     one axis (either is neither dates nor numbers, or the two disagree about which —
-    see ``explain_xrange_error``), a ``solidgauge`` chart with an unknown ``agg`` or a ``dial``
+    see ``explain_xrange_error``), a GAUGE-FAMILY chart with an unknown ``agg`` or a ``dial``
     with no span (see ``explain_gauge_error``), or (for the category-axis types — cartesian,
     radar, heatmap, boxplot, and waterfall) an ``x_col`` that is also one of the
     ``y_cols``.
@@ -1660,7 +1864,7 @@ def build_options(
     colors = list(colors) if colors is not None else list(DEFAULT_COLORS)
 
     if (
-        chart_type in GAUGE_TYPES
+        chart_type in SOLID_GAUGE_TYPES
     ):  # concentric rings: one column, reduced to one number, each
         # Placed ABOVE the shared `_label_ok` filter, and the placement is load-bearing rather
         # than tidy. Gauge has no label channel — `x_col` is None and names nothing — but the
@@ -1823,7 +2027,7 @@ def build_options(
                 # It IS the series.
                 "tooltip": {
                     "headerFormat": "",
-                    "pointFormat": "{series.name}: <b>{point.y}</b>",
+                    "pointFormat": f"{{series.name}}: <b>{_GAUGE_VALUE_FORMAT}</b>",
                 },
                 "plotOptions": {
                     "solidgauge": {
@@ -1851,7 +2055,7 @@ def build_options(
                                 "borderWidth": 0,
                                 "align": "center",
                                 "verticalAlign": "middle",
-                                "format": "{series.name}: {point.y}",
+                                "format": f"{{series.name}}: {_GAUGE_VALUE_FORMAT}",
                                 "style": {
                                     "textOutline": "none",
                                     "fontWeight": "normal",
@@ -1868,6 +2072,213 @@ def build_options(
                     }
                 },
                 "series": rings_out,
+            },
+            dark=dark,
+        )
+
+    if (
+        chart_type in NEEDLE_GAUGE_TYPES
+    ):  # needles on one drawn scale: one column, reduced to one number, each
+        # Above the shared `_label_ok` filter, for the solid gauge's reason exactly: this branch
+        # AGGREGATES, and a row filter above an aggregate does not drop a mark, it silently
+        # changes a NUMBER.
+        #
+        # What it does NOT share with its sibling is the SCALE'S HOME. A solid gauge sweeps 360°,
+        # which leaves nowhere to put an axis, so it prints the dial in a SUBTITLE and every
+        # reading in the hub — the value can be read against nothing, so it has to be written
+        # down. A needle's reading IS an angle against a drawn axis. So the axis is the whole
+        # point of the type, it is what the needle POINTS AT, and the subtitle keeps only the
+        # half of its job that the chart still cannot show: the `agg`. ("62" is a fact; "62, the
+        # mean of nine hosts" is the finding, and no amount of axis will say the second.)
+        low, high = dial if dial is not None else gauge_dial(df, y_cols, agg)
+        lengths = _needle_radii(len(y_cols))
+        # A needle's hue is its arbitrary IDENTITY, like a pie slice's and like a ring's, so it
+        # cycles the OVERRIDABLE `colors` (waterfall's semantic red-means-loss is the opposite
+        # case) and WRAPS rather than IndexErrors on a short custom palette. One `next()` per
+        # needle, then written to TWO levels — and they are not two of the solid gauge's three.
+        hues = itertools.cycle(colors or DEFAULT_COLORS)
+
+        needles: list[dict[str, object]] = []
+        for col, length in zip(y_cols, lengths, strict=True):
+            hue = next(hues)
+            needle: dict[str, object] = {
+                "name": col,
+                # LEVEL 1 — the LEGEND SWATCH, and ONLY the legend swatch. On every ordinary
+                # Highcharts type `color` paints the mark; on a gauge it paints everything EXCEPT
+                # the mark. Verified by rendering `color` alone: three perfectly coloured legend
+                # bullets above three BLACK needles. (It is the mirror of the solid gauge, where
+                # `color` serializes just as cleanly and reaches nothing at all — there the legend
+                # bullet draws grey and needs a `marker.fillColor`. Same property, two different
+                # ways of doing nothing you wanted.)
+                "color": hue,
+                # ...and the legend has to be asked for TWICE, because a gauge series defaults to
+                # `showInLegend: false` — unlike almost every other type. Without this the chart
+                # renders with no legend at all, and since a needle carries no name on the chart,
+                # nothing would say which reading is which (verified: the legend was simply
+                # absent until this line existed).
+                "showInLegend": True,
+                # LEVEL 2 — the NEEDLE. Spread from `_NEEDLE_DIAL` so `topWidth` is present by
+                # construction: omit it and highcharts-core raises `EmptyValueError` out of a
+                # validator that names neither the key nor the series (see the family comment).
+                "dial": {
+                    **_NEEDLE_DIAL,
+                    "backgroundColor": hue,
+                    "radius": _pct(length),
+                },
+                # A one-point series, and — unlike the ring's — with NO ternary for the empty
+                # column. `_gauge_value` hands back a float or an `EnforcedNull`, and BOTH are
+                # correct here as they stand: highcharts-core serializes the null to `[[null]]`, a
+                # real null point, which draws no needle and no label. The ring needs its ternary
+                # only because a LIVE ring must carry `color` on the POINT (its arc reads the
+                # point, not the series) while a null point must NOT — a null `y` is dropped out
+                # of a point dict entirely, leaving a point with no value. A needle's colour is on
+                # its dial, so the point is just the number, and the empty column stops being a
+                # special case at all rather than being handled as one.
+                "data": [_gauge_value(df[col], agg)],
+            }
+            needles.append(needle)
+
+        return _themed(
+            {
+                "chart": {"type": "gauge"},
+                # Genuinely read: every needle seeds its hue from it.
+                "colors": colors,
+                "title": {"text": title},
+                # Only the `agg` — the half of the solid gauge's subtitle the chart cannot draw.
+                # The dial is on the axis now, in ticks, and repeating it here would be the one
+                # thing worse than not saying it: two homes for one number, free to disagree.
+                "subtitle": {"text": agg},
+                # GEOMETRY, not plumbing — and that is the family's sharpest inversion. The solid
+                # gauge's pane is what resolves `highcharts-more`, so dropping it there blanks the
+                # iframe while the PNG renders perfectly. A needle resolves the module from
+                # `chart.type` alone (verified against the pane, `plotOptions` and a bare series
+                # type, each in isolation), so this key could be deleted and the chart would still
+                # DRAW — just as a full circle with a disc behind it.
+                #
+                # It says WHAT the dial is and NOTHING about where to put it: no `size` (silently
+                # dropped by highcharts-core) and no `center` (unsteerable without it). See
+                # `_NEEDLE_START_ANGLE` above for why that is a conclusion rather than a gap.
+                "pane": {
+                    "startAngle": _NEEDLE_START_ANGLE,
+                    "endAngle": _NEEDLE_END_ANGLE,
+                    "background": [
+                        {
+                            "backgroundColor": _GAUGE_TRACK_COLOR,
+                            "borderWidth": 0,
+                            "innerRadius": _NEEDLE_FACE_INNER_PCT,
+                            "outerRadius": _NEEDLE_FACE_OUTER_PCT,
+                            # Said out loud because the default is a CIRCLE: an arc gauge left to
+                            # itself draws a full disc behind its semicircle.
+                            "shape": "arc",
+                        }
+                    ],
+                },
+                # The axis, DRAWN — the one thing the solid gauge cannot have and the reason this
+                # type exists. Its labels, ticks and line are all themed for dark mode by
+                # `_themed`'s generic axis loop, so this type needs no hook of its own for them.
+                "yAxis": {
+                    "min": low,
+                    "max": high,
+                    "tickWidth": 2,
+                    "tickLength": 8,
+                    "minorTickWidth": 0,
+                    # BOTH grid widths, and the MINOR one is the load-bearing half — which is
+                    # exactly backwards from what you would guess, and only rendering says so.
+                    # `_themed` writes a `gridLineColor` onto every axis it finds, so the major
+                    # one has to be pinned or dark-mode readers get concentric gridlines nobody
+                    # asked for. But the MINOR gridline is not themed by anything, and Highcharts
+                    # defaults it to 1px of `#f2f2f2` — invisible on the light dial face, and a
+                    # BLAZING WHITE STARBURST across the dark one (verified by rendering: a dense
+                    # radial fan of white lines, unmissable, on a chart whose every unit test
+                    # passed). The face carries no grid at all, so both go to zero and the ticks
+                    # alone mark the scale.
+                    "gridLineWidth": 0,
+                    "minorGridLineWidth": 0,
+                    # Highcharts titles a value axis "Values" unless it is explicitly CLEARED, and
+                    # None does not clear it — an empty string does (heatmap's rule).
+                    "title": {"text": ""},
+                },
+                # Not redundant, and for a sharper reason than the ring's: this type prints NOTHING
+                # in the mark, so a needle carries no name on the chart at all (the ring at least
+                # has its hub label). The legend is therefore the ONLY thing that says which reading
+                # is whose — always, not merely past a gate — and the only thing that names an empty
+                # column, whose null point draws no needle either. It is what the whole
+                # print-nothing-in-the-mark decision rests on.
+                "legend": {"enabled": True},
+                # `{series.name}`, the solid gauge's answer for the solid gauge's reason: a gauge
+                # series holds exactly ONE point, so the mark's identity is not on the point. It
+                # IS the series.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": f"{{series.name}}: <b>{_GAUGE_VALUE_FORMAT}</b>",
+                },
+                "plotOptions": {
+                    "gauge": {
+                        # The hub. One colour for all N needles — see `_NEEDLE_PIVOT_COLOR` for
+                        # why a per-series pivot is a lie rather than a nicety.
+                        "pivot": {
+                            "backgroundColor": _NEEDLE_PIVOT_COLOR,
+                            "radius": _NEEDLE_PIVOT_RADIUS,
+                            "borderWidth": 0,
+                        },
+                        # NO `dial` HERE, and its absence is the point. It was written first, on the
+                        # reasoning that `topWidth` is demanded at "both levels" — and that is
+                        # simply false: every needle carries its OWN complete dial (they must, since
+                        # each needs its own hue and length), so a plotOptions dial has nothing left
+                        # to default and does no work at all. Deleting it changes not one byte of the
+                        # emitted JS. It is an option that LOOKS load-bearing and isn't — the exact
+                        # thing this module tests other libraries for — and carrying one of our own
+                        # would be worse than any of theirs, because ours comes with a comment
+                        # swearing it is needed.
+                        #
+                        # The `topWidth` trap is real and is guarded where it actually bites: in
+                        # `_NEEDLE_DIAL`, which every SERIES dial is spread from.
+                        #
+                        # What keeps an OVERRIDDEN dial honest: a reading past the end of the scale
+                        # swings PAST the last tick instead of pegging exactly on it, where it would
+                        # be pixel-identical to a true reading of the maximum. See the constant —
+                        # this is the one place the two gauges would otherwise disagree, and the
+                        # only reading a Static PNG could not contradict.
+                        "overshoot": _NEEDLE_OVERSHOOT_DEGREES,
+                        "stickyTracking": False,  # one point per series: hover the needle you mean
+                        # NOTHING IS PRINTED IN THE MARK, and this type needs no gate constant
+                        # either — xrange's rule, arrived at from xrange's premise. The five types
+                        # that DO print a value in the mark print it because it can be read against
+                        # no axis (an angle, an area, a link's width, a bar floating above an
+                        # invisible running total). A needle's reading is an ANGLE AGAINST A DRAWN
+                        # AXIS that renders in the Static PNG too — that IS the type — and its
+                        # identity is in the legend, which it carries anyway to name an empty
+                        # column. There is nothing left for a label to say that the chart does not
+                        # already show.
+                        #
+                        # It was built the other way first, and the renders killed it. Highcharts
+                        # anchors every gauge series' label at the SAME point, so N labels need N
+                        # per-series offsets, a measured leading, a gate — and then the stack, the
+                        # arc and the subtitle cannot all fit at 300px, the smallest chart the app
+                        # draws. Both levers that would have bought the room are closed BY THE
+                        # LIBRARY: `pane.size` is silently dropped (a percentage string validates
+                        # and is then never assigned), and `yAxis.labels.distance` rejects 0 with
+                        # `EmptyValueError` and refuses a negative outright, so the tick labels
+                        # cannot be pulled inside the band. Four constants and a gate, all to
+                        # reprint a number already on the axis.
+                        #
+                        # Disabled EXPLICITLY, and that is the whole reason this key exists: a
+                        # gauge's dataLabels default to ON — unlike heatmap's and column's — so
+                        # merely omitting it would print Highcharts' own boxed label, N of them
+                        # stacked at one anchor.
+                        "dataLabels": {"enabled": False},
+                        # No `yAxis.plotBands` — the red/amber/green zones a speedometer is
+                        # popularly drawn with. Solidgauge's argument against `yAxis.stops`,
+                        # unchanged: a band is a JUDGMENT ("this much is bad"), and the data never
+                        # said so. The user picked columns and a reduction; they did not declare a
+                        # target, and inventing one for them is the confident lie this module's
+                        # whole doctrine exists to refuse. (For the record it would also be a poor
+                        # one: a plot band's `thickness`, `innerRadius` and `outerRadius` are all
+                        # accepted by `Chart.from_options` and silently dropped, so the bands could
+                        # not even be drawn where we wanted them.)
+                    }
+                },
+                "series": needles,
             },
             dark=dark,
         )
@@ -2702,12 +3113,14 @@ def count_marks(
     the appended root. Xrange's does not: it appends nothing, so it is one bar per surviving
     row.
 
-    Gauge has no rule here AT ALL, and deliberately: its marks ARE its series — one ring per y
-    column, an empty column kept as a null ring rather than dropped — so ``len(y_cols)`` is an
-    invariant and the app's default "Series plotted" KPI is already exactly the ring count. It
-    is therefore absent from ``MARK_METRICS`` too, and a rule here that only restated
+    The GAUGE FAMILY (``solidgauge`` and ``gauge``) has no rule here AT ALL, and deliberately:
+    their marks ARE their series — one ring, or one needle, per y column, an empty column kept as
+    a null mark rather than dropped — so ``len(y_cols)`` is an
+    invariant and the app's default "Series plotted" KPI is already exactly the mark count. They
+    are therefore absent from ``MARK_METRICS`` too, and a rule here that only restated
     ``len(y_cols)`` would be the can't-drift rule run backwards: a second computation of a fact
-    that cannot differ from the first.
+    that cannot differ from the first. (The bail below is keyed on ``GAUGE_TYPES``, so the needle
+    inherited this the day it was added, with no edit.)
     """
     if chart_type in GAUGE_TYPES or x_col is None:
         # Bails out ABOVE the shared label mask below, which would otherwise die on `df[None]`
@@ -2862,9 +3275,15 @@ def build_chart_html(
         dial=dial,
     )
 
-    # For a gauge this resolves highcharts-more as well as modules/solid-gauge — and it does so
-    # only because the options tree carries a `pane`. Without highcharts-more the chart renders
+    # For a SOLID gauge this resolves highcharts-more as well as modules/solid-gauge — and it does
+    # so only because the options tree carries a `pane`. Without highcharts-more the chart renders
     # as an empty SVG here while the PNG path below renders perfectly (see the gauge branch).
+    #
+    # The NEEDLE gauge is the standing proof that the second sentence does not generalize: it
+    # resolves highcharts-more from `chart.type` ALONE, so its pane is geometry and nothing hangs
+    # on it. Two sibling types, the same module, resolved by different keys — which is precisely
+    # why this comment names solidgauge rather than "a gauge". Whoever reads it next will be
+    # holding one of the two, and the wrong half is a silently blank iframe beside a perfect PNG.
     script_tags = chart.get_script_tags(as_str=True)
     chart_js = chart.to_js_literal()
     # Match the iframe body to the chart's own background so there's no light

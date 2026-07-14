@@ -120,6 +120,8 @@ from highcharts_builder import (  # noqa: E402
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     SUPPORTED_TYPES,
+    _needle_radii,
+    _pct,
     build_chart_html,
     build_options,
     count_marks,
@@ -203,9 +205,11 @@ def _end_for(chart_type: str) -> str | None:
 
 # Radar remains the ONE "meta" type: Highcharts has no radar series, so it renders as a polar
 # *line* chart and its chart.type serializes as "line". Every other supported type's chart.type
-# equals its own name — solidgauge included, which is why it is called `solidgauge` and not the
-# friendlier `gauge` that radar's precedent would have licensed: `gauge` in Highcharts is a
-# DIFFERENT chart (a needle on a dial), and the name is left free for it.
+# equals its own name — and the gauge FAMILY is why that stayed true. `solidgauge` was never
+# given the friendlier name `gauge` that radar's precedent would have licensed, because `gauge`
+# in Highcharts is a DIFFERENT chart, a needle on a dial. That name is now SPENT, on exactly the
+# type it was being held for, so both gauges are called what Highcharts calls them and this map
+# still has one entry.
 _HC_TYPE = {"radar": "line"}
 
 
@@ -3927,6 +3931,468 @@ def test_weekly_bookings_sample_builds_a_gauge():
 
 
 # --------------------------------------------------------------------------- #
+# Needle gauge — the family's second half: the same readings, pointed at a DRAWN scale
+#
+# Everything ABOVE the mark (the reduction, the empty-column trap, the readings-derived dial,
+# the six aggregations, the non-finite policy) is shared with solidgauge and is already pinned
+# there — `_dial_from_readings` and `_gauge_value` are the same functions. These tests pin only
+# what is genuinely the needle's, and almost every one of them is a MEASUREMENT: the properties
+# below fail DIFFERENTLY here than they do on the ring, and copying the sibling's answers on
+# faith would have shipped four separate silent bugs.
+# --------------------------------------------------------------------------- #
+def _needle(df, y_cols, **kwargs) -> dict:
+    return build_options(df, "gauge", None, list(y_cols), **kwargs)
+
+
+def _needles(opts: dict) -> list[dict]:
+    return opts["series"]
+
+
+def _needle_reading(needle: dict):
+    """The one number a needle points at — or EnforcedNull when its column held no data."""
+    (point,) = needle["data"]
+    return point
+
+
+def test_needle_draws_one_needle_per_column_reduced_to_one_number(bookings_frame):
+    opts = _needle(bookings_frame, ["north", "south", "emea"], agg="sum")
+    needles = _needles(opts)
+    assert [n["name"] for n in needles] == ["north", "south", "emea"]
+    assert [_needle_reading(n) for n in needles] == [436.0, 334.0, 175.0]
+    # marks == series == len(y_cols): the invariant the whole family rests on, and the reason
+    # neither gauge needs a `count_marks` rule or a MARK_METRICS entry.
+    assert opts["chart"]["type"] == "gauge"
+
+
+def test_needle_the_empty_column_is_a_null_not_a_confident_zero(bookings_frame):
+    # The family's headline trap, and it bites HARDER on a needle than on a ring: pandas sums an
+    # all-NaN column to 0.0 (the additive identity), and a needle swung to the floor of the dial
+    # is INDISTINGUISHABLE from a real reading of zero — an arc at least draws nothing.
+    assert pd.Series([float("nan")] * 8).sum() == 0.0  # the reason this test exists
+    (needle,) = _needles(_needle(bookings_frame, ["partner_deals"], agg="sum"))
+    assert _needle_reading(needle) is EnforcedNull
+    # ...and it is KEPT, not dropped, so the needle count still equals the column count. The
+    # legend is then the ONLY thing naming it: a null point draws no needle AND no label.
+    assert needle["showInLegend"] is True
+    assert needle["name"] == "partner_deals"
+
+
+def test_needle_a_null_point_needs_no_ternary_unlike_the_ring(bookings_frame):
+    # The ring must branch on emptiness because a LIVE ring carries `color` on the POINT (its arc
+    # reads the point, not the series) while a null point must not — highcharts-core drops a null
+    # `y` out of a point dict entirely, leaving a point with no value at all. A needle's colour is
+    # on its DIAL, so the point is just the number and both cases are the same expression.
+    live, empty = _needles(
+        _needle(bookings_frame, ["north", "partner_deals"], agg="sum")
+    )
+    assert live["data"] == [436.0]  # a bare number, NOT {"y": ..., "color": ...}
+    assert empty["data"] == [EnforcedNull]
+    js = make_chart(
+        bookings_frame, "gauge", None, ["north", "partner_deals"]
+    ).to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "data:[[null]]" in "".join(js.split())  # a real null point survives
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 5, 12, 40])
+def test_needle_lengths_stagger_and_never_reach_the_pivot(count):
+    # The fix for a corruption, not a decoration. Two columns with EQUAL readings put two needles
+    # at the SAME angle, and Highcharts draws the later series ON TOP — at one length the second
+    # needle covers the first COMPLETELY, so N series draw fewer than N needles while the legend
+    # and the labels both go on naming N. `marks == series` becomes a lie ON SCREEN, in the one
+    # place a reader would never think to check. Staggering exposes each needle's TIP.
+    lengths = _needle_radii(count)
+    assert len(lengths) == count
+    assert lengths == sorted(
+        lengths, reverse=True
+    )  # y_cols[0] is the headline: longest
+    assert (
+        len(set(lengths)) == count
+    )  # every needle a DIFFERENT length, or the fix is not one
+    # Degrades rather than breaks, exactly like `_gauge_rings`: at 40 columns the needles bunch
+    # up, but all 40 are there and none has walked back into the pivot (or past it, to a negative
+    # radius Highcharts draws as garbage). Capping the COUNT instead would drop a column the user
+    # asked for.
+    assert all(0 < length <= 100 for length in lengths)
+
+
+def test_needle_the_staggered_lengths_actually_REACH_the_emitted_needles(
+    bookings_frame,
+):
+    # The gap a mutation test found: `_needle_radii` was pinned in ISOLATION, and the only
+    # options-level radius assertion was the count==1 case — where the stagger is vacuous by
+    # construction. So replacing `_pct(length)` with `_pct(_NEEDLE_LONGEST_PCT)` in the branch —
+    # which restores the exact bug the helper exists to prevent, every needle the same length,
+    # two equal readings drawing as one — left the whole suite GREEN.
+    #
+    # A helper is not a behaviour until something calls it. This asserts the call.
+    cols = ["north", "south", "emea"]
+    opts = _needle(bookings_frame, cols)
+    radii = [n["dial"]["radius"] for n in _needles(opts)]
+    assert radii == [_pct(length) for length in _needle_radii(len(cols))]
+    assert len(set(radii)) == len(cols)  # DISTINCT: the point of the whole exercise
+    # And on the emitted JS, since a dial's geometry is exactly the sort of thing this library
+    # accepts and then drops (the `pane.size` family).
+    js = make_chart(bookings_frame, "gauge", None, cols).to_js_literal()
+    flat = "".join(js.split()) if js else ""
+    assert js and all(f"radius:'{r}'" in flat.replace('"', "'") for r in radii)
+
+
+def test_needle_one_column_takes_the_full_length(bookings_frame):
+    # The n=1 boundary: there is nothing to stagger against, and a lone needle stunted to the
+    # shortest length would look like a bug.
+    (needle,) = _needles(_needle(bookings_frame, ["north"]))
+    assert needle["dial"]["radius"] == "88.0%"
+
+
+def test_needle_every_dial_carries_topwidth_or_the_chart_cannot_be_built(
+    bookings_frame,
+):
+    # THE family's one shared trap, and the nastiest thing about this type. `plot_options/gauge.py`
+    # and the series' own DialOptions both validate `top_width` WITHOUT `allow_empty=True`, so any
+    # dial dict omitting `topWidth` raises EmptyValueError — out of a validator that names neither
+    # the key, nor `dial`, nor the series. And it fires at `Chart.from_options`, one layer BELOW
+    # `build_options`: an options-dict assertion would pass while the chart cannot be built at all,
+    # and the app's interactive path (which does not catch builder errors) would show a bare
+    # traceback. Hence: this test drives `make_chart`, not `build_options`.
+    opts = _needle(bookings_frame, ["north", "south"])
+    assert all(n["dial"]["topWidth"] == 1 for n in _needles(opts))
+    # There is NO `plotOptions.gauge.dial`, and that absence is pinned rather than merely true.
+    # It was carried at first, on the reasoning that `topWidth` is demanded at "both levels" —
+    # which is false: every needle carries its own complete dial (it must, for its hue and its
+    # length), so a plotOptions dial defaults nothing and does no work. Deleting it changes not one
+    # byte of the emitted JS. An option that LOOKS load-bearing and isn't is the exact defect this
+    # module tests other libraries for, and one of ours would be worse — it came with a comment
+    # swearing it was needed.
+    assert "dial" not in opts["plotOptions"]["gauge"]
+    js = make_chart(
+        bookings_frame, "gauge", None, ["north", "south"]
+    ).to_js_literal()  # stubbed str | None; `js and` guards the None case
+    # One per needle, and only per needle — the trap is guarded where it actually bites.
+    assert js and "".join(js.split()).count("topWidth:1") == 2
+
+
+def test_needle_hue_rides_the_dial_and_the_legend_but_never_the_point(bookings_frame):
+    # TWO levels, and NOT two of the ring's three — there is no overlap at all. On a solid gauge a
+    # series-level `color` serializes perfectly and reaches NOTHING (the arc reads the POINT,
+    # because `colorByPoint: true` is a default highcharts-core cannot express turning off; the
+    # legend bullet draws grey and needs a `marker.fillColor`). On a needle, `color` reaches ONLY
+    # the legend — the needle itself is BLACK unless `dial.backgroundColor` says otherwise.
+    # Verified by rendering `color` alone: three perfectly coloured legend swatches above three
+    # black needles. Same property, opposite failure.
+    cols = ["north", "south", "emea"]
+    opts = _needle(bookings_frame, cols)
+    hues = list(DEFAULT_COLORS[:3])
+    assert [n["dial"]["backgroundColor"] for n in _needles(opts)] == hues  # the NEEDLE
+    assert [n["color"] for n in _needles(opts)] == hues  # the LEGEND swatch
+    # The point carries the number and nothing else — no `color` to be read (the ring's level),
+    # and no `marker`, which is the ring's legend hack and does no work at all here.
+    assert all(not isinstance(n["data"][0], dict) for n in _needles(opts))
+    assert all("marker" not in n for n in _needles(opts))
+    js = make_chart(bookings_frame, "gauge", None, cols).to_js_literal()
+    assert js and (
+        "colorByPoint" not in js
+    )  # solidgauge's un-turn-off-able default is not this type's
+
+
+def test_needle_asks_for_the_legend_explicitly_because_a_gauge_series_defaults_to_hiding_it(
+    bookings_frame,
+):
+    # A gauge series defaults to `showInLegend: false`, unlike almost every other type — so
+    # `legend.enabled` alone renders NO legend at all (verified by rendering: it was simply
+    # absent). It has to be asked for twice. And it matters more here than anywhere: a needle
+    # carries no name on the chart, so past the label gate — and for an empty column, whose null
+    # point draws neither needle nor label — the legend is the ONLY thing that says which is which.
+    opts = _needle(bookings_frame, ["north", "south"])
+    assert opts["legend"]["enabled"] is True
+    assert all(n["showInLegend"] is True for n in _needles(opts))
+
+
+def test_needle_pivot_is_one_neutral_colour_not_one_per_series(bookings_frame):
+    # N needles pivot at the SAME POINT, so N hued pivots draw N discs on top of each other and
+    # the reader sees whichever series happened to be drawn last — a hub wearing one arbitrary
+    # column's identity. It is not a mark and has no identity, so it takes the module's existing
+    # off-palette slate (sunburst's root colour), which reads on both backgrounds and needs no
+    # dark flip. Left unset it defaults to BLACK, invisible on the dark shell.
+    opts = _needle(bookings_frame, ["north", "south", "emea"])
+    assert opts["plotOptions"]["gauge"]["pivot"]["backgroundColor"] == "#94a3b8"
+    assert all("pivot" not in n for n in _needles(opts))  # never per series
+
+
+def test_needle_resolves_highcharts_more_from_the_chart_type_alone(bookings_frame):
+    # The family's sharpest INVERSION, and the reason solidgauge's pane comment must not be
+    # copied here. A solid gauge resolves highcharts-more ONLY from its `pane` — drop that key and
+    # the browser draws an empty SVG while the export server renders perfectly. A needle resolves
+    # it from `chart.type`, so its pane is geometry and nothing hangs on it.
+    chart = make_chart(bookings_frame, "gauge", None, ["north"])
+    assert "highcharts-more" in chart.get_required_modules()
+    # ...and it does so with the pane taken away entirely — which is what "from the type alone"
+    # means, and the only way to show it.
+    from highcharts_core.chart import Chart
+
+    paneless = build_options(bookings_frame, "gauge", None, ["north"])
+    paneless.pop("pane")
+    assert "highcharts-more" in Chart.from_options(paneless).get_required_modules()
+
+
+def test_needle_pane_is_an_arc_not_a_disc(bookings_frame):
+    # A pane background defaults to a CIRCLE, so an arc gauge left to itself draws a full disc
+    # behind its semicircle — and `_themed` would then flip a whole dark disc in. `shape` has to
+    # be said out loud. (`size` is NOT set, and must not be: highcharts-core's Pane.size setter
+    # validates a percentage string and then never assigns it — see the next test.)
+    opts = _needle(bookings_frame, ["north"])
+    (face,) = opts["pane"]["background"]
+    assert face["shape"] == "arc"
+    assert (opts["pane"]["startAngle"], opts["pane"]["endAngle"]) == (-90, 90)
+
+
+def test_needle_pane_says_what_the_dial_is_and_nothing_about_where_to_put_it(
+    bookings_frame,
+):
+    # NEITHER key, and that is a conclusion rather than an omission — which is why it is pinned.
+    #
+    # `size` is a SILENT DROP, found by reading the library: `options/pane.py`'s setter runs
+    # `validators.string(value)`, checks the result for '%', and then falls off the end WITHOUT
+    # EVER ASSIGNING `self._size` — only the numeric `except` branch writes it. So the `size: "85%"`
+    # every Highcharts gauge demo sets is accepted and discarded. (`inner_size`, ten lines above
+    # it, assigns in both branches: one copy-paste slip, not a policy.)
+    #
+    # And without `size`, `center` cannot be made safe: Highcharts reserves no room for the tick
+    # labels outside the pane, and the pane's radius scales with the plot box. At 58% the topmost
+    # label printed through the subtitle; at 65% it was clean at 300px and 800px and CLIPPED CLEAN
+    # OFF THE CANVAS at 420 — a failure that is not even monotonic in the height, which is the tell
+    # that it is not a number to be tuned. Highcharts' own default is correct at every height the
+    # app offers, because it is the one placement that knows what the labels need.
+    #
+    # This test exists so nobody "helpfully" re-adds either one.
+    opts = _needle(bookings_frame, ["north"])
+    assert "size" not in opts["pane"]
+    assert "center" not in opts["pane"]
+    assert set(opts["pane"]) == {"startAngle", "endAngle", "background"}
+    js = make_chart(bookings_frame, "gauge", None, ["north"]).to_js_literal()
+    flat = "".join(js.split()) if js else ""
+    assert js and "size:" not in flat and "center:" not in flat
+
+
+def test_needle_draws_the_axis_it_points_at(bookings_frame):
+    # The type's whole reason to exist, and the one thing a solid gauge cannot have: a 360° ring
+    # has nowhere to put an axis, so it prints its dial in a subtitle. A needle's reading IS an
+    # angle against a drawn scale, so the ticks are the chart.
+    opts = _needle(bookings_frame, ["north"], agg="sum")
+    assert (opts["yAxis"]["min"], opts["yAxis"]["max"]) == (
+        0.0,
+        500.0,
+    )  # 436 -> a 0..500 dial
+    assert (
+        opts["yAxis"]["tickWidth"] == 2
+    )  # DRAWN — the solid gauge silences its ticks to 0
+    # `gridLineWidth` is pinned to 0 rather than left to Highcharts, because `_themed` writes a
+    # gridLineColor onto every axis it finds — so a nonzero default would draw concentric
+    # gridlines across the face that ONLY dark-mode readers would ever see.
+    assert opts["yAxis"]["gridLineWidth"] == 0
+    assert opts["yAxis"]["title"] == {"text": ""}  # or Highcharts titles it "Values"
+
+
+def test_needle_subtitle_states_only_the_aggregation(bookings_frame):
+    # The solid gauge's subtitle carries `agg` AND the dial, because neither is on the chart. The
+    # needle draws its dial, so repeating it here would be the one thing worse than not saying it:
+    # two homes for one number, free to disagree. The `agg` stays, because no axis will ever say
+    # that 436 is a sum of eight weeks rather than one week's reading.
+    opts = _needle(bookings_frame, ["north"], agg="mean")
+    assert opts["subtitle"]["text"] == "mean"
+    assert "dial" not in opts["subtitle"]["text"]
+
+
+@pytest.mark.parametrize("count", [1, 3, 8])
+def test_needle_prints_nothing_in_the_mark_and_says_so_EXPLICITLY(count):
+    # The sibling MUST print its readings in the hub — a 360° ring has nowhere to put an axis, so
+    # the value can be read against nothing, and it pays for that with a gate, a measured leading
+    # and a per-series offset. A needle points AT an axis that renders in the Static PNG too, and
+    # its identity is in the legend it carries anyway. So it prints NOTHING in the mark and needs
+    # no gate constant either: xrange's rule, reached from xrange's premise.
+    #
+    # DISABLED EXPLICITLY, which is the whole reason the key is here: a gauge's dataLabels default
+    # to ON (unlike heatmap's and column's), so merely omitting it would print Highcharts' own
+    # boxed label — N of them stacked at ONE anchor, since Highcharts renders every gauge series'
+    # label at the same point. Swept over the count so no gate can creep back in unnoticed.
+    wide = pd.DataFrame({f"c{i}": [float(i + 1)] for i in range(count)})
+    opts = _needle(wide, list(wide.columns))
+    assert opts["plotOptions"]["gauge"]["dataLabels"] == {"enabled": False}
+    assert all("dataLabels" not in n for n in _needles(opts))
+    assert (
+        len(_needles(opts)) == count
+    )  # ...and every column the user asked for is still drawn
+
+
+def test_needle_off_the_dial_swings_past_the_scale_instead_of_lying_on_it(
+    bookings_frame,
+):
+    # The one way this type could still draw a confident, plausible, WRONG chart, and it is
+    # reachable in one keystroke: `gauge_dial` guarantees every reading sits inside the scale it
+    # DERIVES, but the app's two Dial inputs accept any two numbers. Zoom the scale to 0..50 on a
+    # column that sums to 436 and — left to Highcharts — the needle pegs EXACTLY ON the final tick,
+    # pixel-identical to a true reading of 50 (verified by rendering). Nothing on the chart
+    # contradicts it, and the Static PNG has no tooltip.
+    #
+    # It is also the ONE place the two gauges would disagree: a solid gauge in the same state fills
+    # its arc and PRINTS "north: 436" in the hub, so its reader is told. A needle prints nothing in
+    # the mark. The family must not be honest in one branch and mute in the other.
+    opts = _needle(bookings_frame, ["north"], agg="sum", dial=(0.0, 50.0))
+    assert (
+        _needle_reading(_needles(opts)[0]) == 436.0
+    )  # the TRUE value still reaches the chart
+    assert opts["yAxis"]["max"] == 50.0  # ...on a dial that cannot show it
+    assert (
+        opts["plotOptions"]["gauge"]["overshoot"] == 5
+    )  # ...so the needle swings PAST the end
+    js = make_chart(
+        bookings_frame, "gauge", None, ["north"], agg="sum", dial=(0.0, 50.0)
+    ).to_js_literal()
+    assert js and "overshoot:5" in "".join(js.split())  # and it survives the round-trip
+
+
+def test_needle_face_carries_no_grid_not_even_the_minor_one(bookings_frame):
+    # The MINOR gridline is the load-bearing half, which is exactly backwards from what you would
+    # guess. `_themed` writes a `gridLineColor` onto every axis it finds, so the MAJOR width must
+    # be pinned or dark-mode readers get concentric gridlines nobody asked for. But NOTHING themes
+    # the minor one, and Highcharts defaults it to 1px of `#f2f2f2` — invisible on the light dial
+    # face, and a BLAZING WHITE STARBURST across the dark one. Verified by rendering, on a chart
+    # whose every unit test passed: the options were right and the picture was not.
+    opts = _needle(bookings_frame, ["north"], dark=True)
+    assert opts["yAxis"]["gridLineWidth"] == 0
+    assert opts["yAxis"]["minorGridLineWidth"] == 0
+    assert opts["yAxis"]["minorTickWidth"] == 0
+
+
+@pytest.mark.parametrize("chart_type", GAUGE_TYPES)
+def test_gauge_family_rounds_a_reading_that_divides(chart_type, bookings_frame):
+    # A bare `{point.y}` prints the double, and the double is what an AGGREGATION hands you: the
+    # mean of nine integer percentages is 66.44444444444444, which ran off the side of the chart
+    # in a colour-matched 20-character smear. It is the one flaw an options-dict assertion can
+    # NEVER see, because the number is not in the options at all — only the format string is.
+    #
+    # Swept over the FAMILY because the bug was the family's: `solidgauge` had it too, and its own
+    # sample merely happens to divide evenly (436/8 = 54.5). Two types sharing one reduction must
+    # round it one way, or the number a reader compares between them is formatted by whichever
+    # branch they happened to open.
+    opts = build_options(bookings_frame, chart_type, None, ["north"], agg="mean")
+    tooltip = opts["tooltip"]["pointFormat"]
+    assert ":,.1f}" in tooltip and "{point.y}" not in tooltip
+    # ...and the IN-MARK label, which is where the smear was actually SEEN. Asserting only the
+    # tooltip is what let a revert of the solidgauge half sit here undetected: the comment above
+    # described a bug in the hub label while the assertion checked a different string entirely.
+    # A test that claims more than it checks is how the thing it claims to pin comes back.
+    labels = opts["plotOptions"][chart_type]["dataLabels"]
+    if labels.get("enabled"):  # the needle prints nothing in the mark; the ring does
+        assert ":,.1f}" in labels["format"] and "{point.y}" not in labels["format"]
+    # And on the emitted JS, because a format string is only a string until Highcharts reads it:
+    # this is what proves it survives the round-trip as a quoted JS literal rather than being
+    # mangled into something the browser cannot parse.
+    js = make_chart(
+        bookings_frame, chart_type, None, ["north"], agg="mean"
+    ).to_js_literal()
+    assert js and "{point.y}'" not in "".join(js.split())
+
+
+def test_needle_tooltip_names_the_series_not_the_point(bookings_frame):
+    # A gauge series holds exactly ONE point, so the mark's identity is not on the point at all.
+    # It IS the series. (`{point.name}` renders blank; `{point.category}` reads an axis that has
+    # no categories.) The tooltip is also the only place the EXACT reading survives, now that
+    # nothing is printed in the mark — so it is the one thing the interactive mode has that the
+    # Static PNG does not, which is a real (and stated) cost of the axis-instead-of-labels choice.
+    opts = _needle(bookings_frame, ["north"])
+    assert opts["tooltip"]["pointFormat"] == "{series.name}: <b>{point.y:,.1f}</b>"
+
+
+def test_needle_takes_a_custom_palette_and_a_short_one_cycles(bookings_frame):
+    short = ["#111111", "#222222"]
+    opts = _needle(bookings_frame, ["north", "south", "emea"], colors=short)
+    # WRAPS rather than IndexErrors — a needle's hue is its arbitrary IDENTITY, so it rides the
+    # overridable palette (waterfall's semantic red-means-loss is the opposite case).
+    assert [n["dial"]["backgroundColor"] for n in _needles(opts)] == [*short, "#111111"]
+
+
+def test_needle_no_plot_bands_because_the_data_never_said_low_was_bad(bookings_frame):
+    # The red/amber/green zones a speedometer is popularly drawn with are a JUDGMENT, and the user
+    # declared no target — they picked columns and a reduction. Solidgauge's argument against
+    # `yAxis.stops`, unchanged. (It would also be a poor band: `thickness`, `innerRadius` and
+    # `outerRadius` are all accepted by Chart.from_options and silently dropped.)
+    opts = _needle(bookings_frame, ["north"])
+    assert "plotBands" not in opts["yAxis"]
+    assert "stops" not in opts["yAxis"]
+
+
+def test_needle_ignores_x_col_entirely(bookings_frame):
+    # The gauge family's defining pin, and the load-bearing half is the second one: this branch
+    # sits ABOVE the shared `_label_ok` filter, and a row filter over an AGGREGATE does not drop a
+    # mark — it silently changes a NUMBER.
+    without = make_chart(bookings_frame, "gauge", None, ["north"]).to_js_literal()
+    with_x = make_chart(bookings_frame, "gauge", "week", ["north"]).to_js_literal()
+    assert without == with_x
+    unlabelled = bookings_frame.assign(week=[float("nan")] * 8)
+    (needle,) = _needles(_needle(unlabelled, ["north"], agg="sum"))
+    assert _needle_reading(needle) == 436.0  # every row still counted
+
+
+def test_needle_light_mode_shape_and_dark_mode_themes_the_dial_face(bookings_frame):
+    light = _needle(bookings_frame, ["north", "south"], dark=False)
+    assert all(f["backgroundColor"] == "#f1f5f9" for f in light["pane"]["background"])
+
+    dark = _needle(bookings_frame, ["north", "south"], dark=True)
+    # The family's ONE hook, widened from solidgauge's: the dial FACE. Left unset it takes a
+    # Highcharts default that _LIGHT_COLOR_SCHEME_CSS pins to its LIGHT resolution in BOTH themes,
+    # so the dial would sit on a glaring white rail against the dark shell (verified by rendering:
+    # a white arc, unmissable). It is the only hook this type NEEDS — its axis is a real yAxis
+    # dict, so `_themed`'s generic axis loop has already coloured the labels, ticks and line.
+    assert all(f["backgroundColor"] == "#334155" for f in dark["pane"]["background"])
+    assert dark["yAxis"]["labels"]["style"][
+        "color"
+    ]  # ...themed for free, unlike the ring's
+    assert dark["yAxis"]["tickColor"]
+    # The needle hues are untouched (the palette is theme-shared), and so is the slate pivot.
+    assert [n["dial"]["backgroundColor"] for n in _needles(dark)] == list(
+        DEFAULT_COLORS[:2]
+    )
+    assert dark["plotOptions"]["gauge"]["pivot"]["backgroundColor"] == "#94a3b8"
+
+
+def test_needle_and_ring_cannot_disagree_about_the_readings_or_the_dial(bookings_frame):
+    # The family invariant, stated as a test: the two types share `_gauge_value` and `gauge_dial`,
+    # so given one frame, one selection and one reduction they MUST reduce to the same numbers and
+    # scale them against the same dial. Only the mark differs. This is what `_dial_from_readings`
+    # makes structural (a function that cannot see a raw column cannot derive a dial from one) —
+    # and this test is what would catch the two branches drifting apart if anyone ever inlined it.
+    cols = ["north", "south", "emea", "partner_deals"]
+    for agg in GAUGE_AGGREGATIONS:
+        ring = _gauge(bookings_frame, cols, agg=agg)
+        needle = _needle(bookings_frame, cols, agg=agg)
+        assert [_reading(r) for r in _rings(ring)] == [
+            _needle_reading(n) for n in _needles(needle)
+        ]
+        assert (ring["yAxis"]["min"], ring["yAxis"]["max"]) == (
+            needle["yAxis"]["min"],
+            needle["yAxis"]["max"],
+        )
+
+
+def test_server_utilization_sample_builds_a_needle_gauge():
+    from sample_data import SAMPLES
+
+    df = SAMPLES["Server utilization (gauge)"]()
+    cols = ["cpu_pct", "memory_pct", "disk_pct", "swap_pct"]
+    opts = _needle(df, cols, agg="mean")
+    needles = _needles(opts)
+    assert len(needles) == 4
+    # A mean of percentages lands the derived dial on the scale the reader already has in mind.
+    assert opts["yAxis"]["max"] == 100.0
+    assert (
+        _needle_reading(needles[3]) is EnforcedNull
+    )  # the trap, reachable from the app
+    # ...and the three live readings SPREAD, which is what a needle gauge is for.
+    live = [_needle_reading(n) for n in needles[:3]]
+    assert max(live) - min(live) > 15
+
+
+# --------------------------------------------------------------------------- #
 # Static-PNG failure messages (the export server's three different answers)
 # --------------------------------------------------------------------------- #
 class _FakeResponse:
@@ -4977,58 +5443,78 @@ def test_app_chart_type_badge_reflects_selection(app):
     assert any("Pie chart" in b for b in badge_texts(app))
 
 
-def _gauge_app(app):
-    """Switch the app to gauge and return it. The default dataset works: its numerics are
-    revenue/cost, which a gauge happily reduces."""
-    app.selectbox[1].set_value("solidgauge").run()  # Chart type -> solidgauge
+# The gauge family's app tests are PARAMETRIZED over GAUGE_TYPES rather than written twice, and
+# that is the point rather than a saving. Every behaviour below — the absent X control, the
+# builder-sourced aggregation picker, the builder-seeded keyless dial and both halves of its
+# re-mint rule, the no-span warning, the KPI — belongs to the FAMILY: it follows from having no
+# label channel and from reducing whole columns against one dial, which is exactly what
+# `GAUGE_TYPES` means. A second copy would let the two drift, and the drift would be invisible.
+# Only the emitted `chart.type` is per-type, and it is threaded through as a literal.
+def _gauge_app(app, chart_type: str):
+    """Switch the app to one of the gauge types and return it. The default dataset works: its
+    numerics are revenue/cost, which either gauge happily reduces."""
+    app.selectbox[1].set_value(chart_type).run()  # Chart type
     assert not app.exception
     return app
 
 
-def test_app_switch_to_gauge_hides_the_x_control_and_shows_the_dial_controls(app):
-    # The FIRST SUBTRACTIVE control change in this app: every other type's extra widget is
-    # additive (bubble's Size, sankey's Target, sunburst's Parent, xrange's End), but gauge
-    # REMOVES the X selectbox — it has no label channel, so a control there would do nothing,
+@pytest.mark.parametrize("chart_type", GAUGE_TYPES)
+def test_app_switch_to_gauge_hides_the_x_control_and_shows_the_dial_controls(
+    app, chart_type
+):
+    # The ONLY SUBTRACTIVE control change in this app: every other type's extra widget is
+    # additive (bubble's Size, sankey's Target, sunburst's Parent, xrange's End), but the gauge
+    # family REMOVES the X selectbox — no label channel, so a control there would do nothing,
     # and a control that does nothing is a lie in the UI.
     assert any(sb.label == "Category (X) axis" for sb in app.selectbox)
-    _gauge_app(app)
+    _gauge_app(app, chart_type)
     assert not any(sb.label == "Category (X) axis" for sb in app.selectbox)
     assert any(sb.label == "Reduce each column by" for sb in app.selectbox)
     assert [n.label for n in app.number_input] == ["Dial min", "Dial max"]
-    # Multi-select Y: each column is one ring.
+    # Multi-select Y: each column is one mark (a ring, or a needle).
     assert app.pills
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'solidgauge'" in app.code[0].value
-    assert "pane" in app.code[0].value  # without which the iframe is silently blank
+    assert f"type: '{chart_type}'" in app.code[0].value
+    # The solid gauge's pane is what resolves highcharts-more — without it the iframe is silently
+    # blank while the PNG renders perfectly. The needle's pane is only geometry (it resolves the
+    # module from chart.type alone), but both emit one, so the assertion holds for the family.
+    assert "pane" in app.code[0].value
 
 
-def test_app_gauge_aggregation_picker_offers_exactly_the_builders_reductions(app):
+@pytest.mark.parametrize("chart_type", GAUGE_TYPES)
+def test_app_gauge_aggregation_picker_offers_exactly_the_builders_reductions(
+    app, chart_type
+):
     # Sourced from the builder, so the app can never offer a reduction the builder rejects —
     # `coordinate_columns`' can't-drift rule, applied to a POLICY rather than to a column.
-    _gauge_app(app)
+    _gauge_app(app, chart_type)
     picker = next(sb for sb in app.selectbox if sb.label == "Reduce each column by")
     assert list(picker.options) == list(GAUGE_AGGREGATIONS)
 
 
-def test_app_gauge_dial_defaults_come_from_the_builder(app):
-    # The can't-drift rule applied, for the first time, to a widget's VALUE rather than to its
-    # options: the number the app SHOWS is the very dial the chart DRAWS. The app must not
-    # recompute it — a max derived here from the raw column would be smaller than every ring
-    # under `sum`, pinning them all at 100% with nothing on the page to say why.
+@pytest.mark.parametrize("chart_type", GAUGE_TYPES)
+def test_app_gauge_dial_defaults_come_from_the_builder(app, chart_type):
+    # The can't-drift rule applied to a widget's VALUE rather than to its options: the number the
+    # app SHOWS is the very dial the chart DRAWS. The app must not recompute it — a max derived
+    # here from the raw column would be smaller than every reading under `sum`, pinning every mark
+    # at 100% with nothing on the page to say why.
     from sample_data import SAMPLES
 
-    _gauge_app(app)
+    _gauge_app(app, chart_type)
     df = next(iter(SAMPLES.values()))()
     y_cols = [p for p in app.pills[0].value]
     low, high = gauge_dial(df, y_cols, "sum")
     assert [n.value for n in app.number_input] == [low, high]
 
 
-def test_app_gauge_dial_override_reaches_the_chart_and_survives_an_inert_rerun(app):
+@pytest.mark.parametrize("chart_type", GAUGE_TYPES)
+def test_app_gauge_dial_override_reaches_the_chart_and_survives_an_inert_rerun(
+    app, chart_type
+):
     # HALF ONE of the keyless-widget decision. A typed dial is scoped to its derivation, not to
     # every rerun: it survives a change that cannot affect it (the title).
-    _gauge_app(app)
+    _gauge_app(app, chart_type)
     app.number_input[1].set_value(1000.0).run()
     assert not app.exception
     _reveal_config(app)
@@ -5038,14 +5524,15 @@ def test_app_gauge_dial_override_reaches_the_chart_and_survives_an_inert_rerun(a
     assert app.number_input[1].value == 1000.0  # the override stands
 
 
-def test_app_gauge_dial_re_mints_when_the_aggregation_changes(app):
+@pytest.mark.parametrize("chart_type", GAUGE_TYPES)
+def test_app_gauge_dial_re_mints_when_the_aggregation_changes(app, chart_type):
     # HALF TWO, and the reason there is NO `key=` on these inputs. A dial derives from the DATA
     # under a REDUCTION, so an override of it is meaningless the moment either changes: a max of
-    # 500 typed against `sum` would leave every ring at ~1% under `mean`. A `key=` is how you
+    # 500 typed against `sum` would leave every mark at ~1% under `mean`. A `key=` is how you
     # would CAUSE that — with a key, `value=` is honoured only on the FIRST render, so the stale
     # number would become permanent and silent. Re-minting is the INTENDED behaviour here, and
     # it is visible: the box shows the newly derived number.
-    _gauge_app(app)
+    _gauge_app(app, chart_type)
     app.number_input[1].set_value(9999.0).run()
     assert app.number_input[1].value == 9999.0
     picker = next(sb for sb in app.selectbox if sb.label == "Reduce each column by")
@@ -5054,22 +5541,34 @@ def test_app_gauge_dial_re_mints_when_the_aggregation_changes(app):
     assert app.number_input[1].value != 9999.0  # re-derived, not carried over
 
 
-def test_app_gauge_a_dial_with_no_span_warns_instead_of_crashing(app):
+@pytest.mark.parametrize("chart_type", GAUGE_TYPES)
+def test_app_gauge_a_dial_with_no_span_warns_instead_of_crashing(app, chart_type):
     # The third builder error reachable from this page (after sunburst's cycle and xrange's
     # axis mismatch), and the first that is not about a COLUMN at all: two number inputs accept
     # any two numbers, so a max at or below the min is one keystroke away. The interactive path
     # does not catch builder errors, so this must warn and stop rather than throw a traceback.
-    _gauge_app(app)
+    _gauge_app(app, chart_type)
     app.number_input[1].set_value(-10.0).run()  # max below min
     assert not app.exception
     assert app.warning
     assert "must be a finite number above its minimum" in app.warning[0].value
 
 
-def test_app_gauge_kpi_counts_the_rings_as_series(app):
-    # Gauge is deliberately absent from MARK_METRICS: its marks ARE its series, so the default
-    # "Series plotted" is already literally the ring count. An entry would force a count_marks
-    # rule that only restated len(y_cols).
-    _gauge_app(app)
+@pytest.mark.parametrize("chart_type", GAUGE_TYPES)
+def test_app_gauge_kpi_counts_the_marks_as_series(app, chart_type):
+    # The family is deliberately absent from MARK_METRICS: its marks ARE its series, so the
+    # default "Series plotted" is already literally the ring/needle count. An entry would force a
+    # count_marks rule that only restated len(y_cols) — the can't-drift rule run backwards.
+    _gauge_app(app, chart_type)
     metrics = _metrics(app)
     assert metrics["Series plotted"] == str(len(app.pills[0].value))
+
+
+def test_app_needle_gauge_y_control_names_the_mark_it_draws(app):
+    # The one place the two types' controls DIFFER, and the reason it is worth differing: a
+    # reader picking columns should be told what each one will BECOME. Same widget, same
+    # cardinality, different noun.
+    _gauge_app(app, "solidgauge")
+    assert "Rings" in app.pills[0].label
+    _gauge_app(app, "gauge")
+    assert "Needles" in app.pills[0].label

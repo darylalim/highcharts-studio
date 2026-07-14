@@ -19,6 +19,7 @@ import streamlit as st
 
 from highcharts_builder import (
     GAUGE_AGGREGATIONS,
+    GAUGE_TYPES,
     SUPPORTED_TYPES,
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
@@ -279,9 +280,11 @@ with st.sidebar:
             "dates (ISO-8601, e.g. `2026-01-05`) or plain numbers (sprint 12 → 18) — but "
             "both the same kind. A zero-length bar is a **milestone** and still draws; a "
             "backwards one is dropped\n"
-            "- **solidgauge** — one **ring per numeric column**, each collapsed to a single number "
-            "by the aggregation you choose (sum / mean / …), all read against one shared "
-            "dial. There is **no X column**: a gauge has no labels, only readings\n"
+            "- **solidgauge / gauge** — one mark per **numeric column**, each collapsed to a "
+            "single number by the aggregation you choose (sum / mean / …), all read against one "
+            "shared dial. There is **no X column**: a gauge has no labels, only readings. "
+            "`solidgauge` sweeps an **arc** per column; `gauge` points a **needle** per column "
+            "at a scale it actually draws\n"
             "- **line / spline / area / areaspline / column / bar** — a category X axis with "
             "one or more numeric Y series"
         ),
@@ -341,12 +344,15 @@ with st.sidebar:
         # HOW MUCH. Single-select, like every other extra-column type — a second start column
         # would be a second bar per row, which is a second chart.
         x_label, y_label, multi = "Lane / task labels", "Start", False
-    elif chart_type == "solidgauge":
-        # The only type with NO X control at all (see the selectbox below): its marks are the
+    elif chart_type in GAUGE_TYPES:
+        # The two types with NO X control at all (see the selectbox below): their marks are the
         # SELECTED COLUMNS, each collapsed to one number, so there is no label column to pick.
         # Multi-select Y — and here the plural is the whole chart, not a convenience: each
-        # column is one ring, which is why gauge needs no MARK_METRICS entry (marks == series).
-        x_label, y_label, multi = "", "Rings (Y) — one or more", True
+        # column is one mark, which is why neither needs a MARK_METRICS entry (marks == series).
+        # Only the noun differs, and it is worth differing: a reader picking columns should be
+        # told what each one will BECOME.
+        mark = "Rings" if chart_type == "solidgauge" else "Needles"
+        x_label, y_label, multi = "", f"{mark} (Y) — one or more", True
     elif chart_type in ("scatter", "bubble"):
         x_label, y_label, multi = "X axis", "Y axis (one or more)", True
     elif chart_type == "heatmap":
@@ -366,7 +372,7 @@ with st.sidebar:
     # passing a column the builder must ignore lies in the call site AND in three cache keys
     # (the chart would re-render on a change that cannot affect it). `build_options` takes
     # `str | None` precisely so this can be honest.
-    x_col = None if chart_type == "solidgauge" else st.selectbox(x_label, df.columns)
+    x_col = None if chart_type in GAUGE_TYPES else st.selectbox(x_label, df.columns)
 
     # Sankey's second node column, sitting next to Source so the two ends of a link
     # read as a pair. Drawn from every column, not numeric_cols like bubble's
@@ -474,12 +480,12 @@ with st.sidebar:
     # column. They sit BELOW the Y control because the dial is derived from the SELECTED columns
     # under the SELECTED reduction. Inert for every other type.
     agg, dial = GAUGE_AGGREGATIONS[0], None
-    if chart_type == "solidgauge":
+    if chart_type in GAUGE_TYPES:
         agg = st.selectbox(
             "Reduce each column by",
             GAUGE_AGGREGATIONS,  # from the builder: it can never offer one the builder rejects
             index=0,  # a CONSTANT index, like every other keyless picker in this sidebar
-            help="Each ring shows its column collapsed to **one** number.",
+            help="Each mark shows its column collapsed to **one** number.",
         )
         # The default dial comes FROM THE BUILDER — the very `gauge_dial` call `build_options`
         # makes when `dial is None` — so the number the app SHOWS can never drift from the dial
@@ -636,8 +642,8 @@ with left.container(border=True, height="stretch"):
     # can reach just by uploading a CSV. The interactive path doesn't catch, so it has to be
     # stopped here. The message comes from the builder (explain_tree_error), so this warning
     # cannot drift from the exception it stands in for.
-    # (`x_col is not None` is true by construction here — gauge is the only type that passes
-    # None, and it is not sunburst — but it is the narrowing the widened signature now needs.)
+    # (`x_col is not None` is true by construction here — the gauge family are the only types
+    # that pass None, and neither is sunburst — but it is the narrowing the signature now needs.)
     if chart_type == "sunburst" and parent_col is not None and x_col is not None:
         problem = explain_tree_error(df, x_col, parent_col, y_cols[0])
         if problem:
@@ -672,13 +678,13 @@ with left.container(border=True, height="stretch"):
         if problem:
             st.warning(problem, icon=":material/warning:")
             st.stop()
-    # And gauge's own contradiction, the third builder error reachable from this page and the
-    # first that is not about a COLUMN at all: a dial with no span. The two number inputs accept
-    # any two numbers, so a max at or below the min is one keystroke away — and it makes every
-    # ring an undefined fraction of nothing, which has no right drawing. Same contract as the
-    # two above: the message comes from the builder (explain_gauge_error), so it cannot drift
+    # And the gauge family's own contradiction, the third builder error reachable from this page
+    # and the first that is not about a COLUMN at all: a dial with no span. The two number inputs
+    # accept any two numbers, so a max at or below the min is one keystroke away — and it makes
+    # every mark an undefined fraction of nothing, which has no right drawing. Same contract as
+    # the two above: the message comes from the builder (explain_gauge_error), so it cannot drift
     # from the exception it stands in for.
-    if chart_type == "solidgauge":
+    if chart_type in GAUGE_TYPES:
         problem = explain_gauge_error(dial)
         if problem:
             st.warning(problem, icon=":material/warning:")

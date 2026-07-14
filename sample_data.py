@@ -445,6 +445,63 @@ def _weekly_bookings() -> pd.DataFrame:
     )
 
 
+def _server_utilization() -> pd.DataFrame:
+    """Resource utilization across nine hosts, as percentages — the needle gauge's dataset.
+
+    It is `_weekly_bookings`' sibling and deliberately not its clone: both feed the gauge family,
+    but they exercise the dial from OPPOSITE ends, and between them they cover the two ways a
+    reader can misread one.
+
+    * These columns are PERCENTAGES, so the reduction that means anything is ``mean``, not
+      ``sum`` — and a mean of percentages lands the derived dial almost exactly on 0..100, the
+      scale a reader already has in their head. (``sum`` on this frame is nonsense on purpose:
+      it reads past 600% and the dial dutifully rounds out to 1000, which is the fastest way to
+      SEE what the aggregation picker is actually doing to your numbers. The bookings sample
+      makes the same point with the opposite default.)
+    * The columns are comparable measures of one thing, which is the family's whole
+      precondition: needles sharing ONE dial mean nothing when the columns have different units.
+    * ``disk_pct`` is the point of the type. It sits far from the other two, so the three needles
+      SPREAD across the face instead of bunching — which is what a gauge is for, and what a
+      reader cannot get from three near-identical arcs.
+    * ``swap_pct`` is unreported entirely — the family's headline trap, kept reachable from the
+      app rather than left to a test, exactly as ``partner_deals`` is. ``pd.Series([nan, ...])``
+      sums to ``0.0``, the additive identity, so a naive reduction would swing a needle
+      confidently to the floor of the dial and CLAIM zero swap where the truth is "nobody said".
+      The builder tests for empty above the reducer and keeps the mark as a null: no needle at
+      all, named only in the legend. On a needle this matters MORE than on a ring, because a
+      needle at zero is indistinguishable from a real reading of zero. (``float("nan")``, not
+      ``None``: an all-``None`` column is object dtype, so the app's numeric picker could never
+      offer it and the trap would be out of reach from the UI.)
+
+    ``host`` is an ordinary category column, so the frame stays a good citizen for
+    line/column/bar/heatmap — and it is the column a gauge ignores completely, having no label
+    channel to put it in. It leads the frame deliberately: the app opens on ``line`` with the
+    FIRST column as X, and a numeric first column would trip the x-in-y guard the moment this
+    dataset was selected.
+    """
+    blank = float("nan")
+    return pd.DataFrame(
+        {
+            "host": [
+                "web-01",
+                "web-02",
+                "web-03",
+                "api-01",
+                "api-02",
+                "db-01",
+                "db-02",
+                "cache-01",
+                "batch-01",
+            ],
+            "cpu_pct": [62, 58, 55, 71, 68, 81, 77, 34, 92],  # mean ~66
+            "memory_pct": [71, 68, 74, 66, 70, 88, 85, 41, 79],  # mean ~71
+            "disk_pct": [45, 47, 44, 38, 40, 73, 76, 22, 51],  # mean ~48 — the spread
+            "swap_pct": [blank]
+            * 9,  # nothing reported: a null needle, not a confident zero
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -461,4 +518,5 @@ SAMPLES = {
     "Company headcount (sunburst)": _org_headcount,
     "Product release plan (xrange)": _release_plan,
     "Weekly bookings by region (solidgauge)": _weekly_bookings,
+    "Server utilization (gauge)": _server_utilization,
 }

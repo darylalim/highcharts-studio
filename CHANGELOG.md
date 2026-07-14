@@ -33,6 +33,109 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.8.0] - 2026-07-13
+
+### Added
+
+- **`gauge` chart type** — the needle on a dial, and the second member of the
+  **gauge family**. It spends the name `0.7.0` was deliberately holding for it:
+  `solidgauge` was never given the friendlier `gauge` (which radar's precedent
+  would have licensed) because `gauge` in Highcharts is a genuinely different
+  series type, with its own `DialOptions`/`PivotOptions`. Both are now called
+  what Highcharts calls them, and radar stays the *one* type whose `chart.type`
+  is not its own name.
+- **`GAUGE_TYPES` is now a family**, `SOLID_GAUGE_TYPES + NEEDLE_GAUGE_TYPES`.
+  The tuple was already consulted at exactly the five places where the two types
+  are *identical* — the `x_col is None` exemption, the `agg`/`dial` guard,
+  `count_marks`' no-rule raise, the label-drop sweep's exclusion, and the
+  row-less sweep's null expectation — so splitting it in two while keeping their
+  sum under the old name was the whole of the family plumbing. Every one of those
+  five sites stayed correct for the needle with **no edit at all**.
+- `_dial_from_readings()` — the half of `gauge_dial` that **cannot see a
+  DataFrame**. The family's central invariant ("the dial comes from the readings,
+  never from the raw columns") stops being a rule two branches must remember and
+  becomes a *signature*: a function that cannot see a raw column cannot derive a
+  dial from one.
+- **`Server utilization (gauge)` sample** — percentages across nine hosts, whose
+  `mean` lands the derived dial almost exactly on `0..100`. Carries an entirely
+  unreported `swap_pct` column, putting the family's headline trap on a page you
+  can reach in two clicks.
+
+### Fixed
+
+- The needle gauge's **staggered needle lengths**. Two columns with *equal*
+  readings put two needles at the same angle, and Highcharts draws the later
+  series on top — so at one length the second needle covered the first
+  completely: three series, two visible needles, with the legend still naming
+  three. `marks == series` — the invariant the whole family rests on — was a lie
+  *on screen*, in the one place a reader would never think to check. Staggering
+  exposes each needle's tip in its own hue.
+- **`overshoot`**, which keeps an *overridden* dial honest. `gauge_dial` guarantees
+  every reading sits inside the scale it derives, but the app's two Dial inputs
+  accept any two numbers — so zoom the scale to `0..50` on a column that sums to
+  436 and the needle pegs **exactly on the final tick**, pixel-identical to a true
+  reading of 50, with nothing on the chart to contradict it and no tooltip in the
+  Static PNG. It was also the one place the two gauges would have *disagreed*: a
+  ring in the same state fills its arc and prints `north: 436` in the hub, so its
+  reader is told; a needle prints nothing in the mark. Now the needle swings *past*
+  the last tick — what a real meter does when it slams its end stop.
+- **`_GAUGE_VALUE_FORMAT`**, the family's number format, applied to **both** types.
+  A bare `{point.y}` prints the raw double, and the double is what an aggregation
+  hands you: the mean of nine integer percentages is `66.44444444444444`, which ran
+  off the side of the chart in a 20-character smear. `solidgauge` had the identical
+  latent bug — its own sample merely happens to divide evenly (436/8 = 54.5) — and
+  it is the one flaw an options-dict assertion can never see, since the number is
+  not in the options at all, only the format string is.
+- The stale comment in `build_chart_html` claiming a gauge resolves
+  `highcharts-more` from its `pane`. True of `solidgauge` (drop the pane there
+  and the browser draws an empty SVG while the export server renders perfectly);
+  **false** of `gauge`, which resolves the module from `chart.type` alone. The
+  comment now names the type it is about, because the wrong half of it is a
+  silently blank iframe.
+
+### Notes
+
+Three things the needle does *not* inherit from its sibling, each measured on the
+round-trip or by rendering rather than assumed — and each of which would have been
+a silent bug had solidgauge's answer been copied on faith:
+
+- **The hue.** On a solid gauge a series-level `color` serializes perfectly and
+  reaches *nothing* (the arc reads the point; the legend bullet draws grey and
+  needs a `marker.fillColor`). On a needle, `color` reaches *only* the legend —
+  the needle itself is **black** unless `dial.backgroundColor` says otherwise.
+  Same property, opposite failure. The ring writes its hue to three places, the
+  needle to two, and **not one of them is the same place**.
+- **The module.** As above: `pane` for one, `chart.type` for the other.
+- **The label.** A ring *must* print its readings in the hub — a 360° arc has
+  nowhere to put an axis, so its value can be read against nothing, and it pays for
+  that with a gate, a measured leading and a per-series offset. A needle points
+  **at** an axis, so it prints **nothing in the mark** and needs no gate constant
+  either: `xrange`'s rule, reached from `xrange`'s premise. The sibling's label
+  machinery is not re-tuned here, it is *deleted*. (It was built the other way
+  first, and the renders killed it: the stack, the arc and the subtitle cannot all
+  fit at 300px, and both levers that would have bought the room are closed by the
+  library — see below.)
+
+Three silent drops found and pinned along the way. `Pane.size` discards a
+percentage string (its setter validates `"85%"`, checks it for `%`, then falls off
+the end without ever assigning `self._size` — only the numeric branch writes it),
+which is what every gauge demo on the internet sets. `yAxis.labels.distance`
+rejects `0` with `EmptyValueError` and refuses a negative outright — the same
+`allow_empty` bug as `top_width`. And a `yAxis.plotBands` entry keeps
+`from`/`to`/`color` but drops `thickness`, `innerRadius` and `outerRadius`; the type
+carries no plot bands anyway, since `solidgauge`'s argument against `yAxis.stops`
+holds unchanged — a coloured zone is a *judgment*, and the data never said low was
+bad.
+
+Between them, those first two are why the needle's **pane carries no geometry at
+all** — no `size` *and no `center`*. Without `size`, a hand-placed centre cannot be
+made safe: Highcharts reserves no room for the tick labels outside the pane, so
+every value trades one chart height for another (at 65% it was clean at 300px and
+800px and clipped clean off the canvas at 420). A failure that is not even monotonic
+in the height is the tell that it is not a number to be tuned. Highcharts' own
+default is correct at every height the app offers, because it is the one placement
+that knows what the labels need.
+
 ## [0.7.0] - 2026-07-13
 
 ### Added
@@ -245,6 +348,7 @@ demo notebooks (archived at the `notebooks-archive` tag) into a Streamlit studio
   at two modes.
 - The project was renamed twice on its way to `highcharts-studio`.
 
+[0.8.0]: https://github.com/darylalim/highcharts-studio/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/darylalim/highcharts-studio/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/darylalim/highcharts-studio/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/darylalim/highcharts-studio/compare/v0.4.0...v0.5.0
