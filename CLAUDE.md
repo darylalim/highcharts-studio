@@ -727,16 +727,24 @@ which makes the trap unreachable rather than remembered. (`yAxis.labels.distance
 instance of the same `allow_empty` bug: it rejects `0` with `EmptyValueError` and refuses a
 negative outright.)
 
-Finally, `_GAUGE_VALUE_FORMAT` is the **family's** number format, and fixing the sibling with it is
+Finally, `_gauge_reading_label` is the **family's** number format, and fixing the sibling with it is
 the family working as intended rather than scope creep. A bare `{point.y}` prints the double, and
 the double is what an aggregation hands you: the mean of nine integer percentages is
 `66.44444444444444`, which ran off the side of the chart in a colour-matched 20-character smear.
 `solidgauge` had the identical latent bug — its own sample merely happens to divide evenly
 (436/8 = 54.5) — and it is the one flaw an options-dict assertion can **never** see, because the
-number is not in the options at all, only the format string is. (`.1f`, not a trailing-zero-trimming
-`g`: Highcharts' format strings run through its own `numberFormat`, which implements `f`/`e`/`s`
-and not `g`. So a `sum` of 436 prints `436.0` — one redundant zero on the integers, against an
-unreadable chart on every reduction that divides.)
+number is not in the options at all, only the format string is. The reading is therefore formatted
+in **Python** and baked into each series' own `dataLabels`/`tooltip` string (per series, because a
+gauge point drops a `name` carrying the pre-formatted value — the `radius`/`colorByPoint` silent-drop
+family again — so no shared format token survives). No fixed-decimal *Highcharts* format could do it:
+`numberFormat` implements `f`/`e`/`s` and not `g`, and `.1f` trimmed the smear only by rounding a real
+`0.008` reading to `0.0` — the family's own **confident zero**, the exact lie `_gauge_value` fusses to
+keep an empty column from telling — while `.3f` would ring every integer total with `436.000`. So the
+helper carries one decimal above 1 (the smear, trimmed), ~3 significant figures below it (a small
+reading, preserved), a thousands separator, and stripped trailing zeros — falling back to scientific
+outside `1e-4 .. 1e15`, since a `1e308` cell parses out of a plain CSV and a fixed-decimal format would
+expand it to a 300-digit label. It is pinned in isolation, and — the whole point — so is its **output**,
+not merely the format string that used to hide the absurd number.
 
 ## Run
 

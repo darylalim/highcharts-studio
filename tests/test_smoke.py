@@ -120,6 +120,7 @@ from highcharts_builder import (  # noqa: E402
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     SUPPORTED_TYPES,
+    _gauge_reading_label,
     _needle_radii,
     _pct,
     build_chart_html,
@@ -3846,9 +3847,10 @@ def test_gauge_tooltip_names_the_series_not_the_point_or_the_category(bookings_f
     # A third answer for a third reason: waterfall needs {point.category} (its points are
     # positional), sunburst and xrange need {point.name} (their categories are on the wrong
     # axis) — and a gauge ring holds exactly ONE point, so the mark's identity is not on the
-    # point at all. It IS the series.
-    tip = _gauge(bookings_frame, ["north"])["tooltip"]
-    assert "{series.name}" in tip["pointFormat"]
+    # point at all. It IS the series. The tooltip is PER RING now (the reading is baked in
+    # Python and differs per ring), so it lives on the series, not chart-wide.
+    (ring,) = _rings(_gauge(bookings_frame, ["north"]))
+    assert "{series.name}" in ring["tooltip"]["pointFormat"]
 
 
 def test_gauge_subtitle_states_the_aggregation_and_the_dial(bookings_frame):
@@ -4264,43 +4266,81 @@ def test_needle_face_carries_no_grid_not_even_the_minor_one(bookings_frame):
 
 
 @pytest.mark.parametrize("chart_type", GAUGE_TYPES)
-def test_gauge_family_rounds_a_reading_that_divides(chart_type, bookings_frame):
-    # A bare `{point.y}` prints the double, and the double is what an AGGREGATION hands you: the
-    # mean of nine integer percentages is 66.44444444444444, which ran off the side of the chart
-    # in a colour-matched 20-character smear. It is the one flaw an options-dict assertion can
-    # NEVER see, because the number is not in the options at all — only the format string is.
-    #
-    # Swept over the FAMILY because the bug was the family's: `solidgauge` had it too, and its own
-    # sample merely happens to divide evenly (436/8 = 54.5). Two types sharing one reduction must
-    # round it one way, or the number a reader compares between them is formatted by whichever
-    # branch they happened to open.
-    opts = build_options(bookings_frame, chart_type, None, ["north"], agg="mean")
-    tooltip = opts["tooltip"]["pointFormat"]
-    assert ":,.1f}" in tooltip and "{point.y}" not in tooltip
-    # ...and the IN-MARK label, which is where the smear was actually SEEN. Asserting only the
-    # tooltip is what let a revert of the solidgauge half sit here undetected: the comment above
-    # described a bug in the hub label while the assertion checked a different string entirely.
-    # A test that claims more than it checks is how the thing it claims to pin comes back.
-    labels = opts["plotOptions"][chart_type]["dataLabels"]
-    if labels.get("enabled"):  # the needle prints nothing in the mark; the ring does
-        assert ":,.1f}" in labels["format"] and "{point.y}" not in labels["format"]
+def test_gauge_family_formats_a_reading_honestly_at_every_magnitude(chart_type):
+    # The reading is the ONE flaw an options-dict assertion used to be unable to see: a bare
+    # `{point.y}` prints the raw double, so a `mean` renders `66.44444444444444` off the side of
+    # the chart. `.1f` trimmed that but rounded a real 0.008 reading to "0.0" — the family's own
+    # confident zero, the exact lie `_gauge_value` fusses to keep an empty column from telling.
+    # No FIXED-decimal Highcharts format is honest at both ends (Highcharts has no `g`), so the
+    # reading is now formatted in PYTHON (`_gauge_reading_label`) and BAKED into each series' own
+    # format string — which is what finally puts the NUMBER, not just the format string, under
+    # test. Swept over the FAMILY because both types share `_gauge_value` and one reduction: they
+    # must format one number one way, or a reader comparing them gets whichever branch they opened.
+    smear = pd.DataFrame({"m": [1.0] * 8 + [2.0]})  # mean 1.111..., a repeating decimal
+    (series,) = build_options(smear, chart_type, None, ["m"], agg="mean")["series"]
+    assert (
+        series["tooltip"]["pointFormat"] == "{series.name}: <b>1.1</b>"
+    )  # smear trimmed
+    assert "{point.y}" not in series["tooltip"]["pointFormat"]  # the raw double is gone
+
+    tiny = pd.DataFrame(
+        {"t": [0.008, 0.008]}
+    )  # a real reading `.1f` would flatten to "0.0"
+    (series,) = build_options(tiny, chart_type, None, ["t"], agg="mean")["series"]
+    assert (
+        series["tooltip"]["pointFormat"] == "{series.name}: <b>0.008</b>"
+    )  # preserved
+
+    # ...and the IN-MARK hub label, which is where the solidgauge smear was actually SEEN (the
+    # needle prints nothing in the mark). The same baked reading, so the two cannot disagree.
+    if chart_type == "solidgauge":
+        (ring,) = build_options(smear, chart_type, None, ["m"], agg="mean")["series"]
+        assert ring["dataLabels"]["format"] == "{series.name}: 1.1"
+
     # And on the emitted JS, because a format string is only a string until Highcharts reads it:
-    # this is what proves it survives the round-trip as a quoted JS literal rather than being
-    # mangled into something the browser cannot parse.
-    js = make_chart(
-        bookings_frame, chart_type, None, ["north"], agg="mean"
-    ).to_js_literal()
-    assert js and "{point.y}'" not in "".join(js.split())
+    # the baked reading must survive the round-trip and no `{point.y}` token may reappear.
+    js = make_chart(tiny, chart_type, None, ["t"], agg="mean").to_js_literal()
+    flat = "".join(js.split()) if js else ""
+    assert js and "0.008" in flat and "{point.y}" not in flat
+
+
+def test_gauge_reading_label_is_honest_and_length_bounded_at_every_magnitude():
+    # The helper tested in isolation (like `_needle_radii`), because it is the one thing an
+    # options-dict assertion structurally cannot see the OUTPUT of: only the format string.
+    # Big numbers keep one decimal and a separator; small ones keep ~3 significant figures rather
+    # than rounding to a confident zero; a null reading prints nothing.
+    assert _gauge_reading_label(436.0) == "436"  # no trailing zero on an integer total
+    assert _gauge_reading_label(66.44444444444444) == "66.4"  # the mean smear, trimmed
+    assert _gauge_reading_label(1234567.0) == "1,234,567"  # separators, not scientific
+    assert _gauge_reading_label(0.008) == "0.008"  # NOT "0.0" — the whole fix
+    assert _gauge_reading_label(0.0) == "0"
+    assert _gauge_reading_label(-155.0) == "-155"
+    # A non-finite float has no reading to print — guarded so it can't leak "nan"/"inf" into a
+    # label (belt-and-suspenders: `_gauge_value` already returns EnforcedNull for these).
+    assert _gauge_reading_label(float("nan")) == ""
+    assert _gauge_reading_label(float("inf")) == ""
+    assert (
+        _gauge_reading_label("absent") == ""
+    )  # EnforcedNull stands in for a non-float
+
+    # The label must stay SHORT even for a magnitude a dial cannot show — a 1e308 cell parses out
+    # of a plain CSV (the module guards it elsewhere), and a fixed-decimal format would expand it
+    # to a 300-digit string dumped into the emitted JS. Scientific keeps it legible and bounded.
+    assert _gauge_reading_label(1e308) == "1e+308"
+    for value in (1e308, 5e-324, 9e-5, 1.5e15, 1e-4, 9.99e14):
+        assert len(_gauge_reading_label(value)) < 20
 
 
 def test_needle_tooltip_names_the_series_not_the_point(bookings_frame):
     # A gauge series holds exactly ONE point, so the mark's identity is not on the point at all.
     # It IS the series. (`{point.name}` renders blank; `{point.category}` reads an axis that has
-    # no categories.) The tooltip is also the only place the EXACT reading survives, now that
-    # nothing is printed in the mark — so it is the one thing the interactive mode has that the
-    # Static PNG does not, which is a real (and stated) cost of the axis-instead-of-labels choice.
-    opts = _needle(bookings_frame, ["north"])
-    assert opts["tooltip"]["pointFormat"] == "{series.name}: <b>{point.y:,.1f}</b>"
+    # no categories.) The tooltip is PER NEEDLE (the reading is baked in Python) and is the only
+    # place the exact reading survives, now that nothing is printed in the mark — the one thing
+    # interactive mode has that the Static PNG does not, a real cost of axis-instead-of-labels.
+    (needle,) = _needles(_needle(bookings_frame, ["north"], agg="sum"))
+    assert needle["tooltip"]["pointFormat"] == "{series.name}: <b>436</b>"
+    # ...and there is no chart-wide tooltip pointFormat left to drift from the per-series one.
+    assert "pointFormat" not in _needle(bookings_frame, ["north"]).get("tooltip", {})
 
 
 def test_needle_takes_a_custom_palette_and_a_short_one_cycles(bookings_frame):

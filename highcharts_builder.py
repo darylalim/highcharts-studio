@@ -396,25 +396,6 @@ _GAUGE_EMPTY_DIAL = (
 )  # nothing to scale: a drawable dial, never a degenerate 0..0
 _GAUGE_NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
 
-# How BOTH gauges print a reading, in the mark and in the tooltip. A bare `{point.y}` prints the
-# double, and the double is what an AGGREGATION hands you: the mean of nine integer percentages is
-# `66.44444444444444`, which ran off the side of the chart in a colour-matched 20-character smear
-# (verified by rendering — and passed by every unit test in the suite, because the emitted `format`
-# string was right; only the NUMBER it formatted was absurd). It is the one flaw an options-dict
-# assertion can never see, since the value is not in the options at all.
-#
-# This is the FAMILY's format, not the needle's, and fixing the sibling with it is not scope creep
-# but the whole point of the family: `solidgauge` had the identical latent bug — its own sample
-# just happens to divide evenly (436/8 = 54.5), so under `mean` on any other CSV it would have
-# printed the same smear. Two types sharing one reduction must round it one way, or the number a
-# reader compares between them is formatted by whichever branch they happened to open.
-#
-# `.1f` and not a trailing-zero-trimming `g`: Highcharts' format strings run through its own
-# `numberFormat`, which implements `f`/`e`/`s` and NOT `g`. So a `sum` of 436 prints as `436.0`.
-# That is the honest trade — one redundant zero on the integers, against an unreadable chart on
-# every reduction that divides.
-_GAUGE_VALUE_FORMAT = "{point.y:,.1f}"
-
 # ---- the NEEDLE gauge -------------------------------------------------------------------
 # The arc the dial is drawn on. A solid gauge sweeps a full 360° because an arc's LENGTH is its
 # reading and a circle is the most length you can get; a needle's reading is its ANGLE, so the
@@ -523,7 +504,7 @@ _GAUGE_DEFAULT_AGG = "sum"
 _GAUGE_BAD_AGG = "Unsupported gauge aggregation {agg!r}; expected one of {allowed}"
 _GAUGE_BAD_DIAL = (
     "The dial's maximum ({high}) must be a finite number above its minimum ({low}): a dial "
-    "with no span makes every ring an undefined fraction of nothing."
+    "with no span makes every mark an undefined fraction of nothing."
 )
 
 # Highcharts >= 13 expresses its own default colors as CSS custom properties wrapped in
@@ -1018,6 +999,66 @@ def _gauge_value(values: pd.Series, agg: str) -> object:
         return _num(_GAUGE_REDUCERS[agg](clean))
 
 
+def _gauge_reading_label(value: object) -> str:
+    """One reading, formatted for the hub label and the tooltip — honestly at EVERY magnitude.
+
+    The FAMILY's number format, shared by both gauges, and computed in Python on PURPOSE rather
+    than deferred to a Highcharts ``{point.y:...}`` format string. The reason is that Highcharts'
+    ``numberFormat`` implements ``f``/``e``/``s`` but not ``g``, and NO fixed-decimal format is
+    honest at both ends of the range a reduction can produce: a bare ``{point.y}`` prints the raw
+    double (the mean of nine integers is ``66.44444444444444``, a colour-matched smear off the
+    side of the chart), ``.1f`` trims that smear but rounds a real ``0.008`` reading to ``0.0`` —
+    the family's own "confident zero", the exact lie ``_gauge_value`` fusses to keep an EMPTY
+    column from telling — while ``.3f`` would ring every integer total with ``436.000``. The
+    number is also the one flaw an options-dict test can never catch, since it is not in the
+    options at all, only the format string is; formatting HERE puts it back under test.
+
+    So, across the legible range: one decimal for magnitudes >= 1 (which trims the smear, and
+    matches the old ``.1f`` for the range gauges usually live in), and enough decimals to keep ~3
+    significant figures below 1 (which preserves a small reading), with trailing zeros stripped
+    and a thousands separator — ``436`` -> ``"436"``, ``66.444...`` -> ``"66.4"``,
+    ``0.008`` -> ``"0.008"``, ``1234567`` -> ``"1,234,567"``. OUTSIDE that range it falls back to
+    scientific, and that is not fussiness: a ``1e308`` cell parses out of a plain CSV (see
+    ``_gauge_value``), and a fixed-decimal ``.1f`` would expand it to a 300-DIGIT label (a denormal
+    the same, with 300 decimals) — so a magnitude a dial cannot legibly show is written ``1e+308``
+    instead. Plain ``g`` cannot do the whole job, since it switches to scientific at a mere
+    ``1e6`` and would blank the thousands-separated form a gauge wants for millions. An absent
+    reading (``EnforcedNull``) has nothing to print, and its null point draws neither label nor
+    tooltip, so it formats to the empty string.
+    """
+    if not isinstance(value, float) or not math.isfinite(value):
+        return ""  # EnforcedNull (or a non-finite float): the point draws no label or tooltip
+    if value == 0:
+        return "0"  # avoid log10(0); a plain zero needs no decimals
+    magnitude = abs(value)
+    if not (1e-4 <= magnitude < 1e15):
+        return f"{value:.4g}"  # a dial can't legibly show it; keep the label short
+    decimals = 1 if magnitude >= 1 else 2 - math.floor(math.log10(magnitude))
+    text = f"{value:,.{decimals}f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _gauge_reading_formats(value: object) -> dict[str, dict[str, str]]:
+    """The per-series ``dataLabels``/``tooltip`` format dicts for one gauge reading.
+
+    The reading is baked in as a LITERAL (``_gauge_reading_label`` yields only digits, a comma,
+    a dot and a minus — nothing a format parser will touch), while ``{series.name}`` stays a
+    TOKEN so a column name carrying a ``{`` or ``%`` can't break the string. Emitted per series
+    because the value differs per series and Highcharts has no format token that survives here:
+    a point-level ``name`` carrying the pre-formatted string is silently dropped from a gauge
+    point (the ``radius``/``colorByPoint`` family again), so the only place a per-series value
+    can live is a per-series ``format``.
+    """
+    reading = _gauge_reading_label(value)
+    return {
+        "dataLabels": {"format": f"{{series.name}}: {reading}"},
+        "tooltip": {
+            "headerFormat": "",
+            "pointFormat": f"{{series.name}}: <b>{reading}</b>",
+        },
+    }
+
+
 def _check_gauge_agg(agg: str) -> None:
     if agg not in _GAUGE_REDUCERS:
         raise ValueError(_GAUGE_BAD_AGG.format(agg=agg, allowed=GAUGE_AGGREGATIONS))
@@ -1090,7 +1131,8 @@ def _dial_from_readings(readings: list[object]) -> tuple[float, float]:
     exact bug the invariant exists to forbid (under ``sum`` a reading EXCEEDS every observation in
     its own column — 436 against a maximum cell of 63 — so a raw-column dial pins every mark past
     the end of its own scale and draws "everyone smashed target" on data that says nothing of the
-    sort). Both gauges call ``gauge_dial``, so both are held to it by construction.
+    sort). Both gauge branches (and the exported ``gauge_dial``) derive their scale through HERE
+    off the readings they already reduced, so all three are held to the invariant by construction.
     """
     # `isinstance(..., float)` IS the "a reading, or an absence?" question: `_gauge_value`
     # returns one or the other, and an EnforcedNull is not a number to take a min over.
@@ -1873,7 +1915,13 @@ def build_options(
         # NUMBER. Filter three rows out of thirteen because their (unused) label cell happened
         # to be blank and the total comes back smaller — drawn confidently, with nothing on the
         # page saying so. Sitting above the filter makes that unreachable rather than unlikely.
-        low, high = dial if dial is not None else gauge_dial(df, y_cols, agg)
+        #
+        # Reduce each column ONCE, here, and reuse the readings for both the dial and the arcs:
+        # `gauge_dial` would reduce them all a second time (its readings-derived dial is exactly
+        # `_dial_from_readings` of these), and `agg` is already validated above, so the derivation
+        # is called directly. When `dial` is an override the readings still feed the arcs.
+        readings = [_gauge_value(df[col], agg) for col in y_cols]
+        low, high = dial if dial is not None else _dial_from_readings(readings)
         rings = _gauge_rings(len(y_cols))
         # A ring's hue is its arbitrary IDENTITY, like a pie slice's, so it reads from the
         # OVERRIDABLE `colors` (waterfall's semantic red-means-loss is the opposite case),
@@ -1897,8 +1945,14 @@ def build_options(
 
         tracks: list[dict[str, object]] = []
         rings_out: list[dict[str, object]] = []
-        for index, (col, (outer, inner)) in enumerate(zip(y_cols, rings, strict=True)):
+        for index, (col, value, (outer, inner)) in enumerate(
+            zip(y_cols, readings, rings, strict=True)
+        ):
             hue = next(hues)
+            # The hub label and the tooltip, formatted in Python (see `_gauge_reading_label`) so a
+            # small reading survives and a mean smear does not — carried PER RING because the value
+            # differs per ring and no format token survives on a gauge point.
+            formats = _gauge_reading_formats(value)
             # The TRACK: a ring's unfilled remainder, and the only thing that says how far round
             # the ring has NOT gone. It is chart furniture, not a mark, so it lives on the PANE
             # — which is why gauge's dark-mode hook is the first to reach a top-level key.
@@ -1955,9 +2009,12 @@ def build_options(
                 # ("Series plotted") would count a ring the chart never drew.
                 "data": (
                     [EnforcedNull]
-                    if (value := _gauge_value(df[col], agg)) is EnforcedNull
+                    if value is EnforcedNull
                     else [{"y": value, "color": hue}]
                 ),
+                # `{series.name}: <reading>` on the point's hover box. Per-series (not chart-wide)
+                # so the reading is the one this ring drew, formatted in Python.
+                "tooltip": formats["tooltip"],
             }
             if labelled:
                 # One line per ring, stacked in the hub, outermost first. A per-SERIES pixel
@@ -1968,6 +2025,9 @@ def build_options(
                 ring["dataLabels"] = {
                     "y": round((index - middle) * _GAUGE_LABEL_LINE_PX),
                     "style": {"color": hue},
+                    # The reading, baked in Python (see `_gauge_reading_label`). Per ring rather
+                    # than shared in plotOptions because the value differs per ring.
+                    "format": formats["dataLabels"]["format"],
                 }
             rings_out.append(ring)
 
@@ -2020,15 +2080,14 @@ def build_options(
                 # gauge has no axis and the Static PNG has no tooltip. Its swatch is the series
                 # `color` — the one job that property can still do here.
                 "legend": {"enabled": True},
-                # `{series.name}`, and it is a third answer for a third reason: waterfall needs
-                # `{point.category}` (its points are positional), sunburst and xrange need
-                # `{point.name}` (their categories are on the wrong axis) — and a gauge ring
-                # holds exactly ONE point, so the mark's identity is not on the point at all.
-                # It IS the series.
-                "tooltip": {
-                    "headerFormat": "",
-                    "pointFormat": f"{{series.name}}: <b>{_GAUGE_VALUE_FORMAT}</b>",
-                },
+                # The tooltip is PER SERIES (each ring carries its own `tooltip.pointFormat`, see
+                # the loop), not chart-wide — because the reading is baked in Python and differs
+                # per ring. It names `{series.name}`, a third answer for a third reason: waterfall
+                # needs `{point.category}` (its points are positional), sunburst and xrange need
+                # `{point.name}` (their categories are on the wrong axis) — and a gauge ring holds
+                # exactly ONE point, so the mark's identity is not on the point at all. It IS the
+                # series. (Dark mode's `_themed` still adds tooltip CHROME chart-wide; the two
+                # merge.)
                 "plotOptions": {
                     "solidgauge": {
                         "rounded": True,
@@ -2047,6 +2106,8 @@ def build_options(
                         # so past the gate they must be disabled EXPLICITLY: merely omitting the
                         # key (heatmap's style) would be a gate that did nothing, and twenty
                         # labels would pile up at one offset.
+                        # The `format` lives PER RING (each label bakes its own reading, see the
+                        # loop); this shared block carries only what every ring's label shares.
                         "dataLabels": (
                             {
                                 "enabled": True,
@@ -2055,7 +2116,6 @@ def build_options(
                                 "borderWidth": 0,
                                 "align": "center",
                                 "verticalAlign": "middle",
-                                "format": f"{{series.name}}: {_GAUGE_VALUE_FORMAT}",
                                 "style": {
                                     "textOutline": "none",
                                     "fontWeight": "normal",
@@ -2090,7 +2150,11 @@ def build_options(
         # point of the type, it is what the needle POINTS AT, and the subtitle keeps only the
         # half of its job that the chart still cannot show: the `agg`. ("62" is a fact; "62, the
         # mean of nine hosts" is the finding, and no amount of axis will say the second.)
-        low, high = dial if dial is not None else gauge_dial(df, y_cols, agg)
+        #
+        # Reduce each column ONCE and reuse the readings for both the dial and the needles (the
+        # solid gauge's move, same reason): `gauge_dial` would reduce them a second time.
+        readings = [_gauge_value(df[col], agg) for col in y_cols]
+        low, high = dial if dial is not None else _dial_from_readings(readings)
         lengths = _needle_radii(len(y_cols))
         # A needle's hue is its arbitrary IDENTITY, like a pie slice's and like a ring's, so it
         # cycles the OVERRIDABLE `colors` (waterfall's semantic red-means-loss is the opposite
@@ -2099,8 +2163,12 @@ def build_options(
         hues = itertools.cycle(colors or DEFAULT_COLORS)
 
         needles: list[dict[str, object]] = []
-        for col, length in zip(y_cols, lengths, strict=True):
+        for col, value, length in zip(y_cols, readings, lengths, strict=True):
             hue = next(hues)
+            # The tooltip reading, formatted in Python (see `_gauge_reading_label`). The needle
+            # prints NOTHING in the mark, so the tooltip is the only place the exact number shows,
+            # and it is per-needle for the ring's reason: the value differs per series.
+            formats = _gauge_reading_formats(value)
             needle: dict[str, object] = {
                 "name": col,
                 # LEVEL 1 — the LEGEND SWATCH, and ONLY the legend swatch. On every ordinary
@@ -2134,7 +2202,10 @@ def build_options(
                 # of a point dict entirely, leaving a point with no value. A needle's colour is on
                 # its dial, so the point is just the number, and the empty column stops being a
                 # special case at all rather than being handled as one.
-                "data": [_gauge_value(df[col], agg)],
+                "data": [value],
+                # `{series.name}: <reading>` on hover — the ONLY place a needle's exact number
+                # shows (it prints nothing in the mark). Per series so the reading is this one.
+                "tooltip": formats["tooltip"],
             }
             needles.append(needle)
 
@@ -2205,13 +2276,11 @@ def build_options(
                 # column, whose null point draws no needle either. It is what the whole
                 # print-nothing-in-the-mark decision rests on.
                 "legend": {"enabled": True},
-                # `{series.name}`, the solid gauge's answer for the solid gauge's reason: a gauge
-                # series holds exactly ONE point, so the mark's identity is not on the point. It
-                # IS the series.
-                "tooltip": {
-                    "headerFormat": "",
-                    "pointFormat": f"{{series.name}}: <b>{_GAUGE_VALUE_FORMAT}</b>",
-                },
+                # The tooltip is PER NEEDLE (see the loop), not chart-wide, because its reading is
+                # baked in Python and differs per series. It names `{series.name}`, the solid
+                # gauge's answer for the solid gauge's reason: a gauge series holds exactly ONE
+                # point, so the mark's identity is not on the point. It IS the series. (Dark mode's
+                # `_themed` still adds tooltip CHROME chart-wide; the two merge.)
                 "plotOptions": {
                     "gauge": {
                         # The hub. One colour for all N needles — see `_NEEDLE_PIVOT_COLOR` for
