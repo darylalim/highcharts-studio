@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from highcharts_builder import (
+    FUNNEL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     NETWORKGRAPH_TYPES,
@@ -357,11 +358,13 @@ with st.sidebar:
     elif chart_type == "treemap":
         # Single-value shape like pie: one label column + one value column.
         x_label, y_label, multi = "Tile labels", "Tile values", False
-    elif chart_type in ("funnel", "pyramid"):
+    elif chart_type in FUNNEL_TYPES:
         # Pie's single-value shape (one label column names each stage, one value column sizes
         # it), so single-select Y like pie/treemap. "Stage" for both — a pyramid is a funnel
         # read the other way up, not a different data shape. A second value column would be a
-        # second funnel, which is a second chart.
+        # second funnel, which is a second chart. Keyed on the shared FUNNEL_TYPES constant (not a
+        # re-listed literal) so the family can't drift between builder and app — the
+        # X_IN_Y_GUARD_TYPES / GAUGE_TYPES rule.
         x_label, y_label, multi = "Stage labels", "Stage values", False
     elif chart_type == "sankey":
         # Node-link flow: two label columns naming a link's ends (the X selectbox

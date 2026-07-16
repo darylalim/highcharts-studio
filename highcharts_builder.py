@@ -717,7 +717,8 @@ def _themed(options: dict, *, dark: bool) -> dict:
         # dissolved into the dark background (pie/treemap/sankey's gap rule). `plotOptions[type]`
         # is keyed by the concrete `chart.type`, so `pyramid` themes through its own key. Measured
         # by rendering both types light and dark, not inferred from the pie/pyramid kinship.
-        funnel = options["plotOptions"][options["chart"]["type"]]
+        funnel_type = options["chart"]["type"]  # bound once, like `bar_type` above
+        funnel = options["plotOptions"][funnel_type]
         funnel["dataLabels"] = {**funnel.get("dataLabels", {}), "color": t["text"]}
         funnel["borderColor"] = t["bg"]
     if options["chart"].get("type") == "heatmap":
