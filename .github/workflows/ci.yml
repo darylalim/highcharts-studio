@@ -78,3 +78,58 @@ jobs:
 
       - name: ty check
         run: uv run ty check --output-format=github
+
+  release:
+    name: Release (tag + GitHub release)
+    needs: [test, lint, typecheck]
+    # Only on a push to main, and only after all three gates are green — never on
+    # a PR. So a release can only ever be cut from a fully-passing main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Scoped to this job alone, so the gate jobs above keep the top-level
+    # least-privilege read-only token; only this one may create tags and releases.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the idempotency check reads existing tags, and
+          # the annotated tag is placed on this exact commit.
+          fetch-depth: 0
+
+      - name: Cut a release when pyproject's version has no tag yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # .github/scripts/release.py is stdlib-only, so the runner's system Python
+        # (3.12 on ubuntu-latest) runs it with no `uv sync` — its logic was already
+        # exercised under the pinned venv by the three gate jobs this one needs.
+        # The step is idempotent: if v{version} is already released it no-ops, so
+        # it only cuts a release the first time a bumped version reaches main.
+        run: |
+          set -euo pipefail
+          version="$(python3 .github/scripts/release.py version)"
+          tag="v${version}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists — nothing to cut."
+            exit 0
+          fi
+
+          echo "pyproject is at $version with no $tag release — cutting it."
+          python3 .github/scripts/release.py notes > "$RUNNER_TEMP/notes.md"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Annotated tag (matching the v0.7.0–v0.11.0 convention) at this commit,
+          # created only if it isn't already on the remote.
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            git tag -a "$tag" -m "$tag" "$GITHUB_SHA"
+            git push origin "$tag"
+          fi
+
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --target "$GITHUB_SHA" \
+            --latest
