@@ -9,10 +9,13 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+# Cancel superseded runs on the same ref — but only for PRs (rapid pushes to a
+# branch under review). Pushes to main are NOT cancelled: they serialize in this
+# group instead, so the release job below can never be killed mid-run (which could
+# strand a tag with no release), and a queued main run still re-checks on its turn.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -93,43 +96,81 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history + tags: the idempotency check reads existing tags, and
-          # the annotated tag is placed on this exact commit.
+          # Full history is load-bearing: an older un-released version (two bumps
+          # in one push) is tagged at the commit that INTRODUCED it, found by a
+          # pickaxe over pyproject.toml's whole history (git log -S below).
           fetch-depth: 0
 
-      - name: Cut a release when pyproject's version has no tag yet
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Cut a release for every version above the latest released one
         env:
           GH_TOKEN: ${{ github.token }}
-        # .github/scripts/release.py is stdlib-only, so the runner's system Python
-        # (3.12 on ubuntu-latest) runs it with no `uv sync` — its logic was already
-        # exercised under the pinned venv by the three gate jobs this one needs.
-        # The step is idempotent: if v{version} is already released it no-ops, so
-        # it only cuts a release the first time a bumped version reaches main.
+        # release.py is stdlib-only and needs no project deps, so it runs on the
+        # uv-pinned 3.12 with `--no-project` (no `uv sync`) — the pinned
+        # interpreter every other job and hook uses, not the runner's system
+        # python3. Idempotent: a version already released is skipped, so on a push
+        # that doesn't bump the version there is nothing above the watermark.
         run: |
           set -euo pipefail
-          version="$(python3 .github/scripts/release.py version)"
-          tag="v${version}"
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists — nothing to cut."
-            exit 0
-          fi
-
-          echo "pyproject is at $version with no $tag release — cutting it."
-          python3 .github/scripts/release.py notes > "$RUNNER_TEMP/notes.md"
+          PY="uv run --no-project --python 3.12 python .github/scripts/release.py"
 
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Annotated tag (matching the v0.7.0–v0.11.0 convention) at this commit,
-          # created only if it isn't already on the remote.
-          if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-            git tag -a "$tag" -m "$tag" "$GITHUB_SHA"
-            git push origin "$tag"
+          current="$($PY version)"
+          # The latest release is the watermark; anything above it still needs one.
+          latest="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
+          to_cut="$($PY to-release "$latest")"
+
+          if [ -z "$to_cut" ]; then
+            echo "Nothing above the latest release (${latest:-none}) — nothing to cut."
+            exit 0
           fi
 
-          gh release create "$tag" \
-            --title "$tag" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            --target "$GITHUB_SHA" \
-            --latest
+          # to_cut is oldest-first; version strings are whitespace-free tokens.
+          for version in $to_cut; do
+            tag="v${version}"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "$tag already released — skipping."
+              continue
+            fi
+            echo "Cutting $tag."
+
+            notes="$RUNNER_TEMP/notes-$tag.md"
+            $PY notes "$version" > "$notes"
+
+            # Tag the commit that declares this version: HEAD for the current one
+            # (so its post-bump commits are in the release), else the commit that
+            # first introduced the bump — either way the tag's one checkable fact
+            # holds, that its commit declares this version in pyproject.toml.
+            if [ "$version" = "$current" ]; then
+              commit="$GITHUB_SHA"
+            else
+              commits="$(git log --reverse --format=%H \
+                -S "version = \"$version\"" -- pyproject.toml)"
+              commit="${commits%%$'\n'*}"
+              if [ -z "$commit" ]; then
+                echo "::error::No commit declares version $version in pyproject.toml."
+                exit 1
+              fi
+            fi
+
+            # Annotated tag (matching the v0.7.0–v0.11.0 convention), created only
+            # if it isn't already on the remote (a prior run may have pushed it).
+            if ! git ls-remote --exit-code --tags origin "refs/tags/$tag" \
+              >/dev/null 2>&1; then
+              git tag -a "$tag" -m "$tag" "$commit"
+              git push origin "$tag"
+            fi
+
+            # Only the current (highest) version is marked Latest.
+            if [ "$version" = "$current" ]; then latest_flag=true; else latest_flag=false; fi
+            gh release create "$tag" \
+              --title "$tag" \
+              --notes-file "$notes" \
+              --latest="$latest_flag"
+          done

@@ -36,11 +36,27 @@ version bump, a section renamed out from under the table of contents, or a
 version bumped without cutting a changelog section all fail fast here.
 """
 
+import importlib.util
 import re
 import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_release():
+    """Import ``.github/scripts/release.py`` — the canonical CHANGELOG parser, so
+    the changelog-version test reuses its heading logic instead of re-encoding the
+    ``## [x.y.z]`` regex (which would give the format a second home to drift in)."""
+    path = ROOT / ".github" / "scripts" / "release.py"
+    spec = importlib.util.spec_from_file_location("_release_for_packaging", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_release = _load_release()
 
 
 def _project_metadata() -> dict:
@@ -257,13 +273,14 @@ def test_changelog_documents_the_current_version():
     version = _project_metadata()["version"]
 
     # Keep a Changelog is reverse-chronological, so the FIRST ``## [x.y.z]`` heading
-    # is the current release. The pattern only matches a released, numbered section,
-    # which is what lets an ``## [Unreleased]`` heading be kept above it without
-    # being mistaken for one.
-    top = re.search(r"^## \[(\d+\.\d+\.\d+)\]", _changelog(), re.MULTILINE)
-    assert top, "CHANGELOG.md has no released `## [x.y.z]` section"
-    assert top.group(1) == version, (
-        f"CHANGELOG.md's newest entry is {top.group(1)}, but pyproject.toml "
+    # is the current release. ``changelog_versions`` (the release script's parser,
+    # reused here so the heading regex has a single home) matches only released,
+    # numbered sections, which is what lets an ``## [Unreleased]`` heading be kept
+    # above it without being mistaken for one.
+    versions = _release.changelog_versions(_changelog())
+    assert versions, "CHANGELOG.md has no released `## [x.y.z]` section"
+    assert versions[0] == version, (
+        f"CHANGELOG.md's newest entry is {versions[0]}, but pyproject.toml "
         f"declares version {version} — one of the two was bumped and the other "
         f"was not."
     )

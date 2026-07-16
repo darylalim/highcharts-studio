@@ -2,21 +2,27 @@
 """Release automation for highcharts-studio.
 
 Stdlib-only, importable, and runnable as a CLI. The ``release`` job in
-``.github/workflows/ci.yml`` calls it to cut a tag + GitHub release the moment
-``pyproject.toml``'s version moves to a value that has no ``v{version}`` tag yet —
-so a merged version bump can never sit un-released again. (The drift this closes:
-the code reached ``0.11.0`` on ``main`` while the newest GitHub release was still
-``0.9.0``, because tagging + releasing was a manual step that lagged the merge.)
+``.github/workflows/ci.yml`` calls it to cut a tag + GitHub release for every
+version that has reached ``main`` above the latest released one — so a merged
+version bump can never sit un-released again, even when *two* bumps land in one
+push. (The drift this closes: the code reached ``0.11.0`` on ``main`` while the
+newest GitHub release was still ``0.9.0``, because tagging + releasing was a
+manual step that lagged the merge; and both ``0.10.0`` and ``0.11.0`` were merged
+before either was released, which is exactly the multi-bump case a
+release-only-the-current-version job would skip.)
 
-The two facts a release needs — the current version and that version's changelog
-notes — already live in ``pyproject.toml`` and ``CHANGELOG.md``, and are already
-pinned to each other by
-``tests/test_packaging.py::test_changelog_documents_the_current_version``. This
-script only *reads* them, so the release notes are the ``CHANGELOG.md`` section
-verbatim and cannot drift from it. The section-extraction and version-reading
-logic is kept in pure, importable functions (as the ``.claude/hooks/`` scripts
-keep theirs) so ``tests/test_release.py`` can cover it without a subprocess or a
-network call; ``main()`` is the thin file-IO/stdout wrapper the workflow calls.
+The facts a release needs — the current version, the changelog notes, and which
+versions still need releasing — are all *read* from ``pyproject.toml`` and
+``CHANGELOG.md`` (the notes are the ``CHANGELOG.md`` section verbatim and cannot
+drift from it; the changelog↔version pinning is
+``tests/test_packaging.py::test_changelog_documents_the_current_version``, which
+now reuses ``changelog_versions`` here rather than re-encoding the heading regex).
+The pure, importable functions carry every decision so ``tests/test_release.py``
+can cover them with no subprocess and no network — the ``.claude/hooks/`` pattern
+applied to release tooling. ``main()`` is the thin file-IO/stdout wrapper the
+workflow calls; the impure parts a release also needs (the latest-release tag via
+``gh``, the bump commit via ``git``) stay in the workflow, which passes the
+``gh``-derived latest tag into ``to-release``.
 """
 
 import re
@@ -27,23 +33,40 @@ from pathlib import Path
 # release.py lives at <root>/.github/scripts/release.py, so root is two up.
 ROOT = Path(__file__).resolve().parents[2]
 
+# A released ``## [x.y.z]`` heading — the one parser for the changelog's heading
+# shape, shared by changelog_versions() and (via import) the packaging test.
+_HEADING = r"^## \[(\d+\.\d+\.\d+)\]"
+
 
 def read_version(pyproject_text: str) -> str:
     """The ``[project].version`` string from ``pyproject.toml`` text."""
     return tomllib.loads(pyproject_text)["project"]["version"]
 
 
+def changelog_versions(changelog_text: str) -> list[str]:
+    """Every ``## [x.y.z]`` version in ``CHANGELOG.md``, in document order.
+
+    Keep a Changelog is reverse-chronological, so the list is newest-first and its
+    first element is the current version. This is the *single* encoding of the
+    heading format; ``test_changelog_documents_the_current_version`` reuses it
+    instead of re-writing the regex, so the two can't drift.
+    """
+    return re.findall(_HEADING, changelog_text, re.M)
+
+
 def extract_release_notes(changelog_text: str, version: str) -> str:
     """The body of ``CHANGELOG.md``'s ``## [<version>]`` section, verbatim.
 
     Returns everything between that heading and the next ``## [`` heading (or the
-    end of the file), stripped of surrounding blank lines — keyed on the same
-    heading shape ``test_changelog_documents_the_current_version`` matches. Raises
-    ``ValueError`` if the section is absent or empty, so the release step fails
-    loudly rather than cutting a release with no notes (belt-and-braces: on a green
-    build that test already guarantees the current version has a section here).
+    end of the file), stripped of surrounding blank lines. Raises ``ValueError``
+    if the section is absent or empty, so the release step fails loudly rather
+    than cutting a release with no notes (belt-and-braces: on a green build
+    ``test_changelog_documents_the_current_version`` already guarantees the
+    current version has a section here). The heading match ends at end-of-line
+    rather than requiring a trailing newline, so a section whose heading is the
+    file's final line with no newline is diagnosed as *empty*, not as absent.
     """
-    heading = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n", changelog_text, re.M)
+    heading = re.search(rf"^## \[{re.escape(version)}\][^\n]*$", changelog_text, re.M)
     if heading is None:
         raise ValueError(f"CHANGELOG.md has no `## [{version}]` section")
     rest = changelog_text[heading.end() :]
@@ -54,18 +77,65 @@ def extract_release_notes(changelog_text: str, version: str) -> str:
     return body
 
 
+def versions_to_release(changelog_text: str, latest_released: str | None) -> list[str]:
+    """CHANGELOG versions newer than the latest released one, oldest-first.
+
+    ``latest_released`` is the latest release's tag (e.g. ``"v0.11.0"``, the
+    leading ``v`` optional) or empty/``None`` when the repo has no releases yet.
+    Because the changelog is newest-first, "newer than the watermark" is simply
+    "listed above it", so this walks from the top and stops at the watermark,
+    returning what it collected oldest-first (so a caller creates them in
+    ascending order and marks only the newest ``--latest``).
+
+    With no watermark it returns just the newest version — the conservative choice
+    that matches the old single-version behaviour rather than back-filling the
+    entire history (this repo's ``0.1.0``–``0.6.0`` carry tags but deliberately no
+    releases; the watermark keeps the job from resurrecting them).
+    """
+    versions = changelog_versions(changelog_text)
+    if not versions:
+        return []
+    watermark = (latest_released or "").lstrip("v")
+    if not watermark:
+        return [versions[0]]
+    newer: list[str] = []
+    for v in versions:
+        if v == watermark:
+            break
+        newer.append(v)
+    return list(reversed(newer))
+
+
 def main(argv: list[str] | None = None) -> int:
-    """CLI: ``version`` prints the current version, ``notes`` prints its notes."""
+    """CLI for the release job.
+
+    ``version``            prints ``pyproject.toml``'s current version.
+    ``notes [VERSION]``    prints VERSION's (default: current) changelog section.
+    ``to-release TAG``     prints the versions above the latest-release TAG,
+                           oldest-first, one per line.
+    """
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 1 or args[0] not in {"version", "notes"}:
-        print("usage: release.py {version|notes}", file=sys.stderr)
-        return 2
-    version = read_version((ROOT / "pyproject.toml").read_text())
-    if args[0] == "version":
-        print(version)
-    else:  # notes
+    cmd = args[0] if args else ""
+    if cmd == "version" and len(args) == 1:
+        print(read_version((ROOT / "pyproject.toml").read_text()))
+        return 0
+    if cmd == "notes" and len(args) in (1, 2):
+        version = (
+            args[1]
+            if len(args) == 2
+            else read_version((ROOT / "pyproject.toml").read_text())
+        )
         print(extract_release_notes((ROOT / "CHANGELOG.md").read_text(), version))
-    return 0
+        return 0
+    if cmd == "to-release" and len(args) == 2:
+        for v in versions_to_release((ROOT / "CHANGELOG.md").read_text(), args[1]):
+            print(v)
+        return 0
+    print(
+        "usage: release.py {version | notes [VERSION] | to-release LATEST_TAG}",
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

@@ -197,12 +197,17 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `post_edit_py.py`.
 - `tests/test_release.py` — unit tests for `.github/scripts/release.py` (CI's
   release tooling, the `test_hooks.py` sibling for `.github/scripts/`): the pure
-  functions that read the current version and slice a `CHANGELOG.md` section out
-  *verbatim* — bounded by its two `## [` headings, surrounding blank lines
-  stripped, the oldest section running to EOF, a missing or empty section raising
-  so a release is never cut blank — plus a no-drift check against the real files
-  that the *current* version has non-empty notes, so a push that bumps it can
-  actually be released.
+  functions that read the current version, list the changelog's versions, slice a
+  `CHANGELOG.md` section out *verbatim* (bounded by its two `## [` headings, blank
+  lines stripped, the oldest running to EOF, a missing/empty section raising — and
+  a heading with no trailing newline reading as *empty* rather than absent), and
+  decide which versions sit above the latest-release watermark (empty on a
+  no-bump push, the one new version after one bump, **both** oldest-first after two
+  bumps in one push — the headline fix — and just the current version with no
+  watermark). It also pins `main()`'s CLI contract, since the workflow parses its
+  stdout: `version` prints *only* the version, bad args exit 2 writing nothing to
+  stdout — so a stray print can't silently corrupt a tag name — plus a no-drift
+  check against the real files.
 - `tests/test_packaging.py` — unit tests guarding the licensing metadata: the
   `pyproject.toml` SPDX `license`/`license-files` fields, the `LICENSE` file's
   pristine MIT text (nothing appended, so GitHub detects it as MIT), and the
@@ -230,23 +235,36 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   Ruff lint/format, ty) that `uv sync --locked` then run the same checks the
   hooks mirror, on every push to `main` and every PR; then a `release` job that
   `needs` all three, runs on a push to `main` only, and — under a job-scoped
-  `contents: write` over the top-level read-only token — cuts the `v{version}`
-  tag and GitHub release the first time `pyproject.toml`'s version reaches `main`
-  untagged (idempotent: it no-ops when that release already exists, which is how
-  it stays silent on every push that doesn't bump the version). It reads the
-  version and slices the release notes out of `CHANGELOG.md` *verbatim* via
-  `.github/scripts/release.py`, so a merged version bump can never sit
-  un-released again — the drift that once let the code reach `0.11.0` on `main`
-  while the newest GitHub release was still `0.9.0`.
+  `contents: write` over the top-level read-only token — cuts a `v{version}` tag +
+  GitHub release for **every** `CHANGELOG.md` version above the latest released one
+  (the watermark). Releasing *every* untagged version rather than only the current
+  one is the load-bearing part: two bumps in a single push (which is exactly how
+  `0.10.0` and `0.11.0` both reached `main` before either was released) would
+  otherwise leave the intermediate one un-released forever — the very drift this
+  closes. Each version is tagged at the commit that declares it (HEAD for the
+  current one so its post-bump commits ride along, else the bump commit found by a
+  `git log -S` pickaxe over `pyproject.toml` — which is why the checkout is
+  `fetch-depth: 0`), notes are sliced out of `CHANGELOG.md` *verbatim* via
+  `.github/scripts/release.py`, and only the highest gets `--latest`. It is
+  idempotent (a version already released is skipped) so it stays silent on pushes
+  that don't bump the version. The top-level `concurrency` cancels superseded runs
+  for **PRs only** (`cancel-in-progress: ${{ github.event_name == 'pull_request' }}`)
+  — main pushes serialize instead of cancelling, so a release job can't be killed
+  mid-run and strand a pushed tag with no release.
 - `.github/scripts/release.py` — the pure, stdlib-only reader CI's `release` job
-  calls (`version` prints `pyproject.toml`'s version; `notes` prints that
-  version's `CHANGELOG.md` section, stripped, raising if it is absent or empty so
-  a release is never cut blank). It only *reads* the two facts a release needs,
-  both of which already live elsewhere and are already pinned to each other by
-  `test_changelog_documents_the_current_version`, so the notes cannot drift from
-  the changelog. Its extraction/version logic stays importable and is covered by
-  `tests/test_release.py` with no subprocess and no network — the `.claude/hooks/`
-  pattern (pure decision logic + a thin `main()`) applied to release tooling.
+  calls: `version` prints `pyproject.toml`'s version; `notes [VERSION]` prints a
+  changelog section (stripped, raising if absent or empty so a release is never cut
+  blank); `to-release LATEST_TAG` prints, oldest-first, the `CHANGELOG.md` versions
+  above the latest-release watermark (just the current version when the repo has no
+  releases, so it never back-fills the deliberately release-less `0.1.0`–`0.6.0`
+  tags). It only *reads* facts that already live in `pyproject.toml`/`CHANGELOG.md`
+  and are already pinned by `test_changelog_documents_the_current_version` (which
+  now reuses this module's `changelog_versions` rather than re-encoding the heading
+  regex), so the notes cannot drift from the changelog. Every decision stays in
+  importable functions covered by `tests/test_release.py` with no subprocess and no
+  network — the `.claude/hooks/` pattern (pure logic + a thin `main()`) applied to
+  release tooling; the impure parts a release also needs (the latest-release tag,
+  the bump commit) stay in the workflow.
 - `LICENSE` — MIT for this project's own code, kept *pristine* (no text
   appended) so GitHub's license detector classifies the repo as MIT rather than
   "Other".
