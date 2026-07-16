@@ -12,10 +12,9 @@ native Streamlit charts.
 
 ## Contents
 
-[Setup](#setup) · [Run](#run) · [What it does](#what-it-does) · [Files](#files) ·
-[Test](#test) · [Lint &amp; format](#lint--format) · [Type check](#type-check) ·
-[CI](#ci) · [Claude Code hooks](#claude-code-hooks) · [Notes](#notes) ·
-[Dependencies](#dependencies) · [License](#license)
+[Setup](#setup) · [Run](#run) · [Features](#features) ·
+[Chart types](#chart-types) · [Development](#development) · [Notes](#notes) ·
+[License](#license)
 
 ## Setup
 
@@ -32,239 +31,83 @@ uv run streamlit run streamlit_app.py
 ```
 
 Then open <http://localhost:8501>. Pick a sample dataset (or upload a CSV),
-choose a chart type and columns, and switch between two render modes:
-interactive (CDN iframe) or a static PNG. The charts follow the app's
-light/dark theme, which you can toggle from the settings menu.
+choose a chart type and map its columns, and switch between two render modes:
+interactive (CDN iframe) or a static PNG. Charts follow the app's light/dark
+theme, which you can toggle from Streamlit's settings menu.
 
-## What it does
+## Features
 
-- Turns a `pandas.DataFrame` into a Highcharts options `dict`, then a `Chart`
-  via `Chart.from_options(...)`. Series share a brand palette (`DEFAULT_COLORS`)
-  that matches the Streamlit theme in `.streamlit/config.toml`.
-- Two render modes, chosen from the sidebar **Render** selector:
-  - **Interactive** (default): serialize the chart with its own
-    `get_script_tags()` (Highcharts CDN `<script>` tags) + `to_js_literal()`,
-    wrap it in a small HTML document, and embed it with `st.iframe`. Highcharts
-    JS runs in the browser.
-  - **Static (PNG)**: render server-side with `chart.download_chart(format="png")`
-    and show the PNG with `st.image` (plus a download button). No Highcharts JS
-    runs in the browser; the process talks to the Highcharts export server.
-- Light and dark themes, toggled from Streamlit's settings menu (it follows your
-  OS by default). The charts are theme-aware in both render modes: their
-  background, text, axes, and tooltip flip to match the mode, while each series
-  keeps its palette color.
-- An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
-  metric — series plotted, or cells for a heatmap, tiles for a treemap, flows
-  for a sankey, links for a networkgraph, boxes for a boxplot, steps for a
-  waterfall, sectors for a
-  sunburst, and bars for an xrange; neither gauge needs an entry of its own, since
-  their marks *are* their series — one ring, or one needle, per column — so "series
-  plotted" is already literally the mark count) above
-  the chart
-  — with the chart type shown as a badge above the chart rather than a metric in
-  the row — a side-by-side source-data preview, and a toggle that reveals the
-  generated Highcharts config (the `to_js_literal()` output). The Y-series picker
-  uses compact pills, falling back to `st.multiselect` for wide CSVs.
-- Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`,
-  `bar`, `pie`, `scatter`, `bubble` (scatter plus a size column that drives
-  each marker's area), `radar` (a polar spider/web line chart over a
-  category axis), `heatmap` (a category × category grid whose cell colors,
-  on a sequential color axis, show the values), `treemap` (nested
-  rectangles whose area, sized by a value column, shows each label's share),
-  `sankey` (a flow diagram: each row is a link between two node columns,
-  whose width is a value column), `networkgraph` (sankey's cousin: each row is
-  one **unweighted** edge between two node columns, laid out as a force-directed
-  graph of who connects to whom — so it has a Source and a Target column but **no
-  value column at all**, the mirror of the gauge family's missing X), `boxplot`
-  (per-category distributions: a
-  category column whose values repeat, one row per observation, plus a column of
-  raw measurements — each category becomes a Tukey box, with outliers as dots),
-  `waterfall` (a cumulative bridge: a step-label column plus a column of
-  signed *deltas*, so each bar floats where the last one ended, showing how a
-  starting value becomes an ending one — rises green, falls red, and a closing
-  **Total** bar added for you), `sunburst` (a hierarchy as concentric rings:
-  one row per node, a **Parent** column naming each node's parent — blank means a
-  top-level branch — and a column of *leaf* values. A parent's arc is the **sum** of
-  its children's, so a node with children needs no value of its own; a centre
-  sector is added for you; and clicking a sector zooms into that branch),
-  `xrange` (a Gantt-style timeline, and the only type whose marks have *extent*
-  rather than sitting at a point: one row per bar, a **Lane** column naming each
-  task — it may repeat, so a lane can hold several bars — plus a **Start** and an
-  **End** column. Those two are *coordinates*, so they may be dates (ISO-8601) or
-  plain numbers, but both the same kind; a zero-length bar is a **milestone** and
-  still draws, while a backwards one is dropped), and the **gauge family**,
-  `solidgauge` and `gauge` — the two types with **no X column at all**: a gauge has
-  no labels, only readings. Each selected column becomes one mark, showing that
-  column **collapsed to a single number** by the aggregation you pick — sum / mean /
-  median / min / max / last — so they are the only types whose marks are not in the
-  data but *reduced* from it. The dial they are read against is derived from those
-  readings and can be overridden; a column with nothing in it keeps its mark, empty,
-  rather than being drawn as a fictional zero. They differ only in what a mark
-  *becomes*: `solidgauge` sweeps an **arc** per column (an "activity gauge", a full
-  circle, so its scale has to be printed in the subtitle), while `gauge` points a
-  **needle** per column at a scale it actually **draws** — a semicircular axis with
-  ticks, which is the whole reason the type exists.
+- **Data in** — built-in sample datasets or your own CSV upload. Map columns to
+  the chart with compact pills, falling back to `st.multiselect` on wide CSVs.
+- **Two render modes** — *Interactive* runs Highcharts JS from the CDN, embedded
+  via `st.iframe`; *Static (PNG)* renders server-side through the Highcharts
+  export server and shows the image with a download button.
+- **Theme-aware** — charts flip their background, text, axes, and tooltip to match
+  the light/dark theme in both render modes, while each series keeps its palette
+  color. Follows your OS by default.
+- **KPI row** — rows, numeric columns, and a chart-type-adaptive third metric
+  (series plotted, or the mark count: cells, tiles, flows, links, boxes, steps,
+  sectors, or bars).
+- **See the config** — a toggle reveals the generated Highcharts config
+  (`to_js_literal()` output).
+- **Consistent palette** — every series uses the brand palette (`DEFAULT_COLORS`),
+  kept in sync with the Streamlit theme in `.streamlit/config.toml`.
 
-## Files
+## Chart types
 
-| File | Purpose |
-| --- | --- |
-| `streamlit_app.py` | The Streamlit UI: data source, chart controls, caching, a KPI metric row, the render-mode selector (interactive / static PNG), the chart embed, and a toggle for the generated config. |
-| `highcharts_builder.py` | Pure (Streamlit-free) functions that turn a DataFrame into a Highcharts options dict, a `Chart`, and embeddable HTML / PNG bytes. Independently importable and unit-testable. |
-| `sample_data.py` | Pure (Streamlit-free) built-in sample datasets offered when no CSV is uploaded. |
-| `.streamlit/config.toml` | Streamlit light/dark themes (app shell) and dev settings (`runOnSave`). |
-| `pyproject.toml` | Dependencies + the `dev` group and the Ruff / ty config. |
-| `tests/test_smoke.py` | Builder and sample-data unit tests plus headless `AppTest` interaction tests. |
-| `tests/test_hooks.py` | Unit tests for the Claude Code hook scripts (pure decision functions + exit-code contract). |
-| `tests/test_packaging.py` | Unit tests guarding the licensing metadata (pyproject `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) — plus the README's own header badges and `## Contents` list, and the `CHANGELOG.md` entry for the current version — against drift. |
-| `.claude/settings.json`, `.claude/hooks/` | Committed Claude Code hooks that mirror the CI gates (see Claude Code hooks below). |
-| `.github/workflows/ci.yml` | GitHub Actions: pytest, Ruff lint/format, and ty on every push to `main` and every PR. |
-| `LICENSE` | MIT license for this project's own code (kept pristine so GitHub detects it as MIT). |
-| `NOTICE` | Third-party notice for the proprietary Highcharts JS / export server and `highcharts-core` dependencies, split out of `LICENSE`. |
-| `CHANGELOG.md` | Release notes, newest first. Its top entry is pinned to the `pyproject.toml` version, so a bump can't ship undocumented. |
+| Type | What it shows | Extra input |
+| --- | --- | --- |
+| `line`, `spline`, `area`, `areaspline`, `column`, `bar` | One or more Y series over a category X | — |
+| `pie` | Each label's share of a single value column | — |
+| `scatter` | Y vs. X as points | — |
+| `bubble` | Scatter plus a third dimension sizing each marker | Size (Z) |
+| `radar` | A polar spider/web line over a category axis | — |
+| `heatmap` | A category × category grid, cells colored by value | — |
+| `treemap` | Nested rectangles sized by a value column | — |
+| `sankey` | A flow diagram: each row links two node columns, weighted by a value | Target |
+| `networkgraph` | A force-directed graph of unweighted edges between two node columns | Target (no Y) |
+| `boxplot` | Per-category Tukey distributions from repeated observations | — |
+| `waterfall` | A cumulative bridge of signed deltas, with a closing Total bar | — |
+| `sunburst` | A hierarchy as concentric rings from a parent column and leaf values | Parent |
+| `xrange` | A Gantt-style timeline; bars span Start→End on named lanes (dates or numbers) | End |
+| `solidgauge` | An activity gauge: each column reduced to one reading, drawn as an arc | Aggregation, Dial (no X) |
+| `gauge` | A needle per column on a drawn tick scale | Aggregation, Dial (no X) |
 
-## Test
+The gauge family (`solidgauge`, `gauge`) is the only pair with no label column —
+each *selected* column becomes one mark, reduced to a single reading by the
+aggregation you pick (sum / mean / median / min / max / last). `networkgraph` is
+its mirror: edges with no value column. See [`CLAUDE.md`](CLAUDE.md) for the
+per-chart design notes.
+
+## Development
+
+The core chart logic lives in `highcharts_builder.py` — pure, Streamlit-free
+functions (DataFrame → Highcharts options → `Chart` → HTML/PNG) that are
+independently unit-testable. `streamlit_app.py` is the UI and `sample_data.py`
+the built-in datasets. See [`CLAUDE.md`](CLAUDE.md) for the full architecture.
 
 ```bash
-uv run pytest
+uv run pytest                                       # tests
+uv run ruff check --fix . && uv run ruff format .   # lint + format
+uv run ty check                                     # type check
 ```
 
-Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
-
-- **`tests/test_smoke.py`** — the pure builder (every chart type, the
-  missing-data and scatter/bubble edge cases, radar's polar-line shape, heatmap's
-  colorAxis value matrix, treemap's value-sized tiles, sankey's node-link flows,
-  networkgraph's unweighted edges (the `{from, to}` dict that serializes to a
-  `[from, to]` array; the `colorByPoint` that must appear nowhere; `enableSimulation:
-  false`, so the iframe and the PNG settle to the same picture; and the empty `y_cols`
-  it alone accepts, the mirror of the gauge family's `None` x_col),
-  boxplot's aggregated Tukey distributions (including the `iqr == 0` degeneracies
-  and the `fillColor` silent drop), waterfall's appended `isSum` total and its
-  semantic up/down/total bar colors, sunburst's assembled hierarchy (synthesized
-  node ids, so two leaves named the same stay two sectors rather than colliding;
-  valueless internal nodes, so Highcharts' sum is authoritative; a dropped dangling
-  parent vs. a raised cycle; and the appended root), xrange's interval bars (the
-  date-vs-number column sniff and its two traps — a numeric column must never reach
-  a date parser, since `pd.to_datetime(12)` silently yields the epoch, and a date
-  column's epoch millis must be unit-normalized before the int64 view, or every bar
-  lands in 1970; the kept milestone and the dropped backwards bar; and the per-lane
-  hue), the gauge family's reduced marks (the empty-column trap —
-  `pd.Series([nan, ...]).sum()` is `0.0`, so a naive reduction draws a fictional zero
-  where the truth is "no data"; the dial derived from the *readings* rather than the
-  raw column, without which a `sum` pins every mark; `threshold: 0`, without which
-  the bigger loss draws the shorter arc; the levels each type's hue has to be written
-  to — **three** for a ring and **two** for a needle, with not one of them in common,
-  since a series-level `color` reaches nothing at all on a ring and only the legend on
-  a needle; the needle lengths that must be **staggered**, or two columns with equal
-  readings draw as one needle while the legend goes on naming two; and `overshoot`,
-  without which a reading past the end of an overridden dial pegs *exactly on* the
-  final tick, indistinguishable from a true reading of the maximum),
-  the brand palette, the
-  light/dark theming including the dark-mode tooltip and the heatmap colorAxis, and
-  the validation guards — plus an end-to-end pass driving every supported type
-  through the real `Chart.from_options` → `to_js_literal` pipeline) and the sample
-  datasets, plus a headless `AppTest` pass that drives the full app (switching
-  controls including the bubble Size (Z), sankey Target (to), sunburst Parent and
-  xrange End
-  selectors, gauge's aggregation picker and its two Dial inputs — whose defaults are
-  seeded *from the builder*, and which deliberately reset when the data or the
-  reduction changes, because a scale carried over from either is a silent lie —
-  networkgraph's reused Target *and its removed Y control* (the subtractive mirror of
-  gauge's removed X),
-  radar,
-  heatmap, treemap, boxplot, and waterfall, the
-  config toggle, the KPI row, the wide-CSV `st.multiselect` fallback, both render
-  modes, and the guard messages).
-- **`tests/test_hooks.py`** — the `.claude/hooks/` scripts (see
-  [Claude Code hooks](#claude-code-hooks)).
-- **`tests/test_packaging.py`** — the licensing metadata (`pyproject.toml`
-  `license` fields, the `LICENSE` file, and the `NOTICE` third-party notice) plus
-  the README's own header badges and `## Contents` list, and `CHANGELOG.md`'s
-  newest entry (pinned to the `pyproject.toml` version, so a bump can't ship
-  without notes), guarded against drift.
-
-## Lint & format
-
-This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and
-formatting (config in `pyproject.toml`).
-
-```bash
-# Auto-fix lint issues and format (run before committing):
-uv run ruff check --fix . && uv run ruff format .
-
-# Verify only, exactly as CI does (non-mutating):
-uv run ruff check . && uv run ruff format --check .
-```
-
-## Type check
-
-This project uses [ty](https://docs.astral.sh/ty/), Astral's fast Python type
-checker. Because ty resolves third-party imports from the project venv, run it
-through `uv run`:
-
-```bash
-uv run ty check
-```
-
-It runs in CI. A few `highcharts-core` stub mismatches are suppressed inline
-with `# ty: ignore[rule]` (so the rules still apply everywhere else); see
-`CLAUDE.md` for details.
-
-## CI
-
-GitHub Actions runs the tests, the Ruff lint/format checks, and the ty type
-check on every push to `main` and every pull request
-(`.github/workflows/ci.yml`).
-
-## Claude Code hooks
-
-`.claude/settings.json` and `.claude/hooks/` ship
-[Claude Code](https://claude.com/claude-code) hooks (committed; the per-developer
-`.claude/settings.local.json` is gitignored) that mirror the CI gates locally, so
-edits stay green before a push:
-
-- **`post_edit_py.py`** (PostToolUse) — on a `.py` edit, runs `ruff check --fix`
-  + `ruff format`, then `ty check`.
-- **`pytest_stop.py`** (Stop) — runs `pytest` when the tree has uncommitted `.py`
-  changes, with a loop guard so it can't run forever.
-- **`guard_paths.py`** (PreToolUse) — blocks direct edits to `uv.lock`,
-  `.streamlit/secrets.toml`, and `.git/` internals.
-
-They only affect contributors using Claude Code; the app and CI don't depend on
-them. See `CLAUDE.md` for details.
+GitHub Actions runs all three on every push to `main` and every pull request
+(`.github/workflows/ci.yml`). Committed
+[Claude Code](https://claude.com/claude-code) hooks in `.claude/` mirror those
+gates locally so edits stay green before a push (see `CLAUDE.md`).
 
 ## Notes
 
-- There is **no official Streamlit ↔ Highcharts component** (no `st.highcharts`
-  widget) for the `highcharts-core` object model, so the interactive mode uses a
-  dependency-free `Chart` → HTML → `st.iframe` bridge.
-- In the **interactive** mode, the chart loads Highcharts JS from the CDN
-  (`https://code.highcharts.com/`), so the browser needs network access. The
+- There is **no official Streamlit ↔ Highcharts component** for the
+  `highcharts-core` object model, so interactive mode uses a dependency-free
+  `Chart` → HTML → `st.iframe` bridge.
+- **Interactive** mode loads Highcharts JS from the CDN
+  (`https://code.highcharts.com/`), so the browser needs network access; the
   iframe has a fixed height (it does not auto-grow).
-- Highcharts ≥ 13 expresses its default colors as `light-dark()` CSS variables, which
-  would resolve against the **viewer's browser** rather than the app's theme. The
-  generated HTML therefore pins the chart's `color-scheme` to `only light`, so those
-  defaults resolve exactly as the export server resolves them and the two render modes
-  agree. All theming flows through `build_options(..., dark=...)` instead.
-- In **static** mode, the running process must reach the Highcharts export
-  server (`export.highcharts.com` by default). To remove that external
-  dependency, self-host an export server and pass a `server_instance` to
-  `download_chart`.
-
-## Dependencies
-
-Runtime:
-
-- `highcharts-core` — Highcharts for Python charting library (proprietary; see the License section)
-- `pandas` — DataFrames feeding the charts
-- `streamlit` — app runtime (pinned ≥ 1.57, the version this app is built and CI-tested against)
-
-Dev (in the `dev` dependency group, installed by `uv sync`):
-
-- `pytest` — tests
-- `ruff` — linter and formatter
-- `ty` — type checker
-- `watchdog` — faster, more reliable Streamlit hot-reload
+- **Static** mode needs the running process to reach the Highcharts export server
+  (`export.highcharts.com` by default). Self-host one and pass `server_instance`
+  to `download_chart` to remove that external dependency.
 
 ## License
 
