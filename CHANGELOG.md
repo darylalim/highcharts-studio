@@ -33,6 +33,33 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.11.0] - 2026-07-16
+
+### Added
+
+- **`funnel` and `pyramid` chart types** — part-of-whole *stages*, and pie's structural
+  cousins: `FunnelSeries` is literally `FunnelOptions(PieOptions)`, so a funnel reads the same
+  single-value shape pie does (one `{name, y}` leaf per row — `x_col` names each stage, the
+  first `y_cols` column sizes it, a valueless row dropped like a pie slice). They are drawn
+  **top-to-bottom in row order** (not re-sorted, so the sequence is the user's — columnrange's
+  kept-as-given permissiveness). `pyramid` is funnel's inverted mirror and its **own**
+  highcharts-core series type (`PyramidSeries`, which draws inverted by default) — **not** a
+  `funnel` with `reversed=True` — so both serialize under their own Highcharts name (radar stays
+  the one exception) and neither touches `FunnelOptions`' `neck_*` setters. The two differ only
+  in the `chart.type` string, so they share one build branch and one `count_marks` rule, and both
+  resolve `modules/funnel` from `chart.type` alone — **not** `highcharts-more` (verified on the
+  round-trip). Each stage is palette-hued like a pie slice (`colorByPoint` inherited from pie's
+  default; highcharts-core cannot express the key, so the builder sets nothing), and the tooltip
+  prints the value with its share of the stage total. Both opt **into** the count-adaptive KPI
+  (**"Stages"**), unlike their twin pie — one drawable stage per surviving row.
+- **`Marketing conversion funnel (funnel)` and `Customer loyalty pyramid (pyramid)` samples** —
+  the same single-value stage shape drawn two ways. Both lead with their *largest* stage and
+  decrease, but a funnel puts it at the top and narrows downward (a shrinking purchase journey)
+  while a pyramid draws the first row at the *base* and narrows upward to an apex (a broad-based
+  loyalty pyramid) — so reading the two side by side shows the only difference is which way the
+  shape points, not the data. Each leads with a category (stage/tier) column so the app opens
+  cleanly on `line`.
+
 ## [0.10.0] - 2026-07-15
 
 ### Added

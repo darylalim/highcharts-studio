@@ -34,7 +34,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   columns should be told what each one will *become*),
   caching, a KPI metric row (its third metric adapts to the chart type — series
   plotted, or, for the one-series types, the mark count from the builder's
-  `count_marks`: cells for a heatmap, tiles for a treemap, flows for a sankey,
+  `count_marks`: cells for a heatmap, tiles for a treemap, stages for a funnel or
+  pyramid, flows for a sankey,
   links for a networkgraph,
   boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
   xrange, ranges for a columnrange — sourced there
@@ -101,9 +102,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   branches must remember into a **signature**, since a function that cannot see a DataFrame cannot
   derive a dial from a raw column. And `count_marks()`, which
   returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
-  tiles, a sankey's flows, a networkgraph's links, a boxplot's boxes, a waterfall's steps, a
+  tiles, a funnel's or pyramid's stages, a sankey's flows, a networkgraph's links, a boxplot's
+  boxes, a waterfall's steps, a
   sunburst's sectors, an
-  xrange's bars, a columnrange's ranges — the last counting by label like waterfall, minus the
+  xrange's bars, a columnrange's ranges — funnel/pyramid counting `label_ok & value_ok` exactly
+  like treemap, and columnrange counting by label like waterfall, minus the
   appended total)
   for the app's KPI
   row — reusing the same `_label_ok`/`_plottable` drop predicates so the count can't
@@ -133,12 +136,22 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   columnrange/xrange distinction turns on. Every low sits below its high (a clean range), because
   the type's headline is "a min–max per category" and the sample is meant to *show* it; the
   missing-slot and inverted-range edge cases are the tests' job, not a demo's.
+  `Marketing conversion funnel (funnel)` and `Customer loyalty pyramid (pyramid)` are the same
+  single-value **stage** shape drawn two ways: both lead with their **largest** stage and decrease,
+  but the funnel puts it at the top and narrows downward (a shrinking purchase journey) while the
+  pyramid draws row 0 at the **base** and narrows upward to an apex (a broad-based loyalty pyramid,
+  the biggest group at the bottom) — so reading the two side by side shows the only difference is
+  which way the shape points, not the data (the row-0-at-base direction was **verified by
+  rendering**, since Highcharts draws a pyramid as the vertical flip of a funnel).
   Every sample leads with a **category column**, and that is load-bearing rather than tidy: the app
   opens on `line` with the first column as X, so a numeric first column would trip the x-in-y guard
   the moment the dataset was selected.
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data
   and scatter/bubble edge cases, radar's polar-line shape, heatmap's colorAxis
-  value matrix, treemap's value-sized tiles, sankey's node-link flows, boxplot's
+  value matrix, treemap's value-sized tiles, funnel's and pyramid's `{name, y}` stages
+  (the pie-keyed leaf, the drop-the-row policy, the preserved row order, the two dark-mode
+  flips, the `modules/funnel`-not-`highcharts-more` resolution, pyramid's own `chart.type`
+  with no `reversed`, and the count-adaptive "Stages" KPI), sankey's node-link flows, boxplot's
   aggregated Tukey distributions, waterfall's appended total and semantic bar
   colors, sunburst's assembled hierarchy (synthesized ids, valueless internal nodes,
   the dropped dangling parent vs. the raised cycle, and the appended root), xrange's
@@ -296,7 +309,36 @@ sized by value — the same single-value data shape as `pie`: `x_col` labels eac
 tile and the first `y_cols` column gives its `value`, but tiles are colored
 categorically from the palette via `colorByPoint` and laid out by the
 `squarified` algorithm, dropping missing values like pie; pulls in the
-`modules/treemap` module), `sankey` (a node-link flow diagram — the only type
+`modules/treemap` module), `funnel` and `pyramid` (part-of-whole **stages** — pie's
+structural cousins, since `FunnelSeries` is literally `FunnelOptions(PieOptions)`: the
+same single-value data shape (`x_col` names each stage, the first `y_cols` column sizes
+it, a valueless row **dropped like a pie slice** via `_plottable`, the `{name, y}` leaf
+keyed like pie — *not* treemap's `value`), drawn top-to-bottom in **row order** (not
+re-sorted — columnrange's kept-as-given permissiveness). Each stage is palette-hued like
+a pie slice (`colorByPoint` **inherited** from pie's JS default; highcharts-core cannot
+express the key, so the builder sets nothing — the opposite of treemap, which sets it
+explicitly), and the tooltip prints the value with its share of the stage total (pie's
+`point.percentage`, labelled "of total" so it is not misread as a conversion rate).
+`pyramid` is funnel's **inverted mirror** and its OWN highcharts-core series type
+(`PyramidSeries(FunnelSeries)`, which draws inverted **by default**) — *not* a `funnel`
+with `reversed=True`, which keeps this module's "every type serializes as its own
+Highcharts name" rule intact (radar is the one exception) and needs no geometry knobs at all.
+Neither type sets `FunnelOptions`' `neck_*`/`width`/`height` geometry: Highcharts' defaults
+render correctly at every height the app offers (verified across the sample renders), so there
+is nothing to steer — those setters assign cleanly, so it is a "the defaults are right" call,
+not the pane-`size` silent-drop the gauge work hit. The two differ **only** in the `chart.type`
+string, so they share one
+build branch, one `count_marks` rule (`label_ok & value_ok`, so both opt INTO the
+count-adaptive **"Stages"** KPI — unlike their twin pie, whose omission is an unjustified
+gap), and one `_themed` hook (pie's **two** flips — the labels sit OUTSIDE the shape on
+the chart background, so they take the light text color, and the segment borders dissolve
+into the dark background — **measured by rendering**, not inferred from the pie kinship).
+Both resolve `modules/funnel` from `chart.type` alone — **not** `highcharts-more` (the
+plausible guess the round-trip corrects). The one rendering fact that IS Highcharts' and
+not the builder's: a funnel draws row 0 at the **top** and narrows down, a pyramid draws
+row 0 at the **base** and narrows up to an apex — so the same largest-first frame is a
+funnel pointing down or a pyramid pointing up, which is the whole of the difference
+(verified by rendering)), `sankey` (a node-link flow diagram — the only type
 that reads the data as *edges of a graph* rather than as series or categories:
 each row is one link, from the node named in `x_col` to the node named in
 `target_col`, weighted by the first `y_cols` column, encoded as
@@ -1002,6 +1044,8 @@ to serialize — bubble, radar, boxplot, waterfall and columnrange all pulling i
 `highcharts-more` module (columnrange from `chart.type` alone, with no `modules/columnrange` — the
 plausible guess the round-trip corrects),
 heatmap the `modules/heatmap` module, treemap the `modules/treemap` module,
+funnel and pyramid the `modules/funnel` module (shared, from `chart.type` alone — and *not*
+`highcharts-more`, the plausible guess the round-trip corrects, as it does for columnrange),
 sankey the `modules/sankey` module, sunburst the `modules/sunburst` module, xrange the
 `modules/xrange` module (those two alone among the extra-module types needing *not*
 `highcharts-more`), and gauge `modules/solid-gauge` **plus** `highcharts-more` — which is the

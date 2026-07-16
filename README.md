@@ -46,8 +46,8 @@ theme, which you can toggle from Streamlit's settings menu.
   the light/dark theme in both render modes, while each series keeps its palette
   color. Follows your OS by default.
 - **KPI row** — rows, numeric columns, and a chart-type-adaptive third metric
-  (series plotted, or the mark count: cells, tiles, flows, links, boxes, steps,
-  sectors, or bars).
+  (series plotted, or the mark count: cells, tiles, stages, flows, links, boxes,
+  steps, sectors, bars, or ranges).
 - **See the config** — a toggle reveals the generated Highcharts config
   (`to_js_literal()` output).
 - **Consistent palette** — every series uses the brand palette (`DEFAULT_COLORS`),
@@ -64,6 +64,8 @@ theme, which you can toggle from Streamlit's settings menu.
 | `radar` | A polar spider/web line over a category axis | — |
 | `heatmap` | A category × category grid, cells colored by value | — |
 | `treemap` | Nested rectangles sized by a value column | — |
+| `funnel` | Part-of-whole stages, sized top-to-bottom (a narrowing funnel) | — |
+| `pyramid` | Funnel's inverted mirror: stages widening top-to-bottom | — |
 | `sankey` | A flow diagram: each row links two node columns, weighted by a value | Target |
 | `networkgraph` | A force-directed graph of unweighted edges between two node columns | Target (no Y) |
 | `boxplot` | Per-category Tukey distributions from repeated observations | — |

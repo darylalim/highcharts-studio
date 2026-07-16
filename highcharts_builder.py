@@ -31,6 +31,27 @@ BUBBLE_TYPES = ("bubble",)  # scatter (x, y) plus a size (z) dimension
 POLAR_TYPES = ("radar",)  # a polar (spider/web) line chart over the categories
 HEATMAP_TYPES = ("heatmap",)  # an x-category × y-category matrix colored by value
 TREEMAP_TYPES = ("treemap",)  # nested rectangles sized by value, like pie
+# The FUNNEL FAMILY: part-of-whole "stages" charts, and pie's structural cousins — `FunnelSeries`
+# is literally `FunnelOptions(PieOptions)`, so a funnel reads the single-value shape pie does (one
+# `{name, y}` leaf per row: `x_col` names each stage, the first `y_cols` column sizes it) and drops
+# a row whose value can't be plotted exactly as pie drops a valueless slice. `pyramid` is funnel's
+# INVERTED mirror (narrow-to-wide instead of wide-to-narrow), and it is its OWN highcharts-core
+# series type — `PyramidSeries(FunnelSeries)`, which draws inverted BY DEFAULT — NOT a `funnel` with
+# `reversed=True`. Modeling it as the real type keeps this module's "every type serializes as its
+# own Highcharts name" rule (radar is the one exception) and needs no geometry knobs — a
+# `PyramidSeries` draws inverted on its own, so nothing sets `reversed` or a neck. Neither type sets
+# any of `FunnelOptions`' `neck_*`/`width`/`height` geometry either: Highcharts' defaults render
+# correctly at every height the app offers (verified across the sample renders — the setters
+# themselves assign cleanly, unlike the pane `size` the gauge work hit, so this is a "the defaults
+# are right", not a "the setter is broken", call). The two differ ONLY in the `chart.type` string,
+# so they share ONE build branch and one
+# `count_marks` rule, and both resolve `modules/funnel` from `chart.type` alone — NOT
+# `highcharts-more` (verified on the round-trip, correcting the plausible guess). So one tuple,
+# unlike the gauge family's two.
+FUNNEL_TYPES = (
+    "funnel",
+    "pyramid",
+)  # part-of-whole stages: funnel + its inverted mirror pyramid
 SANKEY_TYPES = ("sankey",)  # node-link flows: source -> target links sized by weight
 # NETWORKGRAPH is sankey's cousin — rows are edges of a graph — with two removals that the
 # LIBRARY forces, not preference: a networkgraph link is an UNWEIGHTED [from, to] pair (a
@@ -92,6 +113,7 @@ SUPPORTED_TYPES = (
     + POLAR_TYPES
     + HEATMAP_TYPES
     + TREEMAP_TYPES
+    + FUNNEL_TYPES
     + SANKEY_TYPES
     + NETWORKGRAPH_TYPES
     + BOXPLOT_TYPES
@@ -687,6 +709,17 @@ def _themed(options: dict, *, dark: bool) -> dict:
         # data-label color stays "contrast" (set in build_options): tiles are
         # palette-colored in both themes, so it needs no dark flip.
         options["plotOptions"]["treemap"]["borderColor"] = t["bg"]
+    if options["chart"].get("type") in FUNNEL_TYPES:
+        # Pie's TWO flips, not treemap's one — because a funnel's data labels sit OUTSIDE the
+        # shape on the chart background (its `verticalAlign: middle` default, verified against the
+        # funnel JS source), exactly where pie's do, so they need the same dark text color; and
+        # the segment borders default to the white background var, so they ring every stage until
+        # dissolved into the dark background (pie/treemap/sankey's gap rule). `plotOptions[type]`
+        # is keyed by the concrete `chart.type`, so `pyramid` themes through its own key. Measured
+        # by rendering both types light and dark, not inferred from the pie/pyramid kinship.
+        funnel = options["plotOptions"][options["chart"]["type"]]
+        funnel["dataLabels"] = {**funnel.get("dataLabels", {}), "color": t["text"]}
+        funnel["borderColor"] = t["bg"]
     if options["chart"].get("type") == "heatmap":
         # The colorAxis gradient legend + its tick labels aren't reached by the
         # xAxis/yAxis loop above (nor by the categorical legend theming), so flip
@@ -1846,6 +1879,16 @@ def build_options(
       value), but each tile is colored categorically from the palette
       (``colorByPoint``) and laid out by the ``squarified`` algorithm. Missing
       values are dropped like pie's slices. Pulls in the ``modules/treemap`` module.
+    - ``funnel`` / ``pyramid``: part-of-whole *stages* — the same single-value shape
+      as ``pie`` (``FunnelSeries`` is ``FunnelOptions(PieOptions)``: ``x_col`` names
+      each stage, the first ``y_cols`` column sizes it, a valueless row dropped like
+      a pie slice), drawn top-to-bottom in row order (not re-sorted, so the sequence
+      is the user's). ``pyramid`` is funnel's inverted mirror and its OWN series type
+      (``PyramidSeries``), differing only in ``chart.type``. Each stage is
+      palette-hued like a pie slice (``colorByPoint`` inherited from pie's default),
+      and the tooltip prints the value with its share of the stage total. Both pull
+      in the ``modules/funnel`` module from ``chart.type`` alone (not
+      ``highcharts-more``).
     - ``sankey``: a node-link flow diagram. Unlike every other type, the data is
       read as *edges of a graph* rather than as series or categories: each row is
       one link, from the node named in ``x_col`` to the node named in
@@ -2606,6 +2649,71 @@ def build_options(
                         # sits on the tile, not the chart background — so, unlike
                         # pie's labels, it needs no dark-mode color flip.
                         "dataLabels": _in_mark_labels("{point.name}<br>{point.value}"),
+                    }
+                },
+                "series": [{"name": value_col, "data": data}],
+            },
+            dark=dark,
+        )
+
+    if chart_type in FUNNEL_TYPES:  # part-of-whole stages (funnel / its mirror pyramid)
+        value_col = y_cols[0]
+        # Pie's single-value shape verbatim: `x_col` names each stage, the first y column
+        # sizes it, and a `{name, y}` leaf is DROPPED when the value can't be plotted — the
+        # `_plottable` rule, not the category-x keep-a-slot family, because a funnel segment
+        # has no fixed axis position to hold empty (verified: `FunnelSeries(PieSeries)` reads
+        # `y`, and the values round-trip into the emitted JS). Rows are drawn in the order they
+        # arrive: unlike pie's cosmetic slice order, a funnel's row order IS its stage order, so
+        # the builder does NOT re-sort — the same permissiveness columnrange gives an inverted
+        # range (the samples lead with a clean largest-first sequence; an odd order is the user's
+        # data, not an error). The one twist is the DIRECTION, and it is Highcharts', not ours: a
+        # funnel draws row 0 at the TOP and narrows down, while a pyramid draws row 0 at the BASE
+        # and narrows UP to an apex (verified by rendering) — so the same largest-first frame is a
+        # funnel pointing down or a pyramid pointing up, which is the whole of the difference.
+        #
+        # `chart.type` is the plain type name for BOTH — `pyramid` is its own series type
+        # (`PyramidSeries(FunnelSeries)`, inverted by default), so there is no `reversed`/neck
+        # knob to set and no shared branch to fork; the two options trees are byte-identical
+        # apart from this string. No `colorByPoint` key: a funnel inherits `colorByPoint: true`
+        # from `PieSeries.defaultOptions` at the JS level (and highcharts-core cannot express the
+        # key anyway — its kwargs whitelist never reads it), so each stage is palette-hued for
+        # free, exactly as a pie slice is. No neck/width/height geometry either: Highcharts'
+        # defaults render correctly at every height the app offers (verified across the sample
+        # renders), so there is nothing to steer (see FUNNEL_TYPES).
+        data = [
+            {"name": str(name), "y": float(value)}
+            for name, value in zip(df[x_col], df[value_col], strict=True)
+            if _plottable(value)
+        ]
+        return _themed(
+            {
+                "chart": {"type": chart_type},
+                "colors": colors,
+                "title": {"text": title},
+                # `{point.percentage}` is a funnel point's SHARE OF THE STAGE TOTAL (pie
+                # semantics, inherited — NOT a conversion rate against the first stage), so it is
+                # labelled "of total" rather than left to be misread as attrition. The value is
+                # printed IN the tooltip and beside the stage name so the Static-PNG mode (no
+                # hover) still shows the numbers, as pie/treemap do.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": (
+                        "{point.name}: <b>{point.y}</b> "
+                        "({point.percentage:.1f}% of total)"
+                    ),
+                },
+                "plotOptions": {
+                    chart_type: {
+                        "allowPointSelect": True,
+                        "cursor": "pointer",
+                        # Labels sit OUTSIDE the shape on the chart background with a connector
+                        # (a funnel's default `verticalAlign: middle`, pie's placement — NOT
+                        # treemap's on-fill `contrast` labels), so they take pie's dark-mode
+                        # text-color flip in `_themed`, not `_in_mark_labels`.
+                        "dataLabels": {
+                            "enabled": True,
+                            "format": "{point.name}: {point.y}",
+                        },
                     }
                 },
                 "series": [{"name": value_col, "data": data}],
@@ -3558,6 +3666,12 @@ def count_marks(
         return int((label_ok & target_ok).sum())
     value_ok = df[y_cols[0]].map(_plottable).astype(bool)
     if chart_type in TREEMAP_TYPES:
+        return int((label_ok & value_ok).sum())
+    if chart_type in FUNNEL_TYPES:
+        # One stage per drawable {name, y} leaf — treemap's rule exactly, since a funnel drops a
+        # valueless row the same way (no EnforcedNull slot to keep). Unlike pie, funnel opts INTO
+        # the count-adaptive KPI ("Stages"), so this reuses the very `label_ok`/`value_ok` masks
+        # its build branch drops rows by, and the number can't drift from the stages drawn.
         return int((label_ok & value_ok).sum())
     if chart_type in SANKEY_TYPES:
         target_ok = df[target_col].map(_label_ok).astype(bool)

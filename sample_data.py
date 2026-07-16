@@ -167,6 +167,51 @@ def _company_market_cap() -> pd.DataFrame:
     )
 
 
+def _conversion_funnel() -> pd.DataFrame:
+    """A marketing conversion funnel — the part-of-whole *stages* a funnel is built for: each
+    band is one step of a purchase journey, sized by how many people reach it, and the strict
+    top-to-bottom narrowing IS the story (where a pie would only show each step's share of the
+    sum). Tailored to funnel: a single stage-label column (stage) leading the frame — so the app
+    opens cleanly on ``line`` with a category X — plus one numeric value column (visitors) whose
+    values *decrease* down the funnel. The clean monotone sequence is the demo's job; a missing or
+    out-of-order stage is the tests'."""
+    return pd.DataFrame(
+        {
+            "stage": [
+                "Visitors",
+                "Product views",
+                "Added to cart",
+                "Checkout started",
+                "Purchased",
+            ],
+            "visitors": [48000, 21500, 9200, 4100, 1600],
+        }
+    )
+
+
+def _loyalty_pyramid() -> pd.DataFrame:
+    """A customer-loyalty pyramid — funnel's inverted mirror, drawn as pyramid's own series type.
+    Like a funnel it leads with its LARGEST stage, but where a funnel puts that stage at the top
+    and narrows downward, a Highcharts pyramid draws the first row at the BASE and narrows UPWARD
+    to an apex (verified by rendering) — the classic broad-based loyalty pyramid. Tailored to
+    pyramid exactly as the funnel sample is to funnel: a stage-label column (tier) first, one
+    numeric value column (people) *decreasing* from the broad Audience base to the Advocates apex.
+    Reading the two side by side is the fastest way to see the only difference is which way the
+    shape points, not the data."""
+    return pd.DataFrame(
+        {
+            "tier": [
+                "Audience",
+                "Leads",
+                "Customers",
+                "Repeat buyers",
+                "Advocates",
+            ],
+            "people": [25000, 8000, 3200, 900, 250],
+        }
+    )
+
+
 def _energy_flow() -> pd.DataFrame:
     """Primary energy sources feeding electricity generation, which then splits to
     end-use sectors — the multi-level flow a sankey is built for: each link's width
@@ -626,6 +671,8 @@ SAMPLES = {
     "Product ratings (radar)": _product_ratings,
     "Website activity by weekday (heatmap)": _weekly_activity,
     "Company market cap (treemap)": _company_market_cap,
+    "Marketing conversion funnel (funnel)": _conversion_funnel,
+    "Customer loyalty pyramid (pyramid)": _loyalty_pyramid,
     "Energy flow (sankey)": _energy_flow,
     "Service dependencies (networkgraph)": _service_dependencies,
     "Service response times (boxplot)": _response_times,

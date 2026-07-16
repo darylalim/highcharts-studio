@@ -532,11 +532,21 @@ def test_row_less_frame_with_a_numeric_x_also_draws_an_empty_chart():
 
 @pytest.mark.parametrize(
     "chart_type",
-    ["heatmap", "treemap", "sankey", "boxplot", "waterfall", "sunburst", "xrange"],
+    [
+        "heatmap",
+        "treemap",
+        "funnel",
+        "pyramid",
+        "sankey",
+        "boxplot",
+        "waterfall",
+        "sunburst",
+        "xrange",
+    ],
 )
 def test_count_marks_matches_the_built_series(chart_type):
-    # The app's KPI (heatmap Cells / treemap Tiles / sankey Flows / boxplot Boxes /
-    # waterfall Steps / sunburst Sectors) comes
+    # The app's KPI (heatmap Cells / treemap Tiles / funnel|pyramid Stages / sankey Flows /
+    # boxplot Boxes / waterfall Steps / sunburst Sectors) comes
     # from count_marks, which must equal the marks build_options actually draws — the whole
     # reason it lives in the builder, beside the drop rules. Cross-check the two on a frame
     # that exercises every drop: a NaN label (dropped in all six), a NaN value (drops a
@@ -624,6 +634,10 @@ def test_count_marks_matches_the_built_series(chart_type):
         == {
             "heatmap": 4,
             "treemap": 2,
+            # Funnel/pyramid drop the NaN label (row 3) and the NaN/inf value (rows 2, 4)
+            # like treemap, leaving "a" (1.0) and "e" (5.0): 2 stages, no appended mark.
+            "funnel": 2,
+            "pyramid": 2,
             "sankey": 1,
             "boxplot": 4,
             "waterfall": 5,
@@ -663,10 +677,10 @@ def test_heatmap_non_finite_cell_becomes_enforced_null():
     assert data[1][2] is EnforcedNull
 
 
-@pytest.mark.parametrize("chart_type", ["pie", "treemap"])
+@pytest.mark.parametrize("chart_type", ["pie", "treemap", "funnel", "pyramid"])
 def test_single_value_types_drop_a_non_finite_row(chart_type):
-    # The drop-the-row family drops an infinity exactly as it drops a NaN: a slice or tile
-    # can no more be sized by infinity than by nothing.
+    # The drop-the-row family drops an infinity exactly as it drops a NaN: a slice, tile or
+    # funnel stage can no more be sized by infinity than by nothing.
     df = pd.DataFrame({"n": ["a", "b", "c"], "v": [1.0, float("inf"), 3.0]})
     data = build_options(df, chart_type, "n", ["v"])["series"][0]["data"]
     assert [point["name"] for point in data] == ["a", "c"]
@@ -1495,9 +1509,130 @@ def test_treemap_light_mode_shape():
     assert "backgroundColor" not in opts["tooltip"]
 
 
-@pytest.mark.parametrize("chart_type", ["pie", "treemap"])
+# --------------------------------------------------------------------------- #
+# Funnel / pyramid (part-of-whole stages — pie's single-value cousins)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_funnel_family_builds_leaves_and_skips_missing(chart_type):
+    # Funnel/pyramid share pie's single-value shape (a label column + one value column)
+    # AND pie's leaf key: FunnelSeries is FunnelOptions(PieOptions), so leaves are keyed
+    # "y" (NOT treemap's "value"). Like pie, a NaN- or inf-valued row is DROPPED (a stage
+    # can't be sized without a value) — not the category-x keep-a-slot EnforcedNull family.
+    df = pd.DataFrame({"stage": ["A", "B", "C"], "v": [10.0, float("nan"), 30.0]})
+    opts = build_options(df, chart_type, "stage", ["v"])
+    # chart.type is the CONCRETE type name for both — pyramid is its own series type, not a
+    # funnel with reversed=True, so nothing here says "funnel" for a pyramid.
+    assert opts["chart"]["type"] == chart_type
+    assert opts["series"][0]["name"] == "v"
+    assert opts["series"][0]["data"] == [
+        {"name": "A", "y": 10.0},
+        {"name": "C", "y": 30.0},
+    ]
+    # Palette-hued per stage from the shared colors, NOT a colorAxis (like pie, unlike heatmap).
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    assert "colorAxis" not in opts
+
+
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_funnel_family_uses_only_first_y_col(chart_type):
+    # Single-value like pie: only the first selected column sizes the stages.
+    df = pd.DataFrame({"stage": ["A", "B"], "v": [1.0, 2.0], "v2": [9.0, 9.0]})
+    opts = build_options(df, chart_type, "stage", ["v", "v2"])
+    assert opts["series"][0]["name"] == "v"
+    assert [pt["y"] for pt in opts["series"][0]["data"]] == [1.0, 2.0]
+
+
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_funnel_family_draws_stages_in_row_order(chart_type):
+    # A funnel's row order IS its visual top-to-bottom stage order (unlike pie's cosmetic slice
+    # order), and Highcharts does NOT auto-sort. The builder is deliberately permissive — it
+    # draws stages in the order the rows arrive, re-sorting nothing — so an out-of-order input
+    # is kept as given (columnrange's kept-inverted-range permissiveness, one family over). This
+    # pins that no sort creeps in.
+    df = pd.DataFrame(
+        {"stage": ["A", "B", "C"], "v": [10.0, 90.0, 40.0]}
+    )  # non-monotonic
+    data = build_options(df, chart_type, "stage", ["v"])["series"][0]["data"]
+    assert [pt["name"] for pt in data] == ["A", "B", "C"]
+    assert [pt["y"] for pt in data] == [10.0, 90.0, 40.0]
+
+
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_funnel_family_dark_mode_themes_labels_and_border(chart_type):
+    # Pie's TWO dark-mode flips, not treemap's one — because a funnel's data labels sit OUTSIDE
+    # the shape on the chart background (its default placement), so they take the light TEXT
+    # color; and the segment borders default to the white background var, so they are dissolved
+    # into the dark background (borderColor). Keyed by the concrete chart.type, so pyramid themes
+    # through its own plotOptions key.
+    df = pd.DataFrame({"stage": ["A", "B"], "v": [1.0, 2.0]})
+    opts = build_options(df, chart_type, "stage", ["v"], dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    po = opts["plotOptions"][chart_type]
+    assert (
+        po["dataLabels"]["color"] == "#e2e8f0"
+    )  # light text, unlike treemap's "contrast"
+    assert po["borderColor"] == "#0f172a"  # segment gaps match the dark background
+    # No axes, so the axis-theming loop must simply skip it (not crash).
+    assert "xAxis" not in opts
+
+
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_funnel_family_serializes_and_pulls_in_the_funnel_module(chart_type):
+    # End to end: the {name, y} leaf shape must serialize (values reach the JS) AND resolve
+    # modules/funnel.js — shared by funnel and pyramid, and NOT highcharts-more (the plausible
+    # guess the round-trip corrects, as it does for bubble/boxplot vs treemap/sunburst/xrange).
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"stage": ["A", "B", "C"], "v": [10.0, 20.0, 30.0]})
+    chart = make_chart(df, chart_type, "stage", ["v"])
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and f"type: '{chart_type}'" in js
+    assert all(
+        str(v) in js for v in (10, 20, 30)
+    )  # the values round-trip, not silently dropped
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/funnel.js" in tags
+    assert "highcharts-more" not in tags  # funnel's own module, not bubble/radar's
+
+
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_funnel_family_light_mode_shape(chart_type):
+    # Pin the otherwise-unguarded funnel/pyramid choices — parametrized over BOTH, since they
+    # share one branch and these strings must be byte-identical between them: the value+share
+    # tooltip (headerFormat blanked; the percentage is a funnel point's share of the STAGE TOTAL —
+    # pie semantics, inherited — labelled "of total" so it isn't misread as a conversion rate),
+    # the outside-the-shape name+value data labels, and the ABSENCE of an explicit colorByPoint
+    # key (funnel inherits colorByPoint: true from pie's JS default, and highcharts-core cannot
+    # express the key at all — so the builder must set nothing, unlike treemap which sets it).
+    df = pd.DataFrame({"stage": ["A", "B"], "v": [3.0, 1.0]})
+    opts = build_options(df, chart_type, "stage", ["v"])
+    assert opts["tooltip"]["headerFormat"] == ""
+    assert opts["tooltip"]["pointFormat"] == (
+        "{point.name}: <b>{point.y}</b> ({point.percentage:.1f}% of total)"
+    )
+    plot = opts["plotOptions"][chart_type]
+    assert plot["dataLabels"]["enabled"] is True
+    assert plot["dataLabels"]["format"] == "{point.name}: {point.y}"
+    assert "colorByPoint" not in plot  # inherited from pie's default, never set here
+    # Light mode injects no dark chrome onto the tooltip (a no-op, as elsewhere).
+    assert "backgroundColor" not in opts["tooltip"]
+
+
+def test_pyramid_is_its_own_series_type_not_a_reversed_funnel():
+    # Pyramid is modeled as the real PyramidSeries (chart.type "pyramid"), which draws inverted
+    # by default — NOT a funnel with reversed=True + a zeroed neck. So the emitted options carry
+    # NO `reversed` key and the type is literally "pyramid", keeping this module's "every type
+    # serializes as its own Highcharts name" rule intact (radar is the sole exception).
+    df = pd.DataFrame({"tier": ["A", "B", "C"], "v": [1.0, 2.0, 3.0]})
+    opts = build_options(df, "pyramid", "tier", ["v"])
+    assert opts["chart"]["type"] == "pyramid"
+    assert "reversed" not in opts["plotOptions"]["pyramid"]
+    assert "neckWidth" not in opts["plotOptions"]["pyramid"]
+
+
+@pytest.mark.parametrize("chart_type", ["pie", "treemap", "funnel", "pyramid"])
 def test_single_value_numeric_labels_coerce_to_strings(chart_type):
-    # The single-value point-name types (pie, treemap) build leaves as
+    # The single-value point-name types (pie, treemap, funnel, pyramid) build leaves as
     # {"name": str(label), ...}. That str() is load-bearing: highcharts-core's
     # point model rejects a non-string name (CannotCoerceError on render), so a
     # user who picks a numeric label column (years, IDs) would otherwise get a
@@ -5038,6 +5173,44 @@ def test_company_market_cap_sample_builds_a_treemap_chart():
     assert "value" in opts["series"][0]["data"][0]
 
 
+def test_conversion_funnel_sample_builds_a_funnel_chart():
+    # Ties the new funnel sample to its intended type end to end: a stage label (X) plus one
+    # visitor-count value column (Y) produce one {name, y} band per stage, in row order, and the
+    # sample's values strictly DECREASE — the narrowing a funnel is meant to show.
+    from sample_data import _conversion_funnel
+
+    df = _conversion_funnel()
+    opts = build_options(df, "funnel", "stage", ["visitors"])
+    assert opts["chart"]["type"] == "funnel"
+    assert opts["series"][0]["name"] == "visitors"
+    data = opts["series"][0]["data"]
+    assert len(data) == len(df)
+    assert data[0]["name"] == "Visitors"
+    assert "y" in data[0]  # pie's key, not treemap's "value"
+    values = [pt["y"] for pt in data]
+    assert values == sorted(values, reverse=True)  # a clean narrowing funnel
+
+
+def test_loyalty_pyramid_sample_builds_a_pyramid_chart():
+    # The mirror of the funnel sample: a tier label (X) plus one people-count column (Y). Like the
+    # funnel it leads with its LARGEST stage and DECREASES, but a pyramid draws the first row at
+    # the base (verified by rendering), so the broad Audience base is row 0 and it narrows up to
+    # the Advocates apex. Same data SHAPE as the funnel sample, drawn as pyramid's own series type.
+    from sample_data import _loyalty_pyramid
+
+    df = _loyalty_pyramid()
+    opts = build_options(df, "pyramid", "tier", ["people"])
+    assert opts["chart"]["type"] == "pyramid"
+    assert opts["series"][0]["name"] == "people"
+    data = opts["series"][0]["data"]
+    assert len(data) == len(df)
+    assert data[0]["name"] == "Audience"  # the broad base, drawn at the bottom
+    values = [pt["y"] for pt in data]
+    assert values == sorted(
+        values, reverse=True
+    )  # largest-first, narrowing to the apex
+
+
 def test_energy_flow_sample_builds_a_sankey_chart():
     # Ties the new sankey sample to its intended type end to end: two node columns
     # plus a numeric weight produce one link per row. Unlike every other sample, its
@@ -5282,6 +5455,20 @@ def test_app_switch_to_treemap_regenerates_config(app):
     _reveal_config(app)
     assert not app.exception
     assert "type: 'treemap'" in app.code[0].value
+
+
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_app_switch_to_funnel_family_regenerates_config(app, chart_type):
+    # Funnel/pyramid are single-value like pie/treemap, so switching swaps the Y pills for a
+    # single-select Y (an extra selectbox, exactly as pie does) and drives the config through the
+    # funnel branch, adding NO extra control before Chart type (so the index-[1] addressing other
+    # app tests rely on still holds). `type: '<chart_type>'` proves that branch produced it — and
+    # that a pyramid emits its OWN type name, not a funnel. Network-free.
+    app.selectbox[1].set_value(chart_type).run()  # Chart type -> funnel / pyramid
+    assert not app.exception
+    _reveal_config(app)
+    assert not app.exception
+    assert f"type: '{chart_type}'" in app.code[0].value
 
 
 def test_app_switch_to_sankey_shows_target_control_and_regenerates_config(app):
@@ -5904,6 +6091,24 @@ def test_app_treemap_kpi_shows_tiles_from_count_marks(app):
     x = default_df.columns[0]
     y = [default_df.select_dtypes("number").columns[0]]
     assert metrics["Tiles"] == f"{count_marks(default_df, 'treemap', x, y):,}"
+
+
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_app_funnel_family_kpi_shows_stages_from_count_marks(app, chart_type):
+    # Funnel/pyramid swap "Series plotted" for "Stages", from count_marks (rows with a drawable
+    # label AND a plottable value) — unlike their twin pie, which opts out and shows a bare 1. So
+    # the KPI matches the stages actually drawn.
+    from highcharts_builder import count_marks
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value(chart_type).run()  # Chart type -> funnel / pyramid
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    x = default_df.columns[0]
+    y = [default_df.select_dtypes("number").columns[0]]
+    assert metrics["Stages"] == f"{count_marks(default_df, chart_type, x, y):,}"
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):

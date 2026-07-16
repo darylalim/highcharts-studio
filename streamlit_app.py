@@ -64,6 +64,13 @@ MODE_BADGES: dict[str, tuple[str, str, _BadgeColor]] = {
 MARK_METRICS = {
     "heatmap": "Cells",
     "treemap": "Tiles",
+    # Funnel and its inverted mirror pyramid opt INTO the count-adaptive KPI, unlike their
+    # structural twin pie (whose omission is an unjustified gap). Their one series' points are the
+    # stages, so the default "Series plotted" would misreport them as a bare 1; instead the KPI
+    # shows the drawable-stage count from count_marks (a valueless stage dropped like a pie slice),
+    # which meaningfully differs from the row count when a value can't be plotted.
+    "funnel": "Stages",
+    "pyramid": "Stages",
     "sankey": "Flows",
     # Networkgraph is the OTHER single-series node-link type, so — like sankey — its default
     # "Series plotted" would misreport its one edge-series as a bare 1. Its marks are the edges,
@@ -270,6 +277,9 @@ with st.sidebar:
             "- **pie** — one label column + one value column\n"
             "- **treemap** — one label column + one value column; each tile's "
             "area shows the value (scales to more categories than a pie)\n"
+            "- **funnel / pyramid** — one **stage-label** column + one value column; "
+            "each stage is a band sized by its value, drawn top-to-bottom in row order "
+            "(a `funnel` narrows down, a `pyramid` widens down)\n"
             "- **scatter** — an X column paired with one or more numeric Y series\n"
             "- **bubble** — scatter plus a numeric Size (Z) column driving each "
             "marker's area\n"
@@ -346,6 +356,12 @@ with st.sidebar:
     elif chart_type == "treemap":
         # Single-value shape like pie: one label column + one value column.
         x_label, y_label, multi = "Tile labels", "Tile values", False
+    elif chart_type in ("funnel", "pyramid"):
+        # Pie's single-value shape (one label column names each stage, one value column sizes
+        # it), so single-select Y like pie/treemap. "Stage" for both — a pyramid is a funnel
+        # read the other way up, not a different data shape. A second value column would be a
+        # second funnel, which is a second chart.
+        x_label, y_label, multi = "Stage labels", "Stage values", False
     elif chart_type == "sankey":
         # Node-link flow: two label columns naming a link's ends (the X selectbox
         # plus the Target one below) and one numeric column weighting it.
