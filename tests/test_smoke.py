@@ -1544,11 +1544,12 @@ def test_funnel_family_uses_only_first_y_col(chart_type):
 
 @pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
 def test_funnel_family_draws_stages_in_row_order(chart_type):
-    # A funnel's row order IS its visual top-to-bottom stage order (unlike pie's cosmetic slice
-    # order), and Highcharts does NOT auto-sort. The builder is deliberately permissive — it
-    # draws stages in the order the rows arrive, re-sorting nothing — so an out-of-order input
-    # is kept as given (columnrange's kept-inverted-range permissiveness, one family over). This
-    # pins that no sort creeps in.
+    # A stage's row order IS load-bearing (unlike pie's cosmetic slice order), and Highcharts does
+    # NOT auto-sort. The builder is deliberately permissive — it emits stages in the order the rows
+    # arrive, re-sorting nothing — so an out-of-order input is kept as given (columnrange's
+    # kept-inverted-range permissiveness, one family over). This pins that no sort creeps into the
+    # emitted DATA ARRAY; which end of the shape row 0 lands on is Highcharts' call and differs by
+    # type (a funnel draws row 0 at the top, a pyramid at the base), so it is not asserted here.
     df = pd.DataFrame(
         {"stage": ["A", "B", "C"], "v": [10.0, 90.0, 40.0]}
     )  # non-monotonic
@@ -1587,9 +1588,14 @@ def test_funnel_family_serializes_and_pulls_in_the_funnel_module(chart_type):
     chart = make_chart(df, chart_type, "stage", ["v"])
     js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
     assert js and f"type: '{chart_type}'" in js
-    assert all(
-        str(v) in js for v in (10, 20, 30)
-    )  # the values round-trip, not silently dropped
+    # The leaf VALUE must survive the Chart.from_options round-trip into the JS — the treemap
+    # `value`-vs-`y` silent-drop trap, one type over. highcharts-core collapses each {name, y}
+    # leaf into a `[name, value]` 2-array, so pin the name-to-value PAIR (a dropped value would
+    # leave `['A']` with no number) rather than a bare "10", which could match elsewhere.
+    flat = "".join(js.split())  # the pairs span newlines: ['A',\n10.0] -> ['A',10.0]
+    assert "['A',10.0]" in flat
+    assert "['B',20.0]" in flat
+    assert "['C',30.0]" in flat
     tags = chart.get_script_tags(as_str=True)
     assert "modules/funnel.js" in tags
     assert "highcharts-more" not in tags  # funnel's own module, not bubble/radar's
