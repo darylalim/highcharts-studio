@@ -13,7 +13,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `st.multiselect` on wide CSVs, plus the four type-specific extra column
   selectors — Size (Z) for bubble, Target (to) for sankey (and **networkgraph**, which reuses
   the very same control and `target_col`, since a link is a link), Parent for sunburst, End
-  for xrange — and the **gauge family's** two, which are the only ones that name a **policy** and
+  for xrange, High (top) for **columnrange** (its Y control renamed **Low (bottom)** — the two
+  ends of a range, both magnitudes, drawn from `numeric_cols`, *not* xrange's `coordinate_columns`,
+  since a high can never be a date; the one two-value-column type whose second column is a new
+  kwarg — `high_col` — rather than a reuse, because a magnitude is not xrange's coordinate) — and
+  the **gauge family's** two, which are the only ones that name a **policy** and
   a **scale** rather than a column: an aggregation picker sourced from the builder's
   `GAUGE_AGGREGATIONS`, and a Dial min/max pair *seeded* from its `gauge_dial`. The gauge family is
   **not** the only thing that **removes** a control, though it was the first: neither gauge draws an
@@ -33,13 +37,15 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   `count_marks`: cells for a heatmap, tiles for a treemap, flows for a sankey,
   links for a networkgraph,
   boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
-  xrange — sourced there
+  xrange, ranges for a columnrange — sourced there
   rather than recomputed
   here so it can't drift from what the chart draws; waterfall's and sunburst's are the
   two that *exceed* their drawable mark count, by one, since each appends a mark the
   frame never held (a total bar, a root sector) — not necessarily their row count,
-  since an undrawable label drops its row; xrange appends nothing, so its count is
-  exactly its surviving rows;
+  since an undrawable label drops its row; xrange and columnrange append nothing, so their
+  count is
+  exactly their surviving rows (columnrange counts by label like waterfall, a missing/inverted
+  range kept as a null slot and still counted);
   membership of the `MARK_METRICS` dict is what makes a type count-adaptive, so the
   KPI stays one branch however many such types there are — and gauge is the first type
   whose *absence* from that dict is a decision worth stating: its marks ARE its series
@@ -97,7 +103,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
   tiles, a sankey's flows, a networkgraph's links, a boxplot's boxes, a waterfall's steps, a
   sunburst's sectors, an
-  xrange's bars)
+  xrange's bars, a columnrange's ranges — the last counting by label like waterfall, minus the
+  appended total)
   for the app's KPI
   row — reusing the same `_label_ok`/`_plottable` drop predicates so the count can't
   drift from the chart (sunburst and xrange go further and reuse their *whole* build, for
@@ -119,6 +126,13 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   aggregation picker is doing to your numbers). Both carry an entirely unreported column
   (`partner_deals`, `swap_pct`), which keeps the family's headline trap — pandas sums an all-NaN
   column to `0.0`, the additive identity — reachable from the page rather than only from a test.
+  `Monthly temperature range (columnrange)` is the **mirror** of `Product release plan (xrange)`:
+  both draw a bar from a low to a high, but the range sample's two value columns (`record_low`,
+  `record_high`) are **magnitudes** of one quantity (°C), while the release plan's are
+  **coordinates** (dates) — so reading the two side by side is the fastest way to see the axis the
+  columnrange/xrange distinction turns on. Every low sits below its high (a clean range), because
+  the type's headline is "a min–max per category" and the sample is meant to *show* it; the
+  missing-slot and inverted-range edge cases are the tests' job, not a demo's.
   Every sample leads with a **category column**, and that is load-bearing rather than tidy: the app
   opens on `line` with the first column as X, so a numeric first column would trip the x-in-y guard
   the moment the dataset was selected.
@@ -130,7 +144,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   the dropped dangling parent vs. the raised cycle, and the appended root), xrange's
   interval bars (the date-vs-number coordinate sniff and its two silent traps — a numeric
   column reaching a date parser, and an unnormalized epoch view — plus the kept milestone,
-  the dropped backwards bar, and the per-lane hue), the **gauge family's** reduced marks
+  the dropped backwards bar, and the per-lane hue), columnrange's range bars (the `[low, high]`
+  2-array that must NOT collapse; the null slot for a missing/non-finite end; the **kept**
+  inverted range that is xrange's dropped backwards bar in mirror; the single hue and the
+  `colorByPoint` that must appear nowhere; the low-required and low≠high guards and the x-in-y
+  one; the `highcharts-more` module resolved from `chart.type` alone; and the one border-dissolve
+  `_themed` hook), the **gauge family's** reduced marks
   (`solidgauge`'s rings: the empty-column
   trap, swept over all six reductions because only `sum` lies; the dial derived from the
   *readings* rather than the raw column; `threshold: 0`; the three levels a ring's hue has to
@@ -244,7 +263,16 @@ xrange charts an `end_col=` naming the column each bar ends at (required for `xr
 raising `ValueError` if omitted or equal to the *start* column — `y_cols[0]`, not
 `x_col`, which is the one collision of the four that is not against `x_col` at all — and,
 like sunburst, also raising when its columns cannot place a bar on one axis: see
-`explain_xrange_error`).
+`explain_xrange_error`), and columnrange charts a `high_col=` naming the column each bar
+reaches up to (required for `columnrange`, raising `ValueError` if omitted or equal to the
+*low* column — `y_cols[0]`, xrange's start-is-end collision one type over). It is the fifth
+column kwarg and the one that is **not** a reuse: xrange's `end_col` is a **coordinate** (it
+may be a date, sniffed by `_coordinates`), while a high is a **magnitude** that must be
+`_plottable`, so a shared kwarg would be a lie. Unlike xrange it raises no *column*-level
+contradiction — an inverted `high < low` is drawable (a bar spanning `[min, high]`), so it is
+kept, not raised — so there is no `explain_columnrange_error`. Its `x_col` **is** a real
+category axis, so `x_col == low` is caught by the shared `X_IN_Y_GUARD_TYPES` rule, the only one
+of the extra-column types whose x-collision that rule can express.
 
 The **gauge family** (`solidgauge` and `gauge`) takes the fifth and sixth, and they are the only
 two that are **not column names**: `agg=` names the reduction each mark applies to its column (one
@@ -546,7 +574,48 @@ bar-shaped type, which needs the opposite treatment. That was *measured*, not in
 shared bar base class: waterfall is the standing proof the inference is unsound, its border
 being a fixed `#333333`, while xrange's default border is pure white (the background variable),
 so every bar is ringed white on the dark background until it is dissolved. Pulls in
-`modules/xrange`, and, like sunburst, *not* `highcharts-more`), and `solidgauge` (concentric
+`modules/xrange`, and, like sunburst, *not* `highcharts-more`), and `columnrange` (floating
+vertical bars, each spanning a **low** to a **high** per category — a min–max range, and
+xrange's cousin along one axis and its **opposite** along the other. Both draw a bar from a low
+to a high, but xrange's pair are **coordinates** (they position a bar, may be dates, answer
+*when*) while columnrange's are **magnitudes** (they size a bar, must be finite numbers, answer
+*how much*). So it reuses xrange's UI *shape* — a second value-column selector, low = `y_cols[0]`
+and high = a dedicated **`high_col`** — but **not** xrange's `end_col` kwarg: a coordinate that
+may be a date is a different column role than a magnitude that must be `_plottable`, sourced from
+a different picker (`numeric_cols`, not `coordinate_columns`), so reusing it would be the "a link
+is a link, but a coordinate is not a magnitude" lie. Its `x_col` is a genuine category X axis (the
+bars stand **on** it, drawn vertically — column/bar's shape, not xrange's lanes-on-the-Y), so it
+**joins** `X_IN_Y_GUARD_TYPES` where xrange could not, catching `x_col == low` as the classic
+x-in-y collision; the *other* collision, `low == high`, gets a dedicated guard (xrange's start-is-
+end rule, one type over), since `high_col` isn't in `y_cols` and that rule can't express it.
+
+Each point is a `[low, high]` **2-array**, not a `{low, high}` dict, and that is the boxplot
+lesson one type over: a numeric-first 2-array is read unambiguously as `[low, high]` and survives
+`to_js_literal` intact (verified against the round-trip), whereas a dict whose null end
+highcharts-core silently drops would draw a half-bar. `_range_point` decides the whole point once
+— it is `_num` for a **pair**: the slot survives only when both ends are `_plottable`, else it
+becomes a bare `EnforcedNull` (a kept category tick with no bar, the category-x keep-the-slot
+family — column/bar/waterfall — never a half-drawn range). An **inverted** range (`high < low`) is
+**KEPT**, drawn spanning `[min, high]`, and that is the mirror of xrange's backwards bar and the
+sharpest thing about the type: a columnrange bar is *bounded by its two values*, so `8 → -3` draws
+the same honest bar as `-3 → 8` (verified by rendering), whereas an xrange backwards bar spans the
+*whole axis* — a confident lie, so xrange *drops* it. Same shape, opposite verdict, because one is
+honest and one is not. Bars take a **single brand hue**: a columnrange is one measurement across
+the axis, so `colorByPoint` stays off (its Highcharts default), the opposite call from
+pie/treemap/xrange, whose slices/lanes *are* separate identities. It is a single low/high series,
+so like xrange its one series would misreport the KPI as a bare `1`: it needs a `count_marks` rule
+(waterfall's, *without* the appended total — one bar per drawable label, a missing/inverted range
+kept as a null slot and still counted, so it never exceeds the row count) and a `MARK_METRICS`
+entry (**Ranges**). It prints **nothing in the mark** and needs no gate constant — xrange's rule
+reached from xrange's premise: both ends land on a real, ticked y axis that renders in the Static
+PNG too (column/bar's case), and the only other identity, the category name, is already on the X
+axis. Its tooltip uses `{point.category}` (waterfall's fix, not xrange's bug: a columnrange's
+categories are on the X axis, so `{point.category}` reads the right one) plus `{point.low}` and
+`{point.high}`. It needs **one** `_themed` hook — the `borderColor` dissolve it shares with
+**column/bar/xrange**, and *not* waterfall, which was **measured** (its default border is pure
+white, the background variable, exactly column/bar's case, not waterfall's fixed `#333333`) rather
+than inferred from the shared bar base class. Pulls in `highcharts-more` from `chart.type` alone
+— like bubble/boxplot/waterfall, and *not* a phantom `modules/columnrange`), and `solidgauge` (concentric
 rings on one shared dial — an "activity gauge", and the only type with **no label channel
 at all**. Every other type names its marks from a column: a slice, an axis category, a
 node, a box, a lane. A gauge's marks are the **selected columns themselves**, each
@@ -886,6 +955,19 @@ the `{point.name}` tooltip, since `{point.category}` renders the raw epoch; the 
 dataLabels; the **no-drift pin**, a frame whose only garbage cell sits on a row dropped for its
 label, which a raw-frame sniff would decide differently from the chart; and the one dark-mode
 hook),
+columnrange's range bars (the `[low, high]` **2-array** pinned on the emitted JS, since a
+numeric-first 2-array must serialize as `[low, high]` rather than collapse the way a `{name, low}`
+dict would — boxplot's lesson, one type over; the **null slot** kept as a bare `EnforcedNull` for
+a missing OR non-finite end, with no `inf` reaching the JS; the **kept inverted range**
+(`8 → -3`), which is xrange's *dropped* backwards bar in mirror — a columnrange bar is bounded by
+its two values, so it is honest, not a whole-axis lie; the **single hue** with `colorByPoint`
+asserted NOWHERE, the opposite of xrange's per-lane call; the low-required and low≠high guards and
+— since its `x_col` is a real category axis — the shared x-in-y one; `count_marks` counting by
+label like waterfall (a null slot still counted) and agreeing with the built length; the
+`{point.category}` tooltip, waterfall's fix reached for the right reason; `highcharts-more`
+resolved from `chart.type` **alone** and NOT a phantom `modules/columnrange`; and the one
+border-dissolve dark hook it shares with column/bar/xrange, measured rather than inferred from the
+shared bar base class),
 gauge's reduced rings (the **empty-column trap**, swept over all six reductions because only
 `sum` lies — `pd.Series([nan, ...]).sum()` is `0.0`, an additive identity drawn as a real ring
 at the dial's floor — with the assertion that pandas really does say `0.0` standing IN the test
@@ -916,8 +998,9 @@ column rather than from `x_col`, gauge's known `agg` and its dial-with-a-span, a
 mirror of gauge's own exemption — the `x_col` that every OTHER type now requires) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
-to serialize — bubble, radar, boxplot and waterfall all pulling in the
-`highcharts-more` module,
+to serialize — bubble, radar, boxplot, waterfall and columnrange all pulling in the
+`highcharts-more` module (columnrange from `chart.type` alone, with no `modules/columnrange` — the
+plausible guess the round-trip corrects),
 heatmap the `modules/heatmap` module, treemap the `modules/treemap` module,
 sankey the `modules/sankey` module, sunburst the `modules/sunburst` module, xrange the
 `modules/xrange` module (those two alone among the extra-module types needing *not*
@@ -938,7 +1021,9 @@ datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, treemap,
 sankey's Target (to) control (and networkgraph reusing it while drawing *no Y control at all*,
 its KPI reading **Links** over an empty selection), sunburst's Parent control, xrange's End
-control, gauge's
+control, columnrange's **High (top)** control (over a renamed **Low (bottom)** single-select Y,
+its High picker offering only numeric columns and surviving a Low change via its constant index,
+its KPI reading **Ranges**), gauge's
 aggregation picker and Dial min/max inputs — and gauge's *absent* X control and networkgraph's
 *absent* Y control, the two mirror-image subtractive changes — and boxplot's
 and waterfall's

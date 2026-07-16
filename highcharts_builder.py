@@ -50,6 +50,23 @@ BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw 
 WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
 SUNBURST_TYPES = ("sunburst",)  # a hierarchy as concentric rings, re-rootable by click
 XRANGE_TYPES = ("xrange",)  # a Gantt timeline: bars spanning [start, end] on lanes
+# COLUMNRANGE is xrange's cousin along ONE axis and its opposite along the other: both draw a
+# floating bar from a low to a high, but xrange's pair are COORDINATES (they position a bar, may be
+# dates, answer "when") while columnrange's are MAGNITUDES (they size a bar, must be finite numbers,
+# answer "how much"). So it reuses xrange's UI SHAPE — a second value-column selector, low =
+# y_cols[0] and high = a dedicated `high_col` — but NOT xrange's `end_col` kwarg: a coordinate that
+# may be a date is a different column role than a magnitude that must be `_plottable`, sourced from
+# a different picker (numeric_cols, not coordinate_columns), so reusing it would be the "a link is a
+# link, but a coordinate is not a magnitude" lie. Its x_col is a genuine category X axis (the bars
+# stand ON it, drawn vertically), exactly column/bar's — so it joins X_IN_Y_GUARD_TYPES (x can't
+# also be low) where xrange, whose x names a LANE on the Y axis, could not. Its marks are the bars,
+# one per surviving category — a single series with paired low/high points — so like xrange it needs
+# a `count_marks` rule and a `MARK_METRICS` entry (its one series would misreport as "1" otherwise),
+# unlike column/bar whose N series ARE the KPI. A missing low OR high keeps the category slot as an
+# EnforcedNull bar (the category-x keep-the-slot family), and an inverted range (high < low) is
+# KEPT: a columnrange bar spans [min, max] regardless of order, so unlike xrange's axis-spanning
+# backwards bar it is honest, not a lie (verified by rendering).
+COLUMNRANGE_TYPES = ("columnrange",)  # floating bars spanning [low, high] per category
 # The GAUGE FAMILY: the two types with NO LABEL CHANNEL, whose marks are the SELECTED COLUMNS
 # themselves, each reduced to one number by `agg` and read against one dial. They differ only in
 # what a mark BECOMES — an arc swept from zero, or a needle pointed at a scale — and share
@@ -81,6 +98,7 @@ SUPPORTED_TYPES = (
     + WATERFALL_TYPES
     + SUNBURST_TYPES
     + XRANGE_TYPES
+    + COLUMNRANGE_TYPES
     + GAUGE_TYPES
 )
 
@@ -118,7 +136,19 @@ CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 # it: the rule reads "x_col cannot ALSO be a y series", and a gauge HAS no x_col. It is the
 # one type with no label channel at all (its x_col is None), so there is no collision to
 # express — not a tolerated one, as scatter's is, but an unstatable one.
-X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES + BOXPLOT_TYPES + WATERFALL_TYPES
+# Columnrange is PRESENT, and it is worth stating why it lands here while xrange — the other
+# two-value-column type — does not: columnrange's x_col is a genuine category X axis (the bars
+# stand on it, drawn vertically), exactly column/bar's, so x_col == low (its y_cols[0]) is the
+# same category-x collision the rule was written for. The OTHER collision it can suffer —
+# low == high, the two magnitude columns — is not expressible here (high_col isn't in y_cols),
+# so it gets a dedicated guard in build_options, as xrange's start == end does.
+X_IN_Y_GUARD_TYPES = (
+    CATEGORY_X_TYPES
+    + HEATMAP_TYPES
+    + BOXPLOT_TYPES
+    + WATERFALL_TYPES
+    + COLUMNRANGE_TYPES
+)
 
 # The NODE-LINK types: the two whose rows are edges of a graph rather than series or
 # categories, so they name a link's two ends with `x_col` (source) and `target_col` (far
@@ -617,7 +647,7 @@ def _themed(options: dict, *, dark: bool) -> dict:
         axis["lineColor"] = t["axis"]
         axis["tickColor"] = t["axis"]
         axis["gridLineColor"] = t["grid"]
-    if options["chart"].get("type") in ("column", "bar", "xrange"):
+    if options["chart"].get("type") in ("column", "bar", "xrange", "columnrange"):
         # column/bar draw filled shapes with a 1px border that defaults to
         # var(--highcharts-background-color) -> white, which the color-scheme pin
         # keeps white even in dark mode, ringing every bar. Match it to the dark
@@ -637,6 +667,12 @@ def _themed(options: dict, *, dark: bool) -> dict:
         # background while KEEPING a visible 1px seam between two bars that abut within one
         # lane (they are then separated by background, not by white) -- which is precisely
         # what the white border does on the light shell, so the per-lane hues survive it.
+        #
+        # Columnrange joins for the same MEASURED reason and lands the same way (verified by
+        # rendering): a floating range bar is the columnrange series (a column subclass), so its
+        # default border is the same background var, not waterfall's fixed #333333 -- the
+        # analogy to the shared bar base class holds here, but only because the render confirmed
+        # it, not because the base class was trusted.
         bar_type = options["chart"]["type"]
         options.setdefault("plotOptions", {}).setdefault(bar_type, {})[
             "borderColor"
@@ -775,6 +811,26 @@ def _num(value):
         return EnforcedNull
     number = float(value)
     return number if math.isfinite(number) else EnforcedNull
+
+
+def _range_point(low, high):
+    """Coerce a (low, high) pair to a columnrange point — ``[low, high]`` or a null.
+
+    ``_num`` for a PAIR: a columnrange bar needs BOTH ends, so the slot survives only when
+    both are ``_plottable`` (present and finite). If either is missing or non-finite the whole
+    slot becomes ``EnforcedNull`` — a kept category tick with no bar, the category-x
+    keep-the-slot family (column/bar/waterfall), never a half-drawn range.
+
+    A bare ``EnforcedNull``, not ``{"low": …, "high": EnforcedNull}``: highcharts-core drops a
+    null out of a point dict, so a partial dict would serialize to a point with one end and no
+    other, which draws an arbitrary bar rather than a gap. The order of ``low``/``high`` is not
+    normalized — an inverted range (``high < low``) is KEPT and drawn spanning ``[min, max]``,
+    since a columnrange bar is bounded by its two values (unlike xrange's backwards bar, which
+    spans the whole axis and lies); the vote to keep it lives in the type's design, not here.
+    """
+    if _plottable(low) and _plottable(high):
+        return [float(low), float(high)]
+    return EnforcedNull
 
 
 def _label_ok(value) -> bool:
@@ -1758,6 +1814,7 @@ def build_options(
     target_col: str | None = None,
     parent_col: str | None = None,
     end_col: str | None = None,
+    high_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
 ) -> dict:
@@ -1838,6 +1895,16 @@ def build_options(
       they read as ISO-8601 dates, linear if they read as numbers. A row missing either
       end is dropped, as is one whose bar runs BACKWARDS; a zero-length one (a milestone)
       is kept and floored to a visible sliver. Pulls in the ``modules/xrange`` module.
+    - ``columnrange``: floating vertical bars, each spanning from a LOW to a HIGH per
+      category — xrange's cousin, but its two columns are MAGNITUDES (``low`` = the first
+      ``y_cols`` column, ``high`` = ``high_col``), not coordinates, so they are always
+      finite numbers and never dates. ``x_col`` is a genuine category X axis (the bars
+      stand on it). A row missing either end keeps its category slot as an ``EnforcedNull``
+      bar (the category-x keep-the-slot family); an INVERTED range (``high < low``) is kept
+      and drawn spanning ``[min, high]`` — a columnrange bar is bounded by its two values,
+      so order is cosmetic (unlike xrange's axis-spanning backwards bar). Bars take a single
+      brand hue: it is one measurement across the axis, so ``colorByPoint`` stays off. Shares
+      bubble/radar/boxplot/waterfall's ``highcharts-more`` module.
     - ``solidgauge`` and ``gauge``: the GAUGE FAMILY, the two types with NO LABEL CHANNEL.
       ``x_col`` is unused (and is ``None``) because a gauge's marks are the SELECTED COLUMNS
       THEMSELVES: each ``y_cols`` column becomes one mark, showing that column REDUCED to a
@@ -1940,6 +2007,21 @@ def build_options(
         raise ValueError(
             f"The start column {y_cols[0]!r} cannot also be the end column for an "
             f"xrange chart"
+        )
+    if chart_type in COLUMNRANGE_TYPES and not high_col:
+        raise ValueError("A columnrange chart requires a high column via high_col.")
+    if chart_type in COLUMNRANGE_TYPES and y_cols[0] == high_col:
+        # Low and high name the two ends of every bar, so one column can't be both — xrange's
+        # start-is-end rule, one type over, and here it fails the SAME silent way: every bar
+        # would span zero, so the chart would come back a row of hairlines on the axis rather
+        # than the ranges anyone asked for. This is the collision X_IN_Y_GUARD_TYPES cannot
+        # express (high_col isn't in y_cols), so it lives here; the OTHER collision, x_col ==
+        # low, that rule DOES express, since columnrange's x_col is a real category X axis.
+        # `y_cols[0]` is safe: the empty-y_cols guard above runs first (columnrange is not a
+        # NETWORKGRAPH type, so an empty selection raises there).
+        raise ValueError(
+            f"The low column {y_cols[0]!r} cannot also be the high column for a "
+            f"columnrange chart"
         )
     if chart_type not in GAUGE_TYPES and x_col is None:
         # Every other type NAMES its marks with x_col — a slice, a category, a node, a box, a
@@ -3188,6 +3270,62 @@ def build_options(
             dark=dark,
         )
 
+    if (
+        chart_type in COLUMNRANGE_TYPES
+    ):  # floating bars spanning [low, high] per category
+        assert high_col is not None  # guarded above for columnrange
+        low_col = y_cols[0]
+        # One bar per SURVIVING category — `df` is the `_label_ok`-filtered frame here, so this
+        # zips over exactly the rows that kept their label, in lockstep with `categories`
+        # (column/bar/boxplot's positional data shape). Each point is a `[low, high]` 2-ARRAY,
+        # not a `{low, high}` dict, and that is the boxplot lesson applied one type over: a
+        # numeric-first 2-array is read unambiguously as `[low, high]` (x is auto-assigned by
+        # array position, lining up with `xAxis.categories`), whereas a dict whose null end
+        # highcharts-core silently drops would leave a point with one end and draw an arbitrary
+        # half-bar. `_range_point` decides the whole point once — the missing-slot and
+        # inverted-range policies live there, not here.
+        categories = _category_labels(df, x_col)
+        points = [
+            _range_point(low, high)
+            for low, high in zip(
+                df[low_col].tolist(), df[high_col].tolist(), strict=True
+            )
+        ]
+        return _themed(
+            {
+                "chart": {"type": "columnrange"},
+                # Genuinely used, not carried for consistency: a single series takes `colors[0]`
+                # for every bar. `colorByPoint` stays OFF (its Highcharts default) — a columnrange
+                # is ONE measurement across the axis, so a per-bar hue would assert a categorical
+                # identity the categories don't have (the opposite call from pie/treemap/xrange,
+                # whose slices/lanes ARE separate identities). Carried as the palette source, so a
+                # custom `colors` still repaints the bars — pie's categorical use.
+                "colors": colors,
+                "title": {"text": title},
+                "xAxis": {"categories": categories, "title": {"text": x_col}},
+                "yAxis": {"title": {"text": f"{low_col} – {high_col}"}},
+                # A single-hue series legends as one useless grey bullet, and the categories are
+                # already on the X axis: xrange's, treemap's, boxplot's reasoning.
+                "legend": {"enabled": False},
+                # `{point.category}`, not xrange's `{point.name}`: a columnrange's categories are
+                # on the X axis (its bars stand ON it, unlike an xrange's lanes on the Y), so
+                # `{point.category}` reads the RIGHT axis — this is waterfall's fix, not xrange's
+                # bug. `{point.low}`/`{point.high}` are the two ends; a bare `{point.y}` would
+                # print null, since a columnrange point carries low/high and no y.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": "<b>{point.category}</b><br/>{point.low} – {point.high}",
+                },
+                # No dataLabels, and no gate constant either — xrange's rule, reached from
+                # xrange's premise. Both ends land on a real, ticked, gridlined y axis that
+                # renders in the Static PNG too (column/bar's case, not waterfall's bar floating
+                # above an invisible running total), and the only other identity — the category
+                # name — is already on the X axis. There is nothing left to print in the mark.
+                "series": [{"name": f"{low_col}–{high_col}", "data": points}],
+            },
+            dark=dark,
+        )
+
     # cartesian (line/spline/area/areaspline/column/bar) and radar share the same
     # category-x data shape: x_col labels the axis and each y column is a series.
     categories = _category_labels(df, x_col)
@@ -3305,7 +3443,7 @@ def count_marks(
 ) -> int:
     """The number of marks ``build_options`` will draw, for the app's count-adaptive KPI
     (a heatmap's cells, a treemap's tiles, a sankey's flows, a networkgraph's links, a
-    boxplot's boxes, a waterfall's steps, a sunburst's sectors).
+    boxplot's boxes, a waterfall's steps, a sunburst's sectors, a columnrange's ranges).
 
     Defined here, beside ``build_options`` and reusing its very ``_label_ok`` / ``_plottable``
     predicates, so the KPI number can never drift from what the chart actually renders — the
@@ -3322,7 +3460,9 @@ def count_marks(
     heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``), a boxplot
     keeps one box per distinct drawable label (an all-missing group included), and a
     waterfall keeps one bar per drawable label (a missing delta included, as an
-    ``EnforcedNull``) plus its appended total. Sunburst and xrange are the two types whose
+    ``EnforcedNull``) plus its appended total. Columnrange is waterfall without that total:
+    one bar per drawable label, a missing/inverted range kept as an ``EnforcedNull`` slot, so
+    its value columns are never read here. Sunburst and xrange are the two types whose
     count is not a row filter at all — see their branches, which reuse the whole build rather
     than the predicates — and sunburst's, like waterfall's, exceeds its drawable row count, by
     the appended root. Xrange's does not: it appends nothing, so it is one bar per surviving
@@ -3401,6 +3541,14 @@ def count_marks(
         # the branch likewise appends only when there is at least one step to sum.
         steps = int(label_ok.sum())
         return steps + 1 if steps else 0
+    if chart_type in COLUMNRANGE_TYPES:
+        # One bar per drawable LABEL — waterfall's rule without the appended total, so it is
+        # exactly the surviving-label count. The value columns (low/high) are NOT consulted,
+        # because a missing/inverted range keeps its category slot as an EnforcedNull bar rather
+        # than dropping the row (see `_range_point`). Sits above the `value_ok` line below, which
+        # reads `y_cols[0]`: safe here (columnrange always has a low column) but pointless, since
+        # no value can change a count taken over the labels alone.
+        return int(label_ok.sum())
     if chart_type in NETWORKGRAPH_TYPES:
         # One mark per drawable EDGE — source and target both present, no value consulted (the type
         # is unweighted, and its `y_cols` is empty, so there is no `value_ok` to read). This branch
@@ -3430,6 +3578,7 @@ def make_chart(
     target_col: str | None = None,
     parent_col: str | None = None,
     end_col: str | None = None,
+    high_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
 ) -> Chart:
@@ -3445,6 +3594,7 @@ def make_chart(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        high_col=high_col,
         agg=agg,
         dial=dial,
     )
@@ -3467,6 +3617,7 @@ def build_chart_html(
     target_col: str | None = None,
     parent_col: str | None = None,
     end_col: str | None = None,
+    high_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
 ) -> str:
@@ -3493,6 +3644,7 @@ def build_chart_html(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        high_col=high_col,
         agg=agg,
         dial=dial,
     )
@@ -3545,6 +3697,7 @@ def build_chart_png(
     target_col: str | None = None,
     parent_col: str | None = None,
     end_col: str | None = None,
+    high_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
 ) -> bytes:
@@ -3568,6 +3721,7 @@ def build_chart_png(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        high_col=high_col,
         agg=agg,
         dial=dial,
     )

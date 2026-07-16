@@ -475,6 +475,49 @@ def _release_plan() -> pd.DataFrame:
     )
 
 
+def _temperature_range() -> pd.DataFrame:
+    """A city's monthly record temperatures as RANGES — one row per month, each a record low
+    and a record high in °C.
+
+    Tailored to columnrange, and it is the mirror of ``_release_plan`` on the one axis that
+    matters: its two value columns are a LOW and a HIGH of the SAME quantity (°C), so they are
+    MAGNITUDES, not xrange's coordinates — they answer "how much", never "when", and can never be
+    dates. That is the whole difference the type turns on, and reading this sample beside the
+    release plan is the fastest way to see it: both draw a bar from a low to a high, but one bar
+    spans a temperature and the other a calendar.
+
+    ``record_low`` leads with the category column (``month``) rather than a value, like every
+    sample here and for the same load-bearing reason: the app opens on ``line`` with the first
+    column as X, so a numeric first column would trip the x-in-y guard the instant the dataset is
+    selected. Both value columns are genuine numbers, so the dataset stays usable by the other
+    chart types (and the no-numeric-columns gate has something to find). Every ``low`` sits below
+    its ``high`` — a clean, honest range — because the type's headline is "a min–max per category"
+    and this sample is meant to SHOW that; the missing-slot and inverted-range edge cases are the
+    tests' job, not a demo dataset's. One measurement drawn in one hue: a columnrange does not
+    colour its bars by category, since the months are positions on an axis, not separate kinds.
+    """
+    return pd.DataFrame(
+        {
+            "month": [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ],
+            "record_low": [-8, -6, -2, 2, 7, 11, 14, 13, 9, 3, -3, -7],
+            "record_high": [14, 16, 22, 27, 31, 34, 37, 36, 32, 26, 19, 15],
+        }
+    )
+
+
 def _weekly_bookings() -> pd.DataFrame:
     """Weekly bookings by sales region — four teams, eight weeks of observations.
 
@@ -589,6 +632,7 @@ SAMPLES = {
     "Quarterly profit bridge (waterfall)": _profit_bridge,
     "Company headcount (sunburst)": _org_headcount,
     "Product release plan (xrange)": _release_plan,
+    "Monthly temperature range (columnrange)": _temperature_range,
     "Weekly bookings by region (solidgauge)": _weekly_bookings,
     "Server utilization (gauge)": _server_utilization,
 }

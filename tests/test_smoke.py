@@ -209,6 +209,19 @@ def _end_for(chart_type: str) -> str | None:
     return "end" if chart_type == "xrange" else None
 
 
+def _high_for(chart_type: str) -> str | None:
+    """The high column those same sweeps pass for the columnrange case: columnrange requires
+    one (each bar's top); other types ignore it, so it's None. The fifth of the
+    ``_size_for``/``_target_for``/``_parent_for``/``_end_for`` family — see ``_target_for``.
+
+    It reuses the fixtures' ``"end"`` column, the one extra that is NUMERIC, exactly as
+    ``_end_for`` does — but reading it as a MAGNITUDE (the bar's high), not a coordinate. The
+    pair is ("value", "end") as it is for xrange, and for the same reason the fixtures keep
+    "end" strictly above "value": here that makes every range a clean ``low < high`` rather than
+    an inverted one, so the sweeps exercise the ordinary drawable case."""
+    return "end" if chart_type == "columnrange" else None
+
+
 # Radar remains the ONE "meta" type: Highcharts has no radar series, so it renders as a polar
 # *line* chart and its chart.type serializes as "line". Every other supported type's chart.type
 # equals its own name — and the gauge FAMILY is why that stayed true. `solidgauge` was never
@@ -239,6 +252,7 @@ def test_supported_type_builds(labeled_frame, chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     )
     assert opts["chart"]["type"] == _hc_type(chart_type)
     assert opts["series"]  # at least one series/data set was produced
@@ -268,6 +282,7 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -326,6 +341,7 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     ).to_js_literal()
     assert js
     # `Infinity` is capitalized, so a lowercase "inf" can only be the broken token. None
@@ -394,6 +410,7 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             target_col="to" if chart_type in NODE_LINK_TYPES else None,
             parent_col="parent" if chart_type == "sunburst" else None,
             end_col=_end_for(chart_type),
+            high_col=_high_for(chart_type),
         ).to_js_literal()
         assert js and token not in js.lower(), f"{chart_type} kept a '{token}' label"
 
@@ -441,6 +458,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     )
     # An empty chart, not a raise. Gauge is the one type whose empty chart is not zero marks:
     # its marks are the selected COLUMNS, not the rows, so a header-only CSV still selects one
@@ -460,6 +478,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -705,6 +724,7 @@ def test_default_title_per_type(labeled_frame, chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     )
     assert opts["title"]["text"] == f"{chart_type.title()} chart"
 
@@ -726,6 +746,7 @@ def test_default_palette_applied_per_type(labeled_frame, chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -756,6 +777,7 @@ def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     )
     assert opts["chart"]["backgroundColor"] == "#0f172a"
 
@@ -773,6 +795,7 @@ def test_light_mode_leaves_chart_background_unset(labeled_frame, chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     )
     assert "backgroundColor" not in opts["chart"]
 
@@ -789,6 +812,7 @@ def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -848,6 +872,7 @@ def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
         target_col=_target_for(chart_type),
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
     )
     assert opts["tooltip"]["backgroundColor"] == "#0f172a"
     assert opts["tooltip"]["borderColor"] == "#475569"
@@ -3658,6 +3683,233 @@ def test_release_plan_sample_builds_an_xrange_chart():
 
 
 # --------------------------------------------------------------------------- #
+# Columnrange — floating bars spanning [low, high] per category
+# --------------------------------------------------------------------------- #
+def _range_df() -> pd.DataFrame:
+    """Four categories, each a low/high pair. Apr is INVERTED (high < low) so the keep-and-span
+    policy has something to prove; the rest are ordinary low < high ranges."""
+    return pd.DataFrame(
+        {
+            "month": ["Jan", "Feb", "Mar", "Apr"],
+            "low": [-2.0, 1.0, 4.0, 8.0],
+            "high": [
+                8.0,
+                12.0,
+                18.0,
+                -3.0,
+            ],  # Apr: high < low — kept, spans [min, high]
+        }
+    )
+
+
+def _cr(df: pd.DataFrame | None = None, **kwargs) -> dict:
+    return build_options(
+        df if df is not None else _range_df(),
+        "columnrange",
+        "month",
+        ["low"],
+        high_col="high",
+        **kwargs,
+    )
+
+
+def _ranges(opts: dict) -> list:
+    return opts["series"][0]["data"]
+
+
+def test_columnrange_builds_one_bar_per_category_as_low_high_pairs():
+    opts = _cr()
+    assert opts["chart"]["type"] == "columnrange"
+    # x_col is a genuine category X axis (the bars stand ON it, drawn vertically) — column/bar's
+    # shape, NOT xrange's, whose lanes are on the Y axis.
+    assert opts["xAxis"]["categories"] == ["Jan", "Feb", "Mar", "Apr"]
+    # Each point is a `[low, high]` 2-ARRAY matched to categories BY POSITION — the boxplot
+    # positional trick, one type over. A numeric-first 2-array is read unambiguously as
+    # [low, high] (verified against the round-trip in the serialization test below), so it does
+    # NOT collapse the way a `{name, low}` dict would.
+    assert _ranges(opts) == [[-2.0, 8.0], [1.0, 12.0], [4.0, 18.0], [8.0, -3.0]]
+    # One series, and its legend is off: a single-hue series legends as one useless bullet, and
+    # the categories are on the X axis already (xrange's, treemap's, boxplot's reasoning).
+    assert len(opts["series"]) == 1
+    assert opts["legend"]["enabled"] is False
+
+
+def test_columnrange_keeps_a_missing_or_non_finite_end_as_a_null_slot():
+    # The category-x keep-the-slot family (column/bar/waterfall), applied to a PAIR: a bar needs
+    # BOTH ends, so if either is missing (NaN) or non-finite (inf) the whole slot becomes a bare
+    # EnforcedNull — a kept category tick with no bar — never a half-drawn range. A bare null, not
+    # `{"low": ..., "high": EnforcedNull}`: highcharts-core drops a null out of a point dict, so a
+    # partial dict would draw an arbitrary bar. And no bare `inf` reaches the JS (the `_plottable`
+    # rule the whole module shares).
+    df = pd.DataFrame(
+        {
+            "month": ["Jan", "Feb", "Mar", "Apr"],
+            "low": [-2.0, float("nan"), 4.0, float("inf")],
+            "high": [8.0, 12.0, float("nan"), 20.0],
+        }
+    )
+    opts = _cr(df)
+    assert _ranges(opts) == [[-2.0, 8.0], EnforcedNull, EnforcedNull, EnforcedNull]
+    # The category slots are all KEPT — a null bar still holds its tick (unlike a dropped row).
+    assert opts["xAxis"]["categories"] == ["Jan", "Feb", "Mar", "Apr"]
+    js = make_chart(
+        df, "columnrange", "month", ["low"], high_col="high"
+    ).to_js_literal()
+    assert js
+    for token in ("inf", "nan", "NaN"):
+        assert token not in js, f"columnrange emitted a non-finite literal: {token}"
+
+
+def test_columnrange_keeps_an_inverted_range_spanning_both_values():
+    # The vote the user made, and the mirror of xrange's backwards bar. xrange DROPS a bar that
+    # ends before it starts, because Highcharts draws it spanning the WHOLE axis — a confident,
+    # plausible lie. A columnrange bar is bounded by its two values, so an inverted low/high
+    # (Apr's 8 → -3) draws the SAME honest bar as -3 → 8 (verified by rendering), spanning
+    # [min, max]. So it is KEPT, order preserved, not dropped and not silently normalized.
+    apr = _ranges(_cr())[3]
+    assert apr == [8.0, -3.0]  # kept as-is, not swapped, not dropped
+    # count_marks counts it, exactly as the chart draws it — all four categories survive.
+    assert count_marks(_range_df(), "columnrange", "month", ["low"]) == 4
+
+
+def test_columnrange_colors_every_bar_one_hue_and_never_uses_color_by_point():
+    # A columnrange is ONE measurement across the axis, so every bar takes the single series hue
+    # (colors[0]); `colorByPoint` stays OFF (its Highcharts default) — a per-bar hue would assert
+    # a categorical identity the categories don't have (the opposite call from pie/treemap/xrange,
+    # whose slices/lanes ARE separate identities). So the data carry NO per-point color, and
+    # `colorByPoint` appears NOWHERE in the emitted JS.
+    opts = _cr()
+    assert all(not isinstance(pt, dict) or "color" not in pt for pt in _ranges(opts))
+    # The palette is carried and OVERRIDABLE, so a custom palette repaints the bars.
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    assert _cr(colors=["#abcabc"])["colors"] == ["#abcabc"]
+    js = make_chart(
+        _range_df(), "columnrange", "month", ["low"], high_col="high"
+    ).to_js_literal()
+    assert js and "colorByPoint" not in js
+
+
+def test_columnrange_tooltip_names_the_category_and_the_range():
+    # {point.category}, NOT xrange's {point.name}: a columnrange's categories are on the X axis
+    # (its bars stand ON it), so {point.category} reads the RIGHT axis — waterfall's fix, not
+    # xrange's bug. {point.low}/{point.high} are the two ends; a bare {point.y} would print null.
+    tip = _cr()["tooltip"]["pointFormat"]
+    assert "{point.category}" in tip
+    assert "{point.low}" in tip and "{point.high}" in tip
+    assert "{point.name}" not in tip and "{point.y}" not in tip
+
+
+def test_columnrange_requires_a_high_column():
+    with pytest.raises(ValueError, match="requires a high column"):
+        build_options(_range_df(), "columnrange", "month", ["low"])
+
+
+def test_columnrange_rejects_the_low_column_as_the_high_column():
+    # A bar's two ends, like xrange's start/end. It must be a guard rather than a tolerated
+    # oddity because it fails SILENTLY: every bar would span zero height, a row of hairlines.
+    with pytest.raises(ValueError, match="cannot also be the high column"):
+        build_options(_range_df(), "columnrange", "month", ["low"], high_col="low")
+
+
+def test_columnrange_rejects_x_as_a_y_series():
+    # columnrange IS in X_IN_Y_GUARD_TYPES (unlike xrange): its x_col is a real category X axis,
+    # so x_col == low is the classic x-in-y collision the rule was written for. (x_col == high is
+    # not expressible there — high_col isn't in y_cols — but it is a magnitude picked from
+    # numeric_cols beside a category x, a scatter-style tolerance, so it needs no guard.)
+    with pytest.raises(ValueError, match="cannot also be a y series"):
+        build_options(_range_df(), "columnrange", "low", ["low"], high_col="high")
+
+
+def test_columnrange_uses_only_first_y_col():
+    # low = y_cols[0]; any further y columns are ignored (high comes from high_col, not y_cols[1]).
+    opts = build_options(
+        _range_df(), "columnrange", "month", ["low", "high"], high_col="high"
+    )
+    assert len(_ranges(opts)) == 4
+
+
+def test_columnrange_count_marks_counts_drawable_categories():
+    # Waterfall's rule without the appended total: one bar per drawable LABEL, the value columns
+    # NOT consulted (a missing/inverted range keeps its slot as a null bar and still counts). A
+    # row whose LABEL is missing names no category and drops; a row whose VALUE is missing keeps
+    # its slot. So the KPI's "Ranges" counts by label, and equals the built data length.
+    df = pd.DataFrame(
+        {
+            "month": ["Jan", None, "Mar"],
+            "low": [
+                1.0,
+                2.0,
+                float("nan"),
+            ],  # Mar's low is missing -> null slot, still counted
+            "high": [5.0, 6.0, 7.0],
+        }
+    )
+    built = _ranges(_cr(df))
+    assert built == [
+        [1.0, 5.0],
+        EnforcedNull,
+    ]  # None-label row dropped; Mar kept as a null slot
+    assert count_marks(df, "columnrange", "month", ["low"]) == 2 == len(built)
+
+
+def test_columnrange_serializes_and_resolves_highcharts_more():
+    # End to end: the [low, high] pairs must survive `to_js_literal` (NOT collapse like a boxplot
+    # dict would) AND resolve `highcharts-more` — from `chart.type` ALONE, like bubble/boxplot/
+    # waterfall, and (correcting the plausible guess) NOT a phantom `modules/columnrange.js`. Only
+    # the round-trip can show which module a type pulls in; this repo registers none of them.
+    chart = make_chart(_range_df(), "columnrange", "month", ["low"], high_col="high")
+    js = chart.to_js_literal()
+    assert js and "type: 'columnrange'" in js
+    # The low/high values reach the JS as array elements (the pair did not collapse to [x, y]).
+    for token in ("-2", "8", "12", "18"):
+        assert token in js
+    tags = chart.get_script_tags(as_str=True)
+    assert "highcharts-more" in tags
+    assert (
+        "modules/columnrange" not in tags
+    )  # no such module — it lives in highcharts-more
+
+
+def test_columnrange_light_mode_shape():
+    # Pin the choices nothing else guards, and prove the dark-only key is absent (so the dark
+    # test below is meaningful). columnrange emits NO plotOptions at all in light mode — which is
+    # also how it "carries no data labels": there is no plotOptions.columnrange to hold any.
+    opts = _cr()
+    assert opts["legend"]["enabled"] is False
+    assert "plotOptions" not in opts  # no dataLabels, no light-mode border
+
+
+def test_columnrange_dark_mode_dissolves_the_bar_borders():
+    # columnrange joins column/bar/xrange here and NOT waterfall — MEASURED, not inferred from
+    # the shared bar base class (waterfall is the standing proof that inference is unsound, its
+    # border being a fixed #333333). A columnrange bar's default border is the background
+    # variable, pure white, which the color-scheme pin keeps white in dark mode, ringing every
+    # bar until it is dissolved into the dark background.
+    opts = _cr(dark=True)
+    assert (
+        opts["plotOptions"]["columnrange"]["borderColor"] == "#0f172a"
+    )  # _DARK_CHROME bg
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    # The single hue is unchanged: like the shared palette, it reads on both backgrounds.
+    assert _ranges(opts)[0] == [-2.0, 8.0]
+
+
+def test_temperature_range_sample_builds_a_columnrange_chart():
+    from sample_data import _temperature_range
+
+    df = _temperature_range()
+    opts = build_options(
+        df, "columnrange", "month", ["record_low"], high_col="record_high"
+    )
+    assert opts["chart"]["type"] == "columnrange"
+    ranges = _ranges(opts)
+    assert len(ranges) == 12  # one bar per month
+    # Every low sits below its high — a clean demo range, no inverted or missing slots.
+    assert all(low < high for low, high in ranges)
+    assert count_marks(df, "columnrange", "month", ["record_low"]) == 12
+
+
+# --------------------------------------------------------------------------- #
 # Gauge — concentric rings, each one COLUMN reduced to one number
 # --------------------------------------------------------------------------- #
 @pytest.fixture
@@ -5528,6 +5780,97 @@ def test_app_xrange_kpi_shows_bars(app):
     assert (
         expected == len(df) == 8
     )  # every row a bar; nothing appended, nothing dropped
+
+
+def _pick_columnrange_sample(app):
+    """Select the columnrange sample dataset and switch the chart type to columnrange.
+
+    The DEFAULT dataset (monthly revenue vs cost) would build a columnrange too, but the
+    temperature sample is the one whose two numeric columns ARE a low and a high, so the KPI
+    and picker tests read the numbers the type is meant to draw."""
+    from sample_data import SAMPLES
+
+    label = next(key for key in SAMPLES if "(columnrange)" in key)
+    app.selectbox[0].set_value(label).run()  # Dataset
+    app.selectbox[1].set_value("columnrange").run()  # Chart type
+    return SAMPLES[label]()
+
+
+def test_app_switch_to_columnrange_shows_high_control_and_regenerates_config(app):
+    # Columnrange is the fifth type with a required extra column (after bubble's Size, sankey's
+    # Target, sunburst's Parent and xrange's End): it reveals a "High (top)" selectbox no other
+    # type shows, and drives the config through the high_col plumbing. Network-free.
+    assert not any(sb.label == "High (top)" for sb in app.selectbox)  # absent
+    _pick_columnrange_sample(app)
+    assert not app.exception
+    assert (
+        len([sb for sb in app.selectbox if sb.label == "High (top)"]) == 1
+    )  # now present
+    # Single-select Y, labelled as a MAGNITUDE ("Low (bottom)") — one end of the range, not a
+    # coordinate like xrange's "Start". No pills.
+    assert any(sb.label == "Low (bottom)" for sb in app.selectbox)
+    assert not app.pills
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'columnrange'" in app.code[0].value
+
+
+def test_app_columnrange_low_and_high_pickers_offer_only_numeric_columns(app):
+    # High is a MAGNITUDE, sourced from numeric_cols — NOT coordinate_columns like xrange's End,
+    # because a high can never be a date. `month` is a category, so it must appear in NEITHER
+    # value picker (the mirror of xrange excluding its text lane column from its coordinate ones).
+    _pick_columnrange_sample(app)  # columns: month, record_low, record_high
+    low = next(sb for sb in app.selectbox if sb.label == "Low (bottom)")
+    high = next(sb for sb in app.selectbox if sb.label == "High (top)")
+    for picker in (low, high):
+        assert "month" not in picker.options
+        assert set(picker.options) == {"record_low", "record_high"}
+
+
+def test_app_columnrange_high_survives_a_low_change(app):
+    # The keyless-widget trap High's constant `index` guards against, exactly as xrange's End,
+    # sankey's Target and sunburst's Parent do. A default derived from the current Low would
+    # re-mint High whenever Low changed, silently discarding the user's pick. A 3-numeric CSV
+    # gives room to change Low without colliding with High.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        ("ranges.csv", b"category,a,b,c\nX,1,5,9\nY,2,6,10\n", "text/csv")
+    ).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("columnrange").run()
+    high = next(sb for sb in app.selectbox if sb.label == "High (top)")
+    high.set_value("c").run()  # not the default (which is the 2nd numeric, "b")
+    assert not app.exception
+    low = next(sb for sb in app.selectbox if sb.label == "Low (bottom)")
+    low.set_value("b").run()  # change Low a -> b
+    assert not app.exception
+    high = next(sb for sb in app.selectbox if sb.label == "High (top)")
+    assert high.value == "c"  # not reset to the default
+
+
+def test_app_columnrange_low_equals_high_shows_guard_warning(app):
+    # Columnrange's own collision, xrange's one type over: a bar's low and high. Not the x-in-y
+    # rule (High is the high_col selector, never among the Y series). It must be GUARDED rather
+    # than tolerated because it fails silently — every bar would span zero height.
+    _pick_columnrange_sample(app)  # Low defaults record_low, High defaults record_high
+    high = next(sb for sb in app.selectbox if sb.label == "High (top)")
+    high.set_value("record_low").run()  # == the Low column
+    assert not app.exception  # the guard fires; it does NOT blow up the page
+    assert app.warning
+    assert "Low and High must be different" in app.warning[0].value
+
+
+def test_app_columnrange_kpi_shows_ranges(app):
+    # Columnrange is one series of low/high bars, so the KPI swaps "Series plotted" (which would
+    # read a bare 1) for "Ranges" — mirroring heatmap's "Cells", xrange's "Bars" and the rest.
+    # One bar per category, nothing appended or dropped, so its count is exactly its rows.
+    df = _pick_columnrange_sample(app)
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    expected = count_marks(df, "columnrange", "month", ["record_low"])
+    assert metrics["Ranges"] == f"{expected:,}"
+    assert expected == len(df) == 12
 
 
 def test_app_heatmap_kpi_shows_cells_from_count_marks(app):

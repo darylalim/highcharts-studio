@@ -33,6 +33,55 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.10.0] - 2026-07-15
+
+### Added
+
+- **`columnrange` chart type** — floating vertical bars, each spanning a **low** to a
+  **high** per category (a min–max range). It is xrange's cousin along one axis and its
+  opposite along the other: both draw a bar from a low to a high, but xrange's pair are
+  *coordinates* (they position a bar, may be dates, answer "when") while columnrange's are
+  *magnitudes* (they size a bar, must be finite numbers, answer "how much"). So it reuses
+  xrange's **UI shape** — a second value-column selector, low = `y_cols[0]` and high = a
+  dedicated **`high_col`** — but **not** xrange's `end_col` kwarg: a coordinate that may be a
+  date is a different column role than a magnitude, sourced from a different picker
+  (`numeric_cols`, not `coordinate_columns`), so reusing it would be a lie. Its `x_col` is a
+  genuine category X axis (the bars stand on it), so it joins `X_IN_Y_GUARD_TYPES` where
+  xrange — whose x names a *lane* on the Y axis — could not. Its marks are the bars, one per
+  surviving category (a single series with paired low/high points), so it needs a
+  `count_marks` rule and a `MARK_METRICS` entry (**"Ranges"**) because its one series would
+  otherwise misreport as a bare `1`.
+- **`Monthly temperature range (columnrange)` sample** — a city's monthly record low/high in
+  °C, the canonical columnrange demo. It is the mirror of `_release_plan`: its two value
+  columns are a *low* and a *high* of the same quantity (magnitudes), not xrange's
+  coordinates, so reading the two samples side by side is the fastest way to see the
+  difference. Every low sits below its high (a clean range), because the type's headline is
+  "a min–max per category" and the sample is meant to show it; the edge cases are the tests'.
+
+### Notes
+
+Each of these was measured on the round-trip or by rendering, never assumed:
+
+- **A missing low or high keeps its category slot as a null bar** (the category-x
+  keep-the-slot family — column/bar/waterfall), never a half-drawn range. The point is a
+  bare `EnforcedNull`, not `{"low": …, "high": EnforcedNull}`: highcharts-core drops a null
+  out of a point dict, so a partial dict would draw an arbitrary bar.
+- **An inverted range (`high < low`) is kept, spanning both values.** Unlike xrange's
+  backwards bar — which Highcharts draws across the *whole axis*, a confident lie, so xrange
+  *drops* it — a columnrange bar is bounded by its two values, so `8 → -3` draws the same
+  honest bar as `-3 → 8` (rendered). It is kept, order preserved, not dropped and not
+  silently normalized.
+- **The `[low, high]` point is a 2-array, not a dict.** A numeric-first 2-array is read
+  unambiguously as `[low, high]` and survives `to_js_literal` intact; a `{name, low}` dict
+  would collapse with the name in the leading `x` slot (boxplot's lesson, one type over).
+- **Bars take one hue, not `colorByPoint`.** A columnrange is one measurement across the
+  axis, so a per-bar hue would assert a categorical identity the categories don't have (the
+  opposite call from pie/treemap/xrange, whose slices/lanes *are* separate identities).
+- **The module is `highcharts-more`, from `chart.type` alone** (like bubble/boxplot/
+  waterfall), **not** a phantom `modules/columnrange.js`. It needs one dark-mode `_themed`
+  hook — the border dissolve it shares with column/bar/xrange (measured at pure white, the
+  background variable), and *not* waterfall's fixed `#333333`.
+
 ## [0.9.0] - 2026-07-15
 
 ### Added

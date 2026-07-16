@@ -78,6 +78,11 @@ MARK_METRICS = {
     # bar per surviving row. A zero-length bar (a milestone) IS one of them — the builder
     # floors it to a visible sliver rather than dropping it, so counting it is honest.
     "xrange": "Bars",
+    # Columnrange is a single low/high series like xrange is a single lane-bar series, so its
+    # default "Series plotted" would misreport as 1 too. Its marks are the floating bars, one
+    # per surviving category — a missing/inverted range keeps its slot as a null bar and still
+    # counts (waterfall's rule without the appended total, so it never exceeds the row count).
+    "columnrange": "Ranges",
     # Gauge is deliberately ABSENT, and it is the first type whose absence is worth stating.
     # Its marks ARE its series — one ring per y column, and a column with no data keeps its ring
     # as a null rather than being dropped — so "Series plotted" is already literally the ring
@@ -116,6 +121,7 @@ def cached_chart_html(
     target_col,
     parent_col,
     end_col,
+    high_col,
     agg,
     dial,
 ) -> str:
@@ -131,6 +137,7 @@ def cached_chart_html(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        high_col=high_col,
         agg=agg,
         dial=dial,
     )
@@ -151,6 +158,7 @@ def cached_chart_png(
     target_col,
     parent_col,
     end_col,
+    high_col,
     agg,
     dial,
 ) -> bytes:
@@ -166,6 +174,7 @@ def cached_chart_png(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        high_col=high_col,
         agg=agg,
         dial=dial,
     )
@@ -183,6 +192,7 @@ def cached_chart_js(
     target_col,
     parent_col,
     end_col,
+    high_col,
     agg,
     dial,
 ) -> str:
@@ -199,6 +209,7 @@ def cached_chart_js(
         target_col=target_col,
         parent_col=parent_col,
         end_col=end_col,
+        high_col=high_col,
         agg=agg,
         dial=dial,
     ).to_js_literal()
@@ -291,6 +302,10 @@ with st.sidebar:
             "dates (ISO-8601, e.g. `2026-01-05`) or plain numbers (sprint 12 → 18) — but "
             "both the same kind. A zero-length bar is a **milestone** and still draws; a "
             "backwards one is dropped\n"
+            "- **columnrange** — a category X axis + a **Low** and a **High** numeric column; "
+            "each category gets a bar floating from its low to its high (a min–max range). A "
+            "row missing either end draws no bar but keeps its slot; an inverted range "
+            "(high < low) still draws, spanning both values\n"
             "- **solidgauge / gauge** — one mark per **numeric column**, each collapsed to a "
             "single number by the aggregation you choose (sum / mean / …), all read against one "
             "shared dial. There is **no X column**: a gauge has no labels, only readings. "
@@ -370,6 +385,14 @@ with st.sidebar:
         # HOW MUCH. Single-select, like every other extra-column type — a second start column
         # would be a second bar per row, which is a second chart.
         x_label, y_label, multi = "Lane / task labels", "Start", False
+    elif chart_type == "columnrange":
+        # A category X axis (the bars stand on it, drawn vertically — column/bar's shape), plus
+        # TWO magnitude columns: the Y control carries the bar's LOW (bottom) and the dedicated
+        # High selectbox below carries its top. Single-select Y like every other extra-column
+        # type — a second low column would be a second range per row, which is a second chart.
+        # Labelled "Low (bottom)" rather than a bare "Y" because a reader picking a value should
+        # be told which END of the range it becomes (xrange's Start/End reasoning, magnitudes).
+        x_label, y_label, multi = "Category (X) axis", "Low (bottom)", False
     elif chart_type in GAUGE_TYPES:
         # The two types with NO X control at all (see the selectbox below): their marks are the
         # SELECTED COLUMNS, each collapsed to one number, so there is no label column to pick.
@@ -500,6 +523,29 @@ with st.sidebar:
                 "Each bar's end — the **same kind** of value as Start (both dates, or both "
                 "numbers). A bar that ends where it starts is a **milestone** and still "
                 "draws; one that ends before it starts is dropped."
+            ),
+        )
+
+    # Columnrange's second MAGNITUDE column, sitting right after Low so the two ends of a bar
+    # read as the pair they are (Category -> Low -> High). Drawn from numeric_cols, NOT coord_cols
+    # like xrange's End: a high is a value, not a coordinate, so it can never be a date and must be
+    # a plottable number — the "a coordinate is not a magnitude" distinction that kept this off
+    # xrange's `end_col` kwarg. The index is a CONSTANT, exactly as End's / Size's are: these
+    # widgets are keyless, so Streamlit folds `index` into their identity, and a default derived
+    # from the current Low would re-mint this widget and silently reset the user's High every time
+    # they changed Low. min() lands on the SECOND numeric column so it starts distinct from Low
+    # (which leads with the first) and clamps a single-column frame. Low == High is caught by the
+    # guard in the main panel.
+    high_col = None
+    if chart_type == "columnrange":
+        high_col = st.selectbox(
+            "High (top)",
+            numeric_cols,
+            index=min(1, len(numeric_cols) - 1),
+            help=(
+                "Each bar's top — a numeric column, the **same kind** as Low but a distinct "
+                "column. A row missing either end draws no bar but keeps its category slot; a "
+                "range whose high is below its low still draws, spanning both values."
             ),
         )
 
@@ -699,6 +745,18 @@ with left.container(border=True, height="stretch"):
             icon=":material/warning:",
         )
         st.stop()
+    # Columnrange's own collision, xrange's one type over: a bar's low and high. Like the others
+    # it is not the x-in-y rule — the High column is the `high_col` selector, not among the Y
+    # series — and it fails the same SILENT way xrange's does: every bar would span zero height, so
+    # the chart would come back a row of hairlines on the axis. Unlike xrange there is no column
+    # contradiction to report below it: an inverted low/high is KEPT (drawn spanning both values),
+    # not an error, so the builder never raises for columnrange and no explain_* call is needed.
+    if chart_type == "columnrange" and y_cols[0] == high_col:
+        st.warning(
+            "Low and High must be different columns — every bar would have zero height.",
+            icon=":material/warning:",
+        )
+        st.stop()
     # And the columns' own contradiction, the one reachable from HERE: a date start beside a
     # numeric end. Both ends of a bar sit on one axis, so they must be the same kind. It is not
     # missing data — that is dropped, silently and correctly, a row at a time — and it has no
@@ -761,6 +819,7 @@ with left.container(border=True, height="stretch"):
                 target_col,
                 parent_col,
                 end_col,
+                high_col,
                 agg,
                 dial,
             )
@@ -799,6 +858,7 @@ with left.container(border=True, height="stretch"):
             target_col,
             parent_col,
             end_col,
+            high_col,
             agg,
             dial,
         )
@@ -830,6 +890,7 @@ with left.container(border=True, height="stretch"):
             target_col,
             parent_col,
             end_col,
+            high_col,
             agg,
             dial,
         )
