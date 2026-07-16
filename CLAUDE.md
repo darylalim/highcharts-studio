@@ -984,8 +984,8 @@ mechanical-sync idea as `test_theme_colors_stay_in_sync_with_config`.
 
 ## Lint & format
 
-Ruff handles both (config in `pyproject.toml`). CI runs the tests and these
-checks on every push to `main` and every PR.
+Ruff does both; config is in `pyproject.toml`. (CI and the hooks run these same
+gates — see Structure's `ci.yml` bullet and Hooks.)
 
 ```bash
 uv run ruff check --fix . && uv run ruff format .   # fix + format
@@ -995,8 +995,8 @@ uv run ruff check . && uv run ruff format --check .  # verify (as CI does)
 ## Type check
 
 [ty](https://docs.astral.sh/ty/) (Astral's type checker, pinned in
-`pyproject.toml`) runs in CI. It needs the project venv to resolve imports, so
-run it through `uv run`:
+`pyproject.toml`) needs the project venv to resolve imports, so run it through
+`uv run`:
 
 ```bash
 uv run ty check
