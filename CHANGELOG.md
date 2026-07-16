@@ -33,6 +33,55 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.9.0] - 2026-07-15
+
+### Added
+
+- **`networkgraph` chart type** — a force-directed graph, and sankey's cousin: each
+  row is one edge between two node columns. It is the **mirror of the gauge family**.
+  Gauge removes the *label* channel (`x_col is None`, its marks are the selected
+  columns); networkgraph removes the *value* channel (`y_cols == []`, its marks are
+  the edges), so the app draws it with **no Y control at all** — the second
+  subtractive-control type, and the counterpart to gauge's absent X. It reuses
+  sankey's `target_col` (a link is a link, so there is no new kwarg and the cache
+  layer is untouched), rides the shared `_label_ok` filter on its source column, and
+  needs a `count_marks` rule and a `MARK_METRICS` entry ("Links") because — unlike
+  gauge — its one edge-series would otherwise misreport as a bare `1`.
+- **`Service dependencies (networkgraph)` sample** — a microservice call graph whose
+  source labels *repeat* and whose nodes are many of them both a source and a target
+  (an `API Gateway` hub, a shared `Auth`), so it reads as a connected network rather
+  than a star. It carries a `Catalog ⇄ Search` **cycle**, the one graph shape the
+  sunburst sample's tree could never hold. Its `calls_per_min` column is a genuine
+  numeric column carried for the reason `_release_plan`'s `headcount` is — so the
+  dataset stays plottable by the value types and clears the no-numeric-columns gate —
+  which networkgraph *ignores*, the honest place for a magnitude a graph can't draw.
+
+### Notes
+
+The type is **unweighted**, and that is the library's decision, not a preference —
+each of these was measured on the round-trip or by rendering, never assumed:
+
+- **A per-edge weight is silently dropped.** A `{from, to, weight}` link collapses
+  to a `[from, to]` array in the emitted JS, so a numeric weight column (sankey's
+  entire reason for being) would drive *nothing*. This repo treats a control that
+  does nothing as a lie, so there is no weight column — the Y picker is removed, not
+  ignored.
+- **A node carries no individual color.** A series `nodes` array and a
+  `colorByPoint` are both dropped the same way, so every node is the one brand hue;
+  `colorByPoint` is asserted to appear nowhere. A graph's nodes have no categorical
+  identity to colour, so this is honest rather than a limitation grudgingly accepted.
+- **`enableSimulation` must be `false`.** With it `true` the export server rasterizes
+  the graph mid-simulation as an unreadable central knot while the iframe animates it
+  loose — the two render modes disagree, the class of bug `_LIGHT_COLOR_SCHEME_CSS`
+  exists to close. With it `false` Highcharts settles the layout synchronously and
+  both modes draw the same picture. Pinned on the emitted JS.
+- **It needs no dark-mode `_themed` hook** (like boxplot, for a kindred reason): its
+  node labels ride Highcharts' `contrast` color (white on dark, black on light), its
+  nodes carry palette hues, and its links use a grey legible on both backgrounds —
+  all verified by rendering a dark PNG. And it resolves `modules/networkgraph.js`
+  from `chart.type` alone, and — correcting the common lore — **not**
+  `highcharts-more`.
+
 ## [0.8.0] - 2026-07-13
 
 ### Added
@@ -348,6 +397,7 @@ demo notebooks (archived at the `notebooks-archive` tag) into a Streamlit studio
   at two modes.
 - The project was renamed twice on its way to `highcharts-studio`.
 
+[0.9.0]: https://github.com/darylalim/highcharts-studio/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/darylalim/highcharts-studio/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/darylalim/highcharts-studio/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/darylalim/highcharts-studio/compare/v0.5.0...v0.6.0

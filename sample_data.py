@@ -206,6 +206,77 @@ def _energy_flow() -> pd.DataFrame:
     )
 
 
+def _service_dependencies() -> pd.DataFrame:
+    """A microservice call graph — the who-connects-to-whom a networkgraph is built for: each row
+    is one dependency edge, and the force layout pulls tightly-coupled services together so the
+    clusters (an ``Orders`` hub, an ``Auth`` shared by several callers) fall out of the physics.
+
+    Tailored to networkgraph, and the deliberate MIRROR of the sankey sample above: two columns of
+    node *labels* and NO weight, because a networkgraph edge is unweighted. Like sankey the source
+    labels REPEAT and many nodes are BOTH a source and a target (``API Gateway`` calls Auth and is
+    itself called by Web and Mobile; ``Orders`` sits mid-graph) — which is what makes this a
+    connected network rather than a star. Unlike sankey it also contains a CYCLE (``Catalog`` ⇄
+    ``Search`` call each other), which a networkgraph draws without complaint where the sunburst
+    sample's *tree* could not — the one graph shape no hierarchy can hold.
+
+    The first column is the source, a *label*, so — like every sample and load-bearingly so — the
+    app can open it on ``line`` without a numeric first column tripping the x-in-y guard. The
+    networkgraph itself reads only the two label columns (an edge is unweighted), but ``calls_per_min``
+    is a genuine numeric column carried for the same reason ``_release_plan``'s ``headcount`` is: so
+    the dataset stays usable by the value-based types and the app's no-numeric-columns gate has
+    something to find. It is per-EDGE traffic, so networkgraph ignores it rather than sizing anything
+    by it — the honest place for a magnitude a graph cannot draw."""
+    return pd.DataFrame(
+        {
+            "service": [
+                "Web",
+                "Mobile",
+                "API Gateway",
+                "API Gateway",
+                "API Gateway",
+                "Orders",
+                "Orders",
+                "Orders",
+                "Payments",
+                "Inventory",
+                "Catalog",
+                "Search",
+                "Auth",
+            ],
+            "depends_on": [
+                "API Gateway",
+                "API Gateway",
+                "Auth",
+                "Orders",
+                "Catalog",
+                "Payments",
+                "Inventory",
+                "Auth",
+                "Ledger",
+                "Warehouse",
+                "Search",
+                "Catalog",
+                "Sessions",
+            ],
+            "calls_per_min": [
+                1200,
+                800,
+                1500,
+                600,
+                900,
+                300,
+                450,
+                600,
+                300,
+                200,
+                700,
+                650,
+                2100,
+            ],
+        }
+    )
+
+
 def _response_times() -> pd.DataFrame:
     """Per-service API response times in milliseconds — the per-category *distribution*
     a boxplot is built for: each service's spread of raw observations becomes one box,
@@ -513,6 +584,7 @@ SAMPLES = {
     "Website activity by weekday (heatmap)": _weekly_activity,
     "Company market cap (treemap)": _company_market_cap,
     "Energy flow (sankey)": _energy_flow,
+    "Service dependencies (networkgraph)": _service_dependencies,
     "Service response times (boxplot)": _response_times,
     "Quarterly profit bridge (waterfall)": _profit_bridge,
     "Company headcount (sunburst)": _org_headcount,

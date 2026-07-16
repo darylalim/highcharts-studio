@@ -119,6 +119,7 @@ from highcharts_builder import (  # noqa: E402
     DEFAULT_COLORS,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
+    NETWORKGRAPH_TYPES,
     SUPPORTED_TYPES,
     _gauge_reading_label,
     _needle_radii,
@@ -175,13 +176,16 @@ def _size_for(chart_type: str) -> str | None:
 
 
 def _target_for(chart_type: str) -> str | None:
-    """The target column those same sweeps pass for the sankey case: sankey requires
-    one (the far end of every link); other types ignore it, so it's None. The
-    ``_size_for`` idea, for the other type with a required companion column — the
+    """The target column those same sweeps pass for the node-link cases: BOTH sankey and
+    networkgraph require one (the far end of every edge, reusing one ``target_col``); other
+    types ignore it, so it's None. The
+    ``_size_for`` idea, for the other types with a required companion column — the
     sweeps assert invariants that must hold for *every* type (it builds, it carries
     the palette, dark mode paints the background), so a type that needs an extra
-    column adapts its input rather than dropping out."""
-    return "target" if chart_type == "sankey" else None
+    column adapts its input rather than dropping out. Networkgraph is built by the sweeps with
+    the shared ``y_cols=["value"]``, which it simply IGNORES (it has no value channel); its own
+    empty-``y_cols`` behaviour is pinned separately (``test_networkgraph_builds_with_empty_y_cols``)."""
+    return "target" if chart_type in ("sankey", "networkgraph") else None
 
 
 def _parent_for(chart_type: str) -> str | None:
@@ -386,7 +390,7 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             "label",
             ["value"],
             size_col=_size_for(chart_type),
-            target_col="to" if chart_type == "sankey" else None,
+            target_col="to" if chart_type in ("sankey", "networkgraph") else None,
             parent_col="parent" if chart_type == "sunburst" else None,
             end_col=_end_for(chart_type),
         ).to_js_literal()
@@ -459,10 +463,12 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
 
-@pytest.mark.parametrize("chart_type", ["treemap", "sankey"])
+@pytest.mark.parametrize("chart_type", ["treemap", "sankey", "networkgraph"])
 def test_count_marks_casts_every_mask_not_just_the_label_one(chart_type):
-    # The two types that AND their masks together (`label_ok & value_ok`, plus sankey's
-    # `target_ok`). On a row-less frame each `.map()` returns a non-boolean Series, and once
+    # The types that AND their masks together (`label_ok & value_ok`, plus sankey's/
+    # networkgraph's `target_ok` — networkgraph ANDs `label_ok & target_ok` with no value mask,
+    # since it is unweighted). On a row-less frame each `.map()` returns a non-boolean Series, and
+    # once
     # the label mask alone is cast, `bool & str` still evaluates — so a missing cast on the
     # OTHER masks is invisible to an ordinary assertion. It is not harmless: pandas emits a
     # deprecation saying the operation will RAISE in pandas 4 and that the operand must be
@@ -976,8 +982,15 @@ def test_rejects_unsupported_type():
         build_options(df, "bogus", "x", ["y"])
 
 
-@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+@pytest.mark.parametrize(
+    "chart_type", [t for t in SUPPORTED_TYPES if t not in NETWORKGRAPH_TYPES]
+)
 def test_rejects_empty_y_cols(chart_type):
+    # Every type needs at least one y column — EXCEPT networkgraph, the one type with no value
+    # channel (its marks are the edges between two node columns). It is excluded here and pinned
+    # the other way by `test_networkgraph_builds_with_empty_y_cols`: the exclusion is the mirror
+    # of the gauge family's exclusion from the label sweep — a positive assertion of the missing
+    # channel, not an oversight.
     df = pd.DataFrame({"x": [1, 2], "y": [3, 4]})
     with pytest.raises(ValueError):
         build_options(df, chart_type, "x", [])
@@ -1719,6 +1732,177 @@ def test_sankey_numeric_node_labels_coerce_to_strings():
         {"from": "1", "to": "10", "weight": 1.0},
         {"from": "2", "to": "20", "weight": 2.0},
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Networkgraph (a force-directed graph: rows are UNWEIGHTED edges) — sankey's
+# cousin, and the MIRROR of the gauge family: it removes the VALUE channel
+# (empty y_cols) as gauge removes the LABEL channel (None x_col).
+# --------------------------------------------------------------------------- #
+def test_networkgraph_builds_edges_and_skips_missing():
+    # Like sankey, each row is one edge keyed {from, to} — but UNWEIGHTED: there is no
+    # third value key, because a per-link weight is silently dropped from the emitted JS
+    # anyway. A row missing EITHER node isn't an edge, so it's dropped (no EnforcedNull:
+    # there's no aligned slot, exactly as sankey drops a link).
+    df = pd.DataFrame({"src": ["Web", None, "API"], "dst": ["API", "Auth", None]})
+    opts = build_options(df, "networkgraph", "src", [], target_col="dst")
+    assert opts["chart"]["type"] == "networkgraph"
+    # One edge-series; its name is the source→target relation (no y column to name it).
+    assert opts["series"][0]["name"] == "src → dst"
+    assert opts["series"][0]["data"] == [{"from": "Web", "to": "API"}]
+    # Nodes are palette-colored (like sankey/pie), not by a colorAxis, and there are no axes.
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    assert "colorAxis" not in opts
+    assert "xAxis" not in opts and "yAxis" not in opts
+
+
+def test_networkgraph_builds_with_empty_y_cols():
+    # The positive half of test_rejects_empty_y_cols' networkgraph EXCLUSION: an empty y_cols
+    # is networkgraph's normal state (it has no value channel), so it must BUILD rather than
+    # raise — the mirror of a gauge building with a None x_col.
+    df = pd.DataFrame({"src": ["A", "B"], "dst": ["B", "C"]})
+    opts = build_options(df, "networkgraph", "src", [], target_col="dst")
+    assert [e for e in opts["series"][0]["data"]] == [
+        {"from": "A", "to": "B"},
+        {"from": "B", "to": "C"},
+    ]
+
+
+def test_networkgraph_ignores_any_y_cols_it_is_given():
+    # It has no value channel, so a y column passed through the pure API (the sweeps do this)
+    # changes nothing — the edges are identical with y_cols=["v"] and with []. Proven by
+    # equality, so the day networkgraph starts reading y_cols this test fails.
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "v": [99.0]})
+    with_y = build_options(df, "networkgraph", "src", ["v"], target_col="dst")
+    without_y = build_options(df, "networkgraph", "src", [], target_col="dst")
+    assert with_y["series"][0]["data"] == without_y["series"][0]["data"]
+
+
+def test_networkgraph_requires_a_target_column():
+    # An edge needs two ends, so the target is mandatory (a ValueError, not a silent
+    # fallback) — sankey's rule, and the message names the type.
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"]})
+    with pytest.raises(ValueError, match="networkgraph"):
+        build_options(df, "networkgraph", "src", [])  # no target_col
+
+
+def test_networkgraph_rejects_source_as_target():
+    # One column can't name both ends — every edge would be a self-loop. Networkgraph's OWN
+    # guard, shared with sankey (a fact about the two node columns), not the x-in-y rule.
+    df = pd.DataFrame({"src": ["A", "B"]})
+    with pytest.raises(ValueError):
+        build_options(df, "networkgraph", "src", [], target_col="src")
+
+
+def test_networkgraph_serializes_and_pulls_in_only_the_networkgraph_module():
+    # End to end: the edge shape must serialize AND resolve modules/networkgraph.js — and,
+    # unlike bubble/radar/boxplot, NOT highcharts-more (verified against the round-trip, the
+    # correction to the common lore that a networkgraph needs it). colorByPoint must appear
+    # NOWHERE: it is silently dropped for a networkgraph (so setting it is a lie), and the
+    # nodes carry no per-point color at all.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"src": ["A", "B"], "dst": ["B", "C"]})
+    chart = make_chart(df, "networkgraph", "src", [], target_col="dst")
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'networkgraph'" in js
+    # highcharts-core serializes each {from, to} dict as a [from, to] ARRAY (Highcharts' default
+    # link shape) — so the node names reach the JS as array elements, not `from:`/`to:` keys.
+    assert "'A'" in js and "'B'" in js and "'C'" in js
+    assert "colorByPoint" not in js
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/networkgraph.js" in tags
+    assert "highcharts-more" not in tags  # a networkgraph does NOT need highcharts-more
+
+
+def test_networkgraph_disables_the_simulation_so_both_render_modes_agree():
+    # enableSimulation MUST be False, and pinned on the EMITTED JS (this repo's silent-drop
+    # discipline). It is the one setting the whole type turns on: with it True the export
+    # server rasterizes the graph as an unreadable central knot while the iframe animates it
+    # loose, so the two render modes disagree — the class of bug _LIGHT_COLOR_SCHEME_CSS
+    # exists to close. With it False Highcharts settles the layout synchronously and both
+    # modes draw the same picture.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"]})
+    opts = build_options(df, "networkgraph", "src", [], target_col="dst")
+    layout = opts["plotOptions"]["networkgraph"]["layoutAlgorithm"]
+    assert layout["enableSimulation"] is False
+    # keys maps each serialized [from, to] array onto the edge's two ends.
+    assert opts["plotOptions"]["networkgraph"]["keys"] == ["from", "to"]
+    js = make_chart(df, "networkgraph", "src", [], target_col="dst").to_js_literal()
+    assert js and "enableSimulation: false" in js
+
+
+def test_networkgraph_labels_its_nodes_and_prints_nothing_per_edge():
+    # Nodes are labelled by name (their only identity — no axis, no legend). Unlike sankey
+    # there is NO per-edge label, because the type is unweighted: there is no value to print
+    # in the mark. So the edges are bare {from, to} dicts with no dataLabels of their own.
+    df = pd.DataFrame({"src": ["A", "B"], "dst": ["B", "C"]})
+    opts = build_options(df, "networkgraph", "src", [], target_col="dst")
+    assert opts["plotOptions"]["networkgraph"]["dataLabels"] == {"enabled": True}
+    assert all("dataLabels" not in edge for edge in opts["series"][0]["data"])
+    # Each label dict is copied off the module constant, so nothing can mutate it downstream.
+    assert (
+        opts["plotOptions"]["networkgraph"]["dataLabels"]
+        is not build_options(df, "networkgraph", "src", [], target_col="dst")[
+            "plotOptions"
+        ]["networkgraph"]["dataLabels"]
+    )
+
+
+def test_networkgraph_light_mode_shape():
+    # The light-mode choices nothing else guards: the disabled legend (nodes are labelled on the
+    # chart), and — deliberately — NO custom tooltip at all. A networkgraph tooltip fires on a
+    # NODE, whose point has no fromNode/toNode, so a "name the edge" pointFormat would render an
+    # empty box on every node hover; and the node-specific nodeFormat that would fix it is silently
+    # dropped (sankey's trap). Highcharts' own default prints the node name and is the only way to
+    # get it, so the branch sets no tooltip — and in light mode (where _themed is a no-op) the
+    # options carry none at all.
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"]})
+    opts = build_options(df, "networkgraph", "src", [], target_col="dst")
+    assert opts["legend"]["enabled"] is False
+    assert (
+        "tooltip" not in opts
+    )  # no custom tooltip: Highcharts' default names the nodes
+    # Light mode injects no dark chrome anywhere.
+    assert "borderColor" not in opts["plotOptions"]["networkgraph"]
+
+
+def test_networkgraph_dark_mode_themes_only_the_shared_chrome():
+    # Networkgraph needs NO type-specific _themed hook (like boxplot, and for a kindred
+    # reason): its node labels ride Highcharts' `contrast` color (white on dark, black on
+    # light — verified by rendering), its nodes carry palette hues, and its links use a grey
+    # legible on both backgrounds. So dark mode sets the shared chrome (background, tooltip)
+    # and touches plotOptions.networkgraph not at all.
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"]})
+    opts = build_options(df, "networkgraph", "src", [], target_col="dst", dark=True)
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["tooltip"]["backgroundColor"] == "#0f172a"
+    # No border/color flip and no dataLabels color — the plotOptions block is untouched by dark.
+    assert "borderColor" not in opts["plotOptions"]["networkgraph"]
+    assert "color" not in opts["plotOptions"]["networkgraph"]["dataLabels"]
+    # No axes to theme; the axis loop must skip it, not crash.
+    assert "xAxis" not in opts and "yAxis" not in opts
+
+
+def test_networkgraph_numeric_node_labels_coerce_to_strings():
+    # Both node columns are stringified — highcharts-core's point model rejects a non-string
+    # node name — exactly as sankey's are. A user picking numeric ids gets named nodes, not a
+    # blank chart.
+    df = pd.DataFrame({"src": [1, 2], "dst": [10, 20]})
+    opts = build_options(df, "networkgraph", "src", [], target_col="dst")
+    assert opts["series"][0]["data"] == [
+        {"from": "1", "to": "10"},
+        {"from": "2", "to": "20"},
+    ]
+
+
+def test_networkgraph_count_marks_counts_drawable_edges():
+    # Its marks are the edges: one per row with BOTH ends present, no value consulted (the
+    # type is unweighted). The KPI's "Links" reads this. A row missing either node drops.
+    df = pd.DataFrame({"src": ["A", None, "C", "D"], "dst": ["B", "Y", None, "E"]})
+    assert count_marks(df, "networkgraph", "src", [], target_col="dst") == 2
 
 
 # --------------------------------------------------------------------------- #
@@ -4626,6 +4810,36 @@ def test_energy_flow_sample_builds_a_sankey_chart():
     assert generated == consumed == 150.0
 
 
+def test_service_dependencies_sample_builds_a_networkgraph_chart():
+    # Ties the new networkgraph sample to its intended type end to end: two node columns and
+    # NO value column produce one unweighted edge per row. Like the sankey sample (and unlike
+    # the value-per-row types) its source values REPEAT and several nodes are BOTH a source
+    # and a target — that connectivity is what makes it a graph rather than a star. It also
+    # carries a CYCLE (Catalog ⇄ Search) that a sunburst's tree could never hold.
+    from sample_data import _service_dependencies
+
+    df = _service_dependencies()
+    opts = build_options(df, "networkgraph", "service", [], target_col="depends_on")
+    assert opts["chart"]["type"] == "networkgraph"
+    edges = opts["series"][0]["data"]
+    assert len(edges) == len(df)  # one edge per row, none dropped
+    assert edges[0] == {"from": "Web", "to": "API Gateway"}
+    sources = {e["from"] for e in edges}
+    targets = {e["to"] for e in edges}
+    # Shared nodes make it a connected network (an API Gateway hub, an Auth reached by several).
+    assert {"API Gateway", "Orders", "Auth", "Catalog"} <= sources & targets
+    # The Catalog ⇄ Search cycle: each names the other as a target.
+    assert {"from": "Catalog", "to": "Search"} in edges
+    assert {"from": "Search", "to": "Catalog"} in edges
+    # The sample carries a numeric column (so it stays plottable by other types and clears the
+    # app's no-numeric-columns gate — the _release_plan/headcount precedent), but networkgraph
+    # IGNORES it: the edges name only the two label columns, no weight in sight.
+    from pandas.api.types import is_numeric_dtype
+
+    assert is_numeric_dtype(df["calls_per_min"])
+    assert all(set(e) == {"from", "to"} for e in edges)
+
+
 def test_response_times_sample_builds_a_boxplot_chart():
     # Ties the new boxplot sample to its intended type end to end. Like the sankey sample
     # (and unlike every other, which has one row per unique x value) its x values REPEAT
@@ -4878,6 +5092,79 @@ def test_app_sankey_kpi_shows_flows(app):
     assert "Series plotted" not in metrics
     default_df = next(iter(SAMPLES.values()))()
     assert metrics["Flows"] == f"{len(default_df):,}"
+
+
+def test_app_switch_to_networkgraph_shows_target_hides_y_and_regenerates_config(app):
+    # Networkgraph is the SUBTRACTIVE mirror of gauge: gauge removes the X selectbox, and
+    # networkgraph removes the Y control entirely (it has no value channel). So after switching
+    # it shows a "Target (to)" selectbox (reused from sankey) and NO Y widget at all — neither
+    # the multi-select pills nor a single-select Y selectbox. The only selectboxes left are
+    # Dataset, Chart type, Source (from) and Target (to). The config still generates without a Y,
+    # which is the whole point: an empty y_cols is valid input here. Network-free.
+    assert app.pills  # the default `line` type shows multi-select Y pills...
+    app.selectbox[1].set_value("networkgraph").run()  # Chart type -> networkgraph
+    assert not app.exception
+    assert not app.pills  # ...which are gone, and NOT replaced by a Y selectbox
+    labels = {sb.label for sb in app.selectbox}
+    assert labels == {"Dataset", "Chart type", "Source (from)", "Target (to)"}
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'networkgraph'" in app.code[0].value
+
+
+def test_app_networkgraph_source_equals_target_shows_guard_warning(app):
+    # Networkgraph shares sankey's source-vs-target guard: one column can't be both ends of an
+    # edge. The default Source is the first column, so pointing Target at it collides.
+    app.selectbox[1].set_value("networkgraph").run()  # Chart type -> networkgraph
+    target = next(sb for sb in app.selectbox if sb.label == "Target (to)")
+    target.set_value("month").run()  # == the default Source column
+    assert not app.exception
+    assert app.warning
+    assert "Source and Target must be different" in app.warning[0].value
+
+
+_EDGE_LIST_CSV = (
+    b"source,target\nWeb,API Gateway\nAPI Gateway,Auth\nAPI Gateway,Orders\n"
+)
+
+
+def test_app_networkgraph_plots_a_csv_with_no_numeric_columns_at_all(app):
+    # THE GATE, networkgraph's half of it — the xrange test's mirror. The canonical networkgraph
+    # input is a pure edge list: two TEXT columns and not one number. `select_dtypes("number")`
+    # finds nothing, so the no-numeric-columns gate would refuse the single most natural input for
+    # this type — exactly as it once refused the Gantt CSV for xrange. networkgraph is now exempt
+    # (it reads its two columns as node labels), so the file plots.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("edges.csv", _EDGE_LIST_CSV, "text/csv")).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("networkgraph").run()
+    assert not app.exception
+    assert not app.error  # NOT "this dataset has no numeric columns to plot"
+    metrics = _metrics(app)
+    assert metrics["Numeric columns"] == "0"  # ...and yet
+    assert metrics["Links"] == "3"  # ...it plots every edge
+
+    # The gate stays honest in the other direction: the same file on a type that really does need
+    # a number must still be refused.
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("line").run()
+    assert app.error
+    assert "no numeric columns" in app.error[0].value
+
+
+def test_app_networkgraph_kpi_shows_links(app):
+    # Networkgraph is one series of edges, so — like sankey — the KPI swaps "Series plotted"
+    # (which would read a bare 1) for "Links" = the rows that become edges. The default dataset
+    # has no missing node cells, so every row is an edge. This also proves the empty-Y guard
+    # exempts networkgraph: the KPI (and the chart) render with no Y selected.
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("networkgraph").run()  # Chart type -> networkgraph
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    assert metrics["Links"] == f"{len(default_df):,}"
 
 
 def test_app_switch_to_boxplot_shows_single_select_y_and_regenerates_config(app):

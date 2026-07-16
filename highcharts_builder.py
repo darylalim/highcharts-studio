@@ -32,6 +32,20 @@ POLAR_TYPES = ("radar",)  # a polar (spider/web) line chart over the categories
 HEATMAP_TYPES = ("heatmap",)  # an x-category × y-category matrix colored by value
 TREEMAP_TYPES = ("treemap",)  # nested rectangles sized by value, like pie
 SANKEY_TYPES = ("sankey",)  # node-link flows: source -> target links sized by weight
+# NETWORKGRAPH is sankey's cousin — rows are edges of a graph — with two removals that the
+# LIBRARY forces, not preference: a networkgraph link is an UNWEIGHTED [from, to] pair (a
+# per-link `weight`/`width` is accepted by `Chart.from_options` and then silently dropped from
+# the emitted JS, the sankey-`nodeFormat` family again), and its nodes carry NO individual color
+# (a series `nodes` array and a `colorByPoint` are both dropped the same way). So it is the mirror
+# of the gauge family: gauge removes the LABEL channel (`x_col is None`), networkgraph removes the
+# VALUE channel (`y_cols == []`). Its marks are the edges — one per drawable row — so like sankey
+# it needs a `count_marks` rule and a `MARK_METRICS` entry, unlike the gauge family whose marks
+# ARE their series. Its `x_col` is the SOURCE node label (a real label channel, unlike gauge), so
+# it rides the shared `_label_ok` filter and checks its second label column (`target_col`, reused
+# from sankey — no new kwarg) in its own branch, exactly as sankey does.
+NETWORKGRAPH_TYPES = (
+    "networkgraph",
+)  # a force-directed graph: rows are UNWEIGHTED edges
 BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw rows
 WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
 SUNBURST_TYPES = ("sunburst",)  # a hierarchy as concentric rings, re-rootable by click
@@ -62,6 +76,7 @@ SUPPORTED_TYPES = (
     + HEATMAP_TYPES
     + TREEMAP_TYPES
     + SANKEY_TYPES
+    + NETWORKGRAPH_TYPES
     + BOXPLOT_TYPES
     + WATERFALL_TYPES
     + SUNBURST_TYPES
@@ -158,6 +173,27 @@ _HEATMAP_DATALABEL_MAX_CELLS = 50
 # only drawn on smaller diagrams (the _HEATMAP_DATALABEL_MAX_CELLS rule).
 _SANKEY_DATALABEL_MAX_LINKS = 30
 _SANKEY_LINK_LABEL = {"enabled": True, "format": "{point.weight}"}
+
+# A networkgraph is laid out by a FORCE SIMULATION, and `enableSimulation` is the one setting the
+# whole type turns on: it must be FALSE, and that is measured, not chosen. With it TRUE the export
+# server rasterizes the graph mid-run — every node collapsed into an unreadable knot at the centre,
+# no labels legible (verified by rendering the PNG). With it FALSE Highcharts runs the layout steps
+# synchronously and draws the settled positions, which renders identically in the iframe and the
+# PNG — the `_LIGHT_COLOR_SCHEME_CSS` doctrine (make the two render modes agree), reached here from
+# the layout rather than from a CSS default. `verlet` integration settles a small graph cleanly;
+# `linkLength` is the resting distance between two joined nodes, in px, and sets the graph's scale.
+_NETWORKGRAPH_LINK_LENGTH = 80
+# Its nodes are labelled by name — the ONLY thing identifying a node, since a networkgraph has
+# neither axis nor legend (the legend is off, as sankey's is). Unlike sankey there is no per-link
+# value to print (the type is unweighted), so the label rides the NODE, via Highcharts' default
+# node format, exactly as sankey's node names do; a `linkFormat` here is silently dropped (rendered
+# and confirmed), which is fine — there is nothing to say about an unweighted edge. The labels take
+# NO color: Highcharts draws them in its `contrast` default, computed against the background each
+# one sits on, so they read white on the dark shell and black on the light one with no `_themed`
+# hook (the treemap/sankey rule, verified by rendering both). Not gated on a count like sankey's
+# per-link weights: node labels do not multiply with the edges (a hub node is labelled once however
+# many edges meet it), so a dense graph adds edges, not text.
+_NETWORKGRAPH_NODE_LABEL = {"enabled": True}
 
 # Tukey's constant: a boxplot's whiskers reach the most extreme observation still within
 # 1.5 x IQR of the box, and anything past that is drawn as an individual outlier. Named
@@ -1750,6 +1786,14 @@ def build_options(
       both a target and a source chains the flow into a second hop. Rows missing
       any of the three are dropped, like pie's slices. Pulls in the
       ``modules/sankey`` module.
+    - ``networkgraph``: a force-directed graph, sankey's cousin — each row is one UNWEIGHTED
+      edge, from the node named in ``x_col`` to the node named in ``target_col`` (reused from
+      sankey; there is no weight, so ``y_cols`` is EMPTY — the mirror of the gauge family's
+      absent ``x_col``). A row missing either end is dropped, like sankey's. Nodes are laid out
+      by a force simulation drawn with ``enableSimulation`` OFF (so the iframe and the static PNG
+      settle to the same picture), labelled by name, and painted one brand hue — a networkgraph
+      neither cycles the palette across nodes nor lets a node carry its own color. Pulls in the
+      ``modules/networkgraph`` module (from ``chart.type`` alone; not ``highcharts-more``).
     - ``boxplot``: per-category Tukey distributions. The one type that AGGREGATES —
       every other maps rows 1:1 onto marks, but a box summarizes many rows. The data
       is long/tidy (``x_col``'s values REPEAT, one row per observation) and each
@@ -1807,10 +1851,12 @@ def build_options(
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
     tooltip) for dark mode; the series palette itself is shared across modes.
     ``size_col`` names the marker-size column and is required for ``bubble``;
-    ``target_col`` names the destination-node column and is required for
-    ``sankey``; ``parent_col`` names the parent-label column and is required for
-    ``sunburst``; ``end_col`` names the column each bar ends at and is required for
-    ``xrange``. Each is ignored by the other types. ``agg`` and ``dial`` are read only by the
+    ``target_col`` names the destination-node column and is required for both
+    node-link types (``sankey`` and ``networkgraph``); ``parent_col`` names the
+    parent-label column and is required for ``sunburst``; ``end_col`` names the
+    column each bar ends at and is required for ``xrange``. Each is ignored by the
+    other types. ``networkgraph`` is the one type that takes an EMPTY ``y_cols``
+    (it has no value channel), as the gauge family takes a ``None`` ``x_col``. ``agg`` and ``dial`` are read only by the
     GAUGE FAMILY, and are the only two parameters here that name a POLICY and a SCALE rather
     than a column.
 
@@ -1833,18 +1879,30 @@ def build_options(
         raise ValueError(
             f"Unsupported chart_type {chart_type!r}; expected one of {SUPPORTED_TYPES}"
         )
-    if not y_cols:
+    if not y_cols and chart_type not in NETWORKGRAPH_TYPES:
+        # Networkgraph is the one type with no VALUE channel — its marks are the edges, sized by
+        # nothing — so an empty `y_cols` is legitimate for it exactly as `x_col is None` is for the
+        # gauge family, and the two are mirror exemptions. Every OTHER type needs at least one y
+        # column, so the guard still fires for them (and networkgraph never reaches the `y_cols[0]`
+        # reads below, which belong to types this exemption does not touch). Pinned both ways:
+        # `test_rejects_empty_y_cols` excludes networkgraph, and a positive test builds it with `[]`.
         raise ValueError("At least one y column is required.")
     if chart_type in BUBBLE_TYPES and not size_col:
         raise ValueError("A bubble chart requires a size (z) column via size_col.")
-    if chart_type in SANKEY_TYPES and not target_col:
-        raise ValueError("A sankey chart requires a target (to) column via target_col.")
-    if chart_type in SANKEY_TYPES and x_col == target_col:
-        # Source and target name the two ends of every link, so one column can't be
-        # both: each row would be a self-loop. (The weight column is free to repeat
-        # either — odd, but it still renders, as scatter's x-in-y does.)
+    if chart_type in (SANKEY_TYPES + NETWORKGRAPH_TYPES) and not target_col:
+        # Both node-link types name a link's far end with `target_col` (networkgraph reuses
+        # sankey's kwarg rather than adding one — a link is a link). A sankey ALSO needs a weight
+        # (the empty-`y_cols` guard above catches its absence); a networkgraph does not.
         raise ValueError(
-            f"x_col {x_col!r} cannot also be the target column for a sankey chart"
+            f"A {chart_type} chart requires a target (to) column via target_col."
+        )
+    if chart_type in (SANKEY_TYPES + NETWORKGRAPH_TYPES) and x_col == target_col:
+        # Source and target name the two ends of every link, so one column can't be
+        # both: each row would be a self-loop. (For sankey the weight column is free to repeat
+        # either — odd, but it still renders, as scatter's x-in-y does.) Shared by both node-link
+        # types, since the collision is a fact about the two node columns, not about the weight.
+        raise ValueError(
+            f"x_col {x_col!r} cannot also be the target column for a {chart_type} chart"
         )
     if chart_type in SUNBURST_TYPES and not parent_col:
         raise ValueError("A sunburst chart requires a parent column via parent_col.")
@@ -2539,6 +2597,80 @@ def build_options(
             dark=dark,
         )
 
+    if (
+        chart_type in NETWORKGRAPH_TYPES
+    ):  # a force-directed graph: rows are unweighted edges
+        assert target_col is not None  # guarded above for networkgraph
+        # Edges are {from, to} DICTS with NO weight — the type is unweighted, and a `weight`/
+        # `width` key is silently dropped from the emitted JS anyway (verified on the round-trip),
+        # so carrying one would be a lie the library erases. highcharts-core serializes each dict
+        # to a `[from, to]` array, which is Highcharts' default link shape. Node names are
+        # stringified as sankey's are (the point model rejects a non-string name; a numeric node id
+        # meets its numeric partner as a string). A row missing EITHER end can't be an edge, so it
+        # is dropped as sankey drops a weightless link — no EnforcedNull, there is no slot to keep
+        # aligned. The x_col (source) filter already ran up front (this is a label channel, unlike
+        # gauge); target_col is this branch's own second label column, so it is checked here.
+        edges = [
+            {"from": str(src), "to": str(dst)}
+            for src, dst in zip(df[x_col], df[target_col], strict=True)
+            if _label_ok(src) and _label_ok(dst)
+        ]
+        return _themed(
+            {
+                "chart": {"type": "networkgraph"},
+                # Carried for the palette tests (which sweep every type), but — unlike sankey —
+                # only `colors[0]` actually paints: a networkgraph does NOT cycle the palette
+                # across its nodes, so every node is the brand primary (verified by rendering: all
+                # nodes blue). Per-node color is unreachable anyway (a `nodes` array and
+                # `colorByPoint` are both silently dropped), so this is honest rather than a
+                # limitation grudgingly accepted — a graph's nodes have no categorical identity to
+                # colour. heatmap/treemap carry `colors` for the same cross-type-consistency reason.
+                "colors": colors,
+                "title": {"text": title},
+                # NO custom tooltip — and that is a conclusion from rendering, not an omission.
+                # A networkgraph tooltip fires on NODE hover (the big dots; the links are 1px lines
+                # that do not trigger one), so the format has to be right for a NODE — and a node
+                # point has `name` but no `fromNode`/`toNode`. A `pointFormat` of
+                # `{point.fromNode.name} → {point.toNode.name}` (the obvious "name the edge" move)
+                # therefore renders an EMPTY " → " box on every node hover (verified by rendering:
+                # a blank tooltip on the hub). The fix a sankey would reach for — a node-specific
+                # `plotOptions.networkgraph.tooltip.nodeFormat` — is silently DROPPED here exactly
+                # as sankey's own top-level `nodeFormat` is (verified on the round-trip), so the
+                # node format cannot be set explicitly at all. Highcharts' OWN default is correct
+                # (it prints the node name, verified by rendering: a clean "API Gateway"), and it is
+                # the one and only way to get it — sankey's "we can't name that default explicitly"
+                # situation, one type over. So the tooltip is left default; `_themed` still paints
+                # its box for dark mode (it sets `options["tooltip"]` whether or not the branch did).
+                # Every node is labelled on the chart, so a categorical legend would only repeat
+                # those names — sankey's reasoning, and here there is no series identity to show
+                # either (one unweighted series of edges).
+                "legend": {"enabled": False},
+                "plotOptions": {
+                    "networkgraph": {
+                        # `keys` maps each serialized [from, to] array onto the link's two ends. It
+                        # is Highcharts' own default for a networkgraph, but stated explicitly so
+                        # the mapping is pinned rather than inherited.
+                        "keys": ["from", "to"],
+                        # enableSimulation MUST be False — see `_NETWORKGRAPH_LINK_LENGTH`: with it
+                        # True the export server rasterizes the graph mid-simulation as an
+                        # unreadable central knot, while False settles it identically in both render
+                        # modes. `verlet` integration converges a small graph cleanly.
+                        "layoutAlgorithm": {
+                            "enableSimulation": False,
+                            "integration": "verlet",
+                            "linkLength": _NETWORKGRAPH_LINK_LENGTH,
+                        },
+                        # Labels each node by name via Highcharts' default node format. dict()
+                        # copies the module constant so nothing downstream can mutate it, as
+                        # sankey's link label is copied.
+                        "dataLabels": dict(_NETWORKGRAPH_NODE_LABEL),
+                    }
+                },
+                "series": [{"name": f"{x_col} → {target_col}", "data": edges}],
+            },
+            dark=dark,
+        )
+
     if chart_type in XY_TYPES:  # scatter
         numeric_x = pd.api.types.is_numeric_dtype(df[x_col])
         series = []
@@ -3162,17 +3294,21 @@ def count_marks(
     end_col: str | None = None,
 ) -> int:
     """The number of marks ``build_options`` will draw, for the app's count-adaptive KPI
-    (a heatmap's cells, a treemap's tiles, a sankey's flows, a boxplot's boxes, a
-    waterfall's steps, a sunburst's sectors).
+    (a heatmap's cells, a treemap's tiles, a sankey's flows, a networkgraph's links, a
+    boxplot's boxes, a waterfall's steps, a sunburst's sectors).
 
     Defined here, beside ``build_options`` and reusing its very ``_label_ok`` / ``_plottable``
     predicates, so the KPI number can never drift from what the chart actually renders — the
     reason the drop rules live in this module at all. Reads only the columns each type needs,
-    so it stays correct above ``streamlit_app``'s empty-``y_cols`` guard (heatmap returns 0
-    without touching ``y_cols[0]``; every other count-adaptive type uses a single-value Y
-    control, which guarantees one y column). A row whose label is not drawable is dropped in
+    so it stays correct above ``streamlit_app``'s empty-``y_cols`` guard (heatmap and networkgraph
+    return without touching ``y_cols[0]`` — heatmap needs only the label count, networkgraph only
+    its two node columns, and networkgraph's ``y_cols`` is empty by design; every other
+    count-adaptive type uses a single-value Y control, which guarantees one y column). A row whose
+    label is not drawable is dropped in
     every type (the uniform
-    label policy); for treemap/sankey a non-plottable value/weight drops it too, while a
+    label policy); for treemap/sankey a non-plottable value/weight drops it too, and for
+    networkgraph a missing SECOND node (``target_col``) does — an edge needs both ends but no
+    value, since it is unweighted. A
     heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``), a boxplot
     keeps one box per distinct drawable label (an all-missing group included), and a
     waterfall keeps one bar per drawable label (a missing delta included, as an
@@ -3255,6 +3391,13 @@ def count_marks(
         # the branch likewise appends only when there is at least one step to sum.
         steps = int(label_ok.sum())
         return steps + 1 if steps else 0
+    if chart_type in NETWORKGRAPH_TYPES:
+        # One mark per drawable EDGE — source and target both present, no value consulted (the type
+        # is unweighted, and its `y_cols` is empty, so there is no `value_ok` to read). This branch
+        # therefore sits ABOVE the `value_ok` line below, which would `IndexError` on `y_cols[0]`.
+        # Both masks are `.astype(bool)`-cast for the row-less frame, exactly as sankey's are.
+        target_ok = df[target_col].map(_label_ok).astype(bool)
+        return int((label_ok & target_ok).sum())
     value_ok = df[y_cols[0]].map(_plottable).astype(bool)
     if chart_type in TREEMAP_TYPES:
         return int((label_ok & value_ok).sum())

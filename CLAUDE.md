@@ -11,14 +11,19 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
   `st.multiselect` on wide CSVs, plus the four type-specific extra column
-  selectors — Size (Z) for bubble, Target (to) for sankey, Parent for sunburst, End
+  selectors — Size (Z) for bubble, Target (to) for sankey (and **networkgraph**, which reuses
+  the very same control and `target_col`, since a link is a link), Parent for sunburst, End
   for xrange — and the **gauge family's** two, which are the only ones that name a **policy** and
   a **scale** rather than a column: an aggregation picker sourced from the builder's
-  `GAUGE_AGGREGATIONS`, and a Dial min/max pair *seeded* from its `gauge_dial`. The family is
-  also what **removes** a control: neither gauge draws an X selectbox at all,
-  the one *subtractive* change here, since a control that does nothing is a lie in
+  `GAUGE_AGGREGATIONS`, and a Dial min/max pair *seeded* from its `gauge_dial`. The gauge family is
+  **not** the only thing that **removes** a control, though it was the first: neither gauge draws an
+  X selectbox at all — a *subtractive* change, since a control that does nothing is a lie in
   the UI and passing a column the builder must ignore is a lie in the call site and
-  in three cache keys. Every one of those controls is keyed on `GAUGE_TYPES`, so `gauge` inherited
+  in three cache keys — and **networkgraph** is the MIRROR of it, drawing no **Y** control at all
+  (it is unweighted, so a value picker would drive nothing). Gauge removes the label channel and
+  keeps the value; networkgraph removes the value channel and keeps the label. Each is exempted
+  from the empty-selection guard that the other's channel still enforces (`x_col is None` for
+  gauge, `y_cols == []` for networkgraph — pinned both ways, by an exclusion and a positive test). Every one of those controls is keyed on `GAUGE_TYPES`, so `gauge` inherited
   the lot without a new branch — and the AppTests that pin them are *parametrized over the family*
   rather than written twice, which is what stops the two drifting. The single difference is a noun:
   the Y control says **Rings** for one and **Needles** for the other, because a reader picking
@@ -26,6 +31,7 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   caching, a KPI metric row (its third metric adapts to the chart type — series
   plotted, or, for the one-series types, the mark count from the builder's
   `count_marks`: cells for a heatmap, tiles for a treemap, flows for a sankey,
+  links for a networkgraph,
   boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
   xrange — sourced there
   rather than recomputed
@@ -89,7 +95,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   branches must remember into a **signature**, since a function that cannot see a DataFrame cannot
   derive a dial from a raw column. And `count_marks()`, which
   returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
-  tiles, a sankey's flows, a boxplot's boxes, a waterfall's steps, a sunburst's sectors, an
+  tiles, a sankey's flows, a networkgraph's links, a boxplot's boxes, a waterfall's steps, a
+  sunburst's sectors, an
   xrange's bars)
   for the app's KPI
   row — reusing the same `_label_ok`/`_plottable` drop predicates so the count can't
@@ -143,7 +150,9 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   brand
   palette, the validation
   guards including bubble's required size column, sankey's required and distinct
-  target column, sunburst's required and distinct parent column, xrange's required end
+  target column (shared verbatim by networkgraph, whose *empty* `y_cols` is pinned both ways — an
+  exclusion from the empty-Y sweep and a positive build — the mirror of gauge's `None` `x_col`),
+  sunburst's required and distinct parent column, xrange's required end
   column (distinct from the *start* column, not from `x_col`), the gauge family's known aggregation
   and its dial-with-a-span, and the
   heatmap/boxplot/waterfall x-in-y rule, and
@@ -223,8 +232,11 @@ renderers. Bubble charts also take a `size_col=` naming the numeric column that
 drives each marker's area (required for `bubble`, raising `ValueError` if
 omitted; ignored by the other types), threaded through the same renderers,
 sankey charts a `target_col=` naming the destination-node column (required for
-`sankey`, and raising `ValueError` if omitted or equal to `x_col`; likewise
-ignored by the other types), threaded the same way, sunburst charts a
+both node-link types — `sankey` and `networkgraph`, which share one `target_col`,
+raising `ValueError` if omitted or equal to `x_col`; likewise
+ignored by the other types), threaded the same way — and `networkgraph` reads *only* that
+plus `x_col`, taking an **empty** `y_cols` (it is unweighted), the one type that does, as the
+gauge family is the only one taking a `None` `x_col`, sunburst charts a
 `parent_col=` naming the parent-label column (required for `sunburst`, raising
 `ValueError` if omitted or equal to `x_col` — and, unlike the other two, also raising
 when the column it names does not describe a *tree*: see `explain_tree_error`), and
@@ -267,6 +279,41 @@ default node label and each link carries its weight as a *per-link* `dataLabels`
 — gated on link count like heatmap's cell labels — because highcharts-core drops
 `plotOptions.sankey.dataLabels.nodeFormat` and the `format` that survives there
 would label the links with the node format and blank the node names),
+`networkgraph` (a force-directed graph, sankey's cousin — rows are edges of a graph,
+read as `{from, to}` dicts over the same two node columns (`x_col` and `target_col`,
+reused from sankey — no new kwarg, so the cache layer is untouched), but **unweighted**,
+and that is the *library's* decision, not a preference. A per-edge `weight`/`width` is
+accepted by `Chart.from_options` and then silently dropped (the `{from, to, weight}` dict
+serializes to a bare `[from, to]` array), so a numeric weight column would drive nothing —
+and this project treats a control that does nothing as a lie, so the Y picker is **removed**,
+not ignored. That makes networkgraph the **mirror of the gauge family**: gauge removes the
+LABEL channel (`x_col is None`, marks are the selected columns), networkgraph the VALUE
+channel (`y_cols == []`, marks are the edges) — the second subtractive-control type, and the
+counterpart to gauge's absent X. Its `x_col` is the SOURCE node label, a real label channel
+(unlike gauge), so it rides the shared `_label_ok` filter and checks its second label column
+in its own branch, exactly as sankey does; a row missing either end is dropped, no
+`EnforcedNull`. It needs a `count_marks` rule and a `MARK_METRICS` entry (**Links**, one per
+drawable edge) because — unlike gauge — its one edge-series would misreport as a bare `1`.
+Nodes are painted ONE brand hue: a networkgraph neither cycles the palette across nodes nor
+lets a node carry its own color (`colorByPoint` and a `nodes` array are both silently dropped,
+so `colorByPoint` is pinned to appear NOWHERE), which is honest rather than grudging — a
+graph's nodes have no categorical identity to colour. Nodes are labelled by name (their only
+identity — no axis, no legend), in Highcharts' `contrast` color, so networkgraph needs **no
+`_themed` hook at all** (like boxplot): white labels on dark, black on light, palette nodes
+and grey links legible on both, all verified by rendering. The one setting the whole type turns
+on is `enableSimulation: false`, pinned on the emitted JS and load-bearing: with it *true* the
+export server rasterizes the graph mid-simulation as an unreadable central knot while the iframe
+animates it loose — the two render modes disagree, the class of bug `_LIGHT_COLOR_SCHEME_CSS`
+exists to close — while *false* settles the layout synchronously so both draw the same picture.
+It sets **no custom tooltip** — another render-derived conclusion. A networkgraph tooltip fires on
+a NODE (the links are 1px lines that trigger none), and a node point has `name` but no
+`fromNode`/`toNode`, so the obvious `{point.fromNode.name} → {point.toNode.name}` renders an **empty
+box** on every node hover (verified by rendering). The node-specific `nodeFormat` that would fix it
+is silently dropped (sankey's `nodeFormat` trap, one type over), so the node format cannot be set
+explicitly at all — and Highcharts' OWN default is correct (it prints the node name), the one and
+only way to get it. So the tooltip is left default (`_themed` still paints its box for dark mode).
+Pulls in `modules/networkgraph` from `chart.type` alone, and — correcting the common lore —
+*not* `highcharts-more`),
 `boxplot` (per-category Tukey distributions — the only type whose builder
 *aggregates*: every other maps rows 1:1 onto marks, but a box summarizes many rows.
 The data is long/tidy — `x_col`'s values *repeat*, one row per observation — and each
@@ -889,9 +936,11 @@ series-level `radius` is — the *surviving* half of a pair whose point-level ha
 the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, treemap,
-sankey's Target (to) control, sunburst's Parent control, xrange's End control, gauge's
-aggregation picker and Dial min/max inputs — and gauge's *absent* X control, the one
-subtractive change — and boxplot's
+sankey's Target (to) control (and networkgraph reusing it while drawing *no Y control at all*,
+its KPI reading **Links** over an empty selection), sunburst's Parent control, xrange's End
+control, gauge's
+aggregation picker and Dial min/max inputs — and gauge's *absent* X control and networkgraph's
+*absent* Y control, the two mirror-image subtractive changes — and boxplot's
 and waterfall's
 single-select Y —
 revealing the generated config behind its toggle,

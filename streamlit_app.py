@@ -20,6 +20,7 @@ import streamlit as st
 from highcharts_builder import (
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
+    NETWORKGRAPH_TYPES,
     SUPPORTED_TYPES,
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
@@ -63,6 +64,12 @@ MARK_METRICS = {
     "heatmap": "Cells",
     "treemap": "Tiles",
     "sankey": "Flows",
+    # Networkgraph is the OTHER single-series node-link type, so — like sankey — its default
+    # "Series plotted" would misreport its one edge-series as a bare 1. Its marks are the edges,
+    # counted by count_marks (one per drawable row, both node ends present). It needs this entry
+    # for the same reason sankey does, and — unlike the gauge family, its mirror in having a
+    # subtractive control — it is NOT a `marks == len(y_cols)` type: its y_cols is empty.
+    "networkgraph": "Links",
     "boxplot": "Boxes",
     "waterfall": "Steps",  # counts the appended Total, as the chart draws it
     "sunburst": "Sectors",  # likewise counts the appended root — the other appending type
@@ -259,6 +266,9 @@ with st.sidebar:
             "- **sankey** — a Source and a Target column of node names plus a "
             "numeric flow value; each link's width shows how much moves from one "
             "node to the next\n"
+            "- **networkgraph** — a Source and a Target column of node names (no value "
+            "column); each row is one edge, laid out as a force-directed graph of who "
+            "connects to whom\n"
             "- **heatmap** — a category X axis and one or more numeric Y columns "
             "form a grid (each selected column becomes a row); each cell's color "
             "shows its value\n"
@@ -291,18 +301,25 @@ with st.sidebar:
     )
 
     # The no-plottable-columns gate. It runs HERE, below the chart-type picker, because the
-    # answer depends on the type: every other type needs a NUMBER, but xrange's start/end are
-    # coordinates and may be dates — and a date column is object dtype, so a real Gantt CSV
-    # (`task,start,end`, all dates) has no numeric columns whatsoever. Gating on numeric_cols
-    # before the picker was drawn refused that file at the door, with a message about a
-    # requirement xrange does not have.
+    # answer depends on the type. MOST types need a NUMBER, but two do not, and each is exempted:
+    # xrange's start/end are coordinates and may be dates — and a date column is object dtype, so a
+    # real Gantt CSV (`task,start,end`, all dates) has no numeric columns whatsoever — while
+    # networkgraph reads two columns as node LABELS and needs no number at all, so the canonical
+    # edge-list CSV (`source,target`, both text) likewise has none. Gating on numeric_cols before
+    # the picker was drawn refused those files at the door, with a message about a requirement the
+    # type does not have. Networkgraph needs no gate of its own: with fewer than two columns the
+    # Source == Target guard in the main panel says so.
     if chart_type == "xrange" and not coord_cols:
         st.error(
             "This dataset has no date or number columns to place a bar on.",
             icon=":material/error:",
         )
         st.stop()
-    if chart_type != "xrange" and not numeric_cols:
+    if (
+        chart_type != "xrange"
+        and chart_type not in NETWORKGRAPH_TYPES
+        and not numeric_cols
+    ):
         st.error(
             "This dataset has no numeric columns to plot.", icon=":material/error:"
         )
@@ -317,6 +334,14 @@ with st.sidebar:
         # Node-link flow: two label columns naming a link's ends (the X selectbox
         # plus the Target one below) and one numeric column weighting it.
         x_label, y_label, multi = "Source (from)", "Flow value (weight)", False
+    elif chart_type == "networkgraph":
+        # Sankey's cousin: two label columns naming an edge's ends (the X selectbox plus the
+        # Target one below) and NO value column — the graph is unweighted, so there is no Y
+        # control at all (skipped in the y_cols block below). `y_label`/`multi` go unused, but
+        # every branch here assigns the triple, so they are set for the shape rather than left
+        # dangling. This is the MIRROR of the gauge family: gauge has a value but no label (no X),
+        # networkgraph a label but no value (no Y).
+        x_label, y_label, multi = "Source (from)", "", False
     elif chart_type == "boxplot":
         # Long/tidy: the X column's values REPEAT (one row per observation) and one
         # numeric column carries the raw measurements the builder aggregates into a box
@@ -374,9 +399,10 @@ with st.sidebar:
     # `str | None` precisely so this can be honest.
     x_col = None if chart_type in GAUGE_TYPES else st.selectbox(x_label, df.columns)
 
-    # Sankey's second node column, sitting next to Source so the two ends of a link
+    # The node-link types' second node column, sitting next to Source so the two ends of a link
     # read as a pair. Drawn from every column, not numeric_cols like bubble's
-    # Size (Z): a node name is a label. Only shown for sankey (None otherwise, and
+    # Size (Z): a node name is a label. Shown for BOTH node-link types — sankey and networkgraph,
+    # which reuse one Target control and one `target_col` (None otherwise, and
     # ignored by the other builders). The index is a CONSTANT for the same reason
     # the Y default below is: these widgets are keyless, so Streamlit folds it into
     # their identity — the tempting "the column after Source" default would re-mint
@@ -384,7 +410,7 @@ with st.sidebar:
     # Source. min() clamps a single-column frame. Source == Target is caught by the
     # guard in the main panel instead.
     target_col = None
-    if chart_type == "sankey":
+    if chart_type in ("sankey", "networkgraph"):
         target_col = st.selectbox(
             "Target (to)", df.columns, index=min(1, len(df.columns) - 1)
         )
@@ -409,7 +435,15 @@ with st.sidebar:
             ),
         )
 
-    if multi:
+    if chart_type in NETWORKGRAPH_TYPES:
+        # Networkgraph draws NO Y control and passes an empty list. It is the one type with no
+        # VALUE channel — its marks are the edges between two node columns, sized by nothing — so a
+        # Y picker would drive nothing, and rendering a control that does nothing lies in the UI
+        # exactly as an X control would for the gauge family. `build_options` accepts an empty
+        # `y_cols` for networkgraph precisely so this can be honest (the mirror of gauge's `None`
+        # x_col). The empty-Y guard in the main panel exempts it for the same reason.
+        y_cols = []
+    elif multi:
         # Pills keep every series choice inline and compact, but past
         # MAX_PILL_OPTIONS a wide uploaded CSV would wrap them into several rows in
         # the narrow sidebar, so fall back to st.multiselect (a dropdown, and
@@ -607,7 +641,10 @@ with right.container(border=True, height="stretch"):
 with left.container(border=True, height="stretch"):
     st.subheader("Highcharts output")
 
-    if not y_cols:
+    if not y_cols and chart_type not in NETWORKGRAPH_TYPES:
+        # Networkgraph is exempt: it has no value channel, so an empty Y selection is its normal
+        # state, not an error (the mirror of the gauge family, which is exempt from the X guard).
+        # The KPI row above already shows its "Links" count over this same empty selection.
         st.warning(
             "Pick at least one numeric column to plot.", icon=":material/warning:"
         )
@@ -618,9 +655,10 @@ with left.container(border=True, height="stretch"):
             icon=":material/warning:",
         )
         st.stop()
-    # Sankey's own collision: a link's two ends. Not the x-in-y rule above — the
-    # Target column isn't among the Y series at all (see X_IN_Y_GUARD_TYPES).
-    if chart_type == "sankey" and x_col == target_col:
+    # The node-link types' own collision: an edge's two ends. Shared by sankey and networkgraph,
+    # since it is a fact about the two node columns, not the weight. Not the x-in-y rule above —
+    # the Target column isn't among the Y series at all (see X_IN_Y_GUARD_TYPES).
+    if chart_type in ("sankey", "networkgraph") and x_col == target_col:
         st.warning(
             "Source and Target must be different columns — every link would loop "
             "back to its own node.",

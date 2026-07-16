@@ -55,7 +55,8 @@ light/dark theme, which you can toggle from the settings menu.
   keeps its palette color.
 - An at-a-glance KPI row (rows, numeric columns, and a chart-type-adaptive third
   metric — series plotted, or cells for a heatmap, tiles for a treemap, flows
-  for a sankey, boxes for a boxplot, steps for a waterfall, sectors for a
+  for a sankey, links for a networkgraph, boxes for a boxplot, steps for a
+  waterfall, sectors for a
   sunburst, and bars for an xrange; neither gauge needs an entry of its own, since
   their marks *are* their series — one ring, or one needle, per column — so "series
   plotted" is already literally the mark count) above
@@ -71,7 +72,11 @@ light/dark theme, which you can toggle from the settings menu.
   on a sequential color axis, show the values), `treemap` (nested
   rectangles whose area, sized by a value column, shows each label's share),
   `sankey` (a flow diagram: each row is a link between two node columns,
-  whose width is a value column), `boxplot` (per-category distributions: a
+  whose width is a value column), `networkgraph` (sankey's cousin: each row is
+  one **unweighted** edge between two node columns, laid out as a force-directed
+  graph of who connects to whom — so it has a Source and a Target column but **no
+  value column at all**, the mirror of the gauge family's missing X), `boxplot`
+  (per-category distributions: a
   category column whose values repeat, one row per observation, plus a column of
   raw measurements — each category becomes a Tukey box, with outliers as dots),
   `waterfall` (a cumulative bridge: a step-label column plus a column of
@@ -129,6 +134,10 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
 - **`tests/test_smoke.py`** — the pure builder (every chart type, the
   missing-data and scatter/bubble edge cases, radar's polar-line shape, heatmap's
   colorAxis value matrix, treemap's value-sized tiles, sankey's node-link flows,
+  networkgraph's unweighted edges (the `{from, to}` dict that serializes to a
+  `[from, to]` array; the `colorByPoint` that must appear nowhere; `enableSimulation:
+  false`, so the iframe and the PNG settle to the same picture; and the empty `y_cols`
+  it alone accepts, the mirror of the gauge family's `None` x_col),
   boxplot's aggregated Tukey distributions (including the `iqr == 0` degeneracies
   and the `fillColor` silent drop), waterfall's appended `isSum` total and its
   semantic up/down/total bar colors, sunburst's assembled hierarchy (synthesized
@@ -160,6 +169,8 @@ Three suites (see [`CLAUDE.md`](CLAUDE.md) for the full breakdown):
   selectors, gauge's aggregation picker and its two Dial inputs — whose defaults are
   seeded *from the builder*, and which deliberately reset when the data or the
   reduction changes, because a scale carried over from either is a silent lie —
+  networkgraph's reused Target *and its removed Y control* (the subtractive mirror of
+  gauge's removed X),
   radar,
   heatmap, treemap, boxplot, and waterfall, the
   config toggle, the KPI row, the wide-CSV `st.multiselect` fallback, both render
