@@ -21,6 +21,7 @@ from highcharts_builder import (
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     NETWORKGRAPH_TYPES,
+    NODE_LINK_TYPES,
     SUPPORTED_TYPES,
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
@@ -410,7 +411,7 @@ with st.sidebar:
     # Source. min() clamps a single-column frame. Source == Target is caught by the
     # guard in the main panel instead.
     target_col = None
-    if chart_type in ("sankey", "networkgraph"):
+    if chart_type in NODE_LINK_TYPES:
         target_col = st.selectbox(
             "Target (to)", df.columns, index=min(1, len(df.columns) - 1)
         )
@@ -658,7 +659,7 @@ with left.container(border=True, height="stretch"):
     # The node-link types' own collision: an edge's two ends. Shared by sankey and networkgraph,
     # since it is a fact about the two node columns, not the weight. Not the x-in-y rule above —
     # the Target column isn't among the Y series at all (see X_IN_Y_GUARD_TYPES).
-    if chart_type in ("sankey", "networkgraph") and x_col == target_col:
+    if chart_type in NODE_LINK_TYPES and x_col == target_col:
         st.warning(
             "Source and Target must be different columns — every link would loop "
             "back to its own node.",

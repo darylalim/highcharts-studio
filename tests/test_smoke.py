@@ -120,6 +120,7 @@ from highcharts_builder import (  # noqa: E402
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     NETWORKGRAPH_TYPES,
+    NODE_LINK_TYPES,
     SUPPORTED_TYPES,
     _gauge_reading_label,
     _needle_radii,
@@ -185,7 +186,7 @@ def _target_for(chart_type: str) -> str | None:
     column adapts its input rather than dropping out. Networkgraph is built by the sweeps with
     the shared ``y_cols=["value"]``, which it simply IGNORES (it has no value channel); its own
     empty-``y_cols`` behaviour is pinned separately (``test_networkgraph_builds_with_empty_y_cols``)."""
-    return "target" if chart_type in ("sankey", "networkgraph") else None
+    return "target" if chart_type in NODE_LINK_TYPES else None
 
 
 def _parent_for(chart_type: str) -> str | None:
@@ -390,7 +391,7 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             "label",
             ["value"],
             size_col=_size_for(chart_type),
-            target_col="to" if chart_type in ("sankey", "networkgraph") else None,
+            target_col="to" if chart_type in NODE_LINK_TYPES else None,
             parent_col="parent" if chart_type == "sunburst" else None,
             end_col=_end_for(chart_type),
         ).to_js_literal()
@@ -1762,7 +1763,7 @@ def test_networkgraph_builds_with_empty_y_cols():
     # raise — the mirror of a gauge building with a None x_col.
     df = pd.DataFrame({"src": ["A", "B"], "dst": ["B", "C"]})
     opts = build_options(df, "networkgraph", "src", [], target_col="dst")
-    assert [e for e in opts["series"][0]["data"]] == [
+    assert opts["series"][0]["data"] == [
         {"from": "A", "to": "B"},
         {"from": "B", "to": "C"},
     ]

@@ -120,6 +120,16 @@ CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 # express — not a tolerated one, as scatter's is, but an unstatable one.
 X_IN_Y_GUARD_TYPES = CATEGORY_X_TYPES + HEATMAP_TYPES + BOXPLOT_TYPES + WATERFALL_TYPES
 
+# The NODE-LINK types: the two whose rows are edges of a graph rather than series or
+# categories, so they name a link's two ends with `x_col` (source) and `target_col` (far
+# end) and share one dedicated guard pair — target_col required, and source != target. Named
+# once here, the GAUGE_TYPES / X_IN_Y_GUARD_TYPES "name the family so the sites can't drift"
+# rule, so the required-target and source-vs-target guards (and the app's Target control and
+# collision warning) read one constant instead of re-spelling the pair. It is NOT the
+# numeric-columns gate's set: a sankey needs a numeric weight, a networkgraph needs none, so
+# only networkgraph is exempt there — that site stays keyed on `NETWORKGRAPH_TYPES` alone.
+NODE_LINK_TYPES = SANKEY_TYPES + NETWORKGRAPH_TYPES
+
 # Default series palette, applied to every chart so both render modes (iframe
 # and static PNG) share one look that matches the Streamlit theme in
 # .streamlit/config.toml. It leads with the config's LIGHT-mode primaryColor and
@@ -1889,14 +1899,14 @@ def build_options(
         raise ValueError("At least one y column is required.")
     if chart_type in BUBBLE_TYPES and not size_col:
         raise ValueError("A bubble chart requires a size (z) column via size_col.")
-    if chart_type in (SANKEY_TYPES + NETWORKGRAPH_TYPES) and not target_col:
+    if chart_type in NODE_LINK_TYPES and not target_col:
         # Both node-link types name a link's far end with `target_col` (networkgraph reuses
         # sankey's kwarg rather than adding one — a link is a link). A sankey ALSO needs a weight
         # (the empty-`y_cols` guard above catches its absence); a networkgraph does not.
         raise ValueError(
             f"A {chart_type} chart requires a target (to) column via target_col."
         )
-    if chart_type in (SANKEY_TYPES + NETWORKGRAPH_TYPES) and x_col == target_col:
+    if chart_type in NODE_LINK_TYPES and x_col == target_col:
         # Source and target name the two ends of every link, so one column can't be
         # both: each row would be a self-loop. (For sankey the weight column is free to repeat
         # either — odd, but it still renders, as scatter's x-in-y does.) Shared by both node-link
