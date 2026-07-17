@@ -67,6 +67,7 @@ theme, which you can toggle from Streamlit's settings menu.
 | `funnel` | Part-of-whole stages, sized top-to-bottom (a narrowing funnel) | — |
 | `pyramid` | Funnel's inverted mirror: stages widening top-to-bottom | — |
 | `sankey` | A flow diagram: each row links two node columns, weighted by a value | Target |
+| `dependencywheel` | A circular sankey: the same weighted links drawn as nodes on a ring | Target |
 | `networkgraph` | A force-directed graph of unweighted edges between two node columns | Target (no Y) |
 | `boxplot` | Per-category Tukey distributions from repeated observations | — |
 | `waterfall` | A cumulative bridge of signed deltas, with a closing Total bar | — |

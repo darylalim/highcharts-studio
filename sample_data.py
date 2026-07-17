@@ -251,6 +251,56 @@ def _energy_flow() -> pd.DataFrame:
     )
 
 
+def _regional_migration() -> pd.DataFrame:
+    """Population moving between regions over a year — the who-flows-to-whom a dependencywheel is
+    built for: nodes sit on a ring and each curved ribbon's width shows how many people moved from
+    one region to another, so the whole migration matrix reads in one circle.
+
+    Tailored to dependencywheel, and the deliberate MIRROR of the sankey energy sample above. Both
+    read the same {from, to, weight} link shape, but the SHAPE OF THE DATA is opposite, which is the
+    whole point of reading them side by side: the energy sample is a layered DAG — fuel flows one
+    way into ``Electricity`` and on to a sector, and the source set and the target set barely
+    overlap, so it draws cleanly as a left-to-right flow. Here EVERY region is BOTH an origin and a
+    destination (North sends to South and East, and receives from South, East and Central), so the
+    flow is a symmetric, cyclic matrix with no layers — exactly the graph a straight sankey draws as
+    a tangle of back-crossing links and a ring draws as a clean wheel. Ten links, well under the
+    label gate, so each ribbon carries its own count.
+
+    Leads with a *label* column (``origin``) — load-bearingly so, like every sample: the app opens
+    on ``line`` with the first column as X, and a numeric first column would trip the x-in-y guard
+    the moment the dataset is selected. ``people`` is the numeric weight the wheel sizes ribbons by,
+    which also gives the app's no-numeric-columns gate something to find."""
+    return pd.DataFrame(
+        {
+            "origin": [
+                "North",
+                "North",
+                "South",
+                "South",
+                "East",
+                "East",
+                "West",
+                "West",
+                "Central",
+                "Central",
+            ],
+            "destination": [
+                "South",
+                "East",
+                "North",
+                "Central",
+                "West",
+                "North",
+                "Central",
+                "South",
+                "North",
+                "East",
+            ],
+            "people": [1200, 800, 950, 700, 600, 450, 500, 400, 650, 550],
+        }
+    )
+
+
 def _service_dependencies() -> pd.DataFrame:
     """A microservice call graph — the who-connects-to-whom a networkgraph is built for: each row
     is one dependency edge, and the force layout pulls tightly-coupled services together so the
@@ -674,6 +724,7 @@ SAMPLES = {
     "Marketing conversion funnel (funnel)": _conversion_funnel,
     "Customer loyalty pyramid (pyramid)": _loyalty_pyramid,
     "Energy flow (sankey)": _energy_flow,
+    "Regional migration flows (dependencywheel)": _regional_migration,
     "Service dependencies (networkgraph)": _service_dependencies,
     "Service response times (boxplot)": _response_times,
     "Quarterly profit bridge (waterfall)": _profit_bridge,

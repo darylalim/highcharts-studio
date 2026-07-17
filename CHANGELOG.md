@@ -33,6 +33,41 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.12.0] - 2026-07-16
+
+### Added
+
+- **`dependencywheel` chart type** — a circular sankey. It reads the **same** weighted
+  node-link data as `sankey` (a source `x_col`, a `target_col`, and a weight `y_cols[0]`,
+  encoded as `{from, to, weight}` links) and draws it as nodes on a ring joined by curved
+  ribbons instead of a left-to-right flow. In highcharts-core `SankeySeries` is literally a
+  **subclass** of `DependencyWheelSeries` (both carry `WeightedConnectionData`), so the link
+  building, the drop-a-row-missing-any-of-three policy, the node chaining and the node/link
+  tooltips are all **identical** to sankey's — so the two share **one** build branch, keyed by
+  `chart_type` (the funnel/pyramid "differ only in the type string" pattern), plus one
+  `count_marks` rule and one dark-mode border hook, via the new `WEIGHTED_NODE_LINK_TYPES`
+  constant. The one thing NOT shared — found by **rendering** — is sankey's per-link weight
+  labels: on a ring they stack in a clipped column off the left, so the wheel omits them and
+  shows weight by ribbon width plus the tooltip (its canonical presentation), keeping only the
+  node names on the arc. It reuses sankey's `target_col` (a link is a link — no new
+  kwarg, so the cache layer is untouched) and joins `NODE_LINK_TYPES`, so the Target control, the
+  required-target guard and the source≠target guard all bind it for free. It resolves **both**
+  `modules/dependency-wheel` **and** `modules/sankey` from `chart.type` alone (the wheel builds on
+  sankey's diagram infrastructure) — **not** `highcharts-more` (the plausible guess the round-trip
+  corrects). Its marks are the same links, so it shares sankey's count-adaptive **"Flows"** KPI.
+  The interactive path reorders those two module `<script>` tags (`_order_script_tags`) so
+  `modules/sankey.js` loads **before** `modules/dependency-wheel.js` — the latter extends the
+  sankey series, and `get_script_tags` emits them reversed, which blanks the iframe with
+  Highcharts error #17 while the export-server PNG renders regardless (the two-render-modes-must-
+  agree rule; found by rendering in a browser).
+- **`Regional migration flows (dependencywheel)` sample** — population moving between five
+  regions, and the deliberate **mirror** of the sankey energy sample: both read the same
+  `{from, to, weight}` shape, but where the energy flow is a layered DAG (its source and target
+  sets barely overlap), here **every** region is both an origin and a destination — the
+  symmetric, cyclic matrix a wheel is built for, and a straight sankey would draw as a tangle of
+  back-crossing links. It leads with a category (`origin`) column so the app opens cleanly on
+  `line`.
+
 ## [0.11.0] - 2026-07-16
 
 ### Added

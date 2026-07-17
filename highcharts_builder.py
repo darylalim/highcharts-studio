@@ -53,6 +53,23 @@ FUNNEL_TYPES = (
     "pyramid",
 )  # part-of-whole stages: funnel + its inverted mirror pyramid
 SANKEY_TYPES = ("sankey",)  # node-link flows: source -> target links sized by weight
+# DEPENDENCYWHEEL is a circular sankey — the SAME weighted node-link data (source, target, weight),
+# drawn as nodes on a ring joined by curved ribbons instead of a left-to-right flow. In
+# highcharts-core `SankeySeries` is literally a SUBCLASS of `DependencyWheelSeries` (both carry
+# `WeightedConnectionData`), so the {from, to, weight} links, the drop-a-row-missing-any-of-three
+# policy, the node chaining, the per-link weight labels, the node/link tooltips and the border
+# dissolve are ALL identical to sankey's — the two differ only in the `chart.type` string, the
+# `plotOptions` key, and the module (both resolved from `chart.type` alone: modules/dependency-wheel
+# PLUS modules/sankey, which the wheel builds on). So it SHARES sankey's build branch, keyed by
+# chart_type — the funnel/pyramid "one branch, differ only in the type string" pattern, NOT the
+# sankey/networkgraph split (networkgraph genuinely differs: unweighted, no weight label, contrast
+# node labels, no border hook). It reuses sankey's `target_col` — a link is a link, no new kwarg, so
+# the cache layer is untouched (networkgraph's win). WEIGHTED_NODE_LINK_TYPES (below) names the
+# shared pair so the build branch, the `count_marks` rule and the `_themed` hook read one constant
+# and can't drift apart.
+DEPENDENCYWHEEL_TYPES = (
+    "dependencywheel",
+)  # a circular sankey: weighted links around a ring
 # NETWORKGRAPH is sankey's cousin — rows are edges of a graph — with two removals that the
 # LIBRARY forces, not preference: a networkgraph link is an UNWEIGHTED [from, to] pair (a
 # per-link `weight`/`width` is accepted by `Chart.from_options` and then silently dropped from
@@ -115,6 +132,7 @@ SUPPORTED_TYPES = (
     + TREEMAP_TYPES
     + FUNNEL_TYPES
     + SANKEY_TYPES
+    + DEPENDENCYWHEEL_TYPES
     + NETWORKGRAPH_TYPES
     + BOXPLOT_TYPES
     + WATERFALL_TYPES
@@ -172,15 +190,27 @@ X_IN_Y_GUARD_TYPES = (
     + COLUMNRANGE_TYPES
 )
 
-# The NODE-LINK types: the two whose rows are edges of a graph rather than series or
+# The WEIGHTED node-link types: sankey and its circular twin dependencywheel, which read one
+# {from, to, weight} link shape and draw it identically bar the layout (a left-to-right flow vs. a
+# ring). Named once so the SHARED build branch, the `count_marks` rule and the `_themed` border
+# hook — the three sites where the two are identical bar the `chart.type`/`plotOptions` key and the
+# single per-link-label divergence inside the branch (the wheel omits them; see there) — read one
+# constant and can't drift. Networkgraph is deliberately absent: it is UNweighted, so it
+# shares none of those three (no weight to build, no weight label, contrast node labels, no border
+# hook), only the node-link GUARDS below.
+WEIGHTED_NODE_LINK_TYPES = SANKEY_TYPES + DEPENDENCYWHEEL_TYPES
+
+# The NODE-LINK types: the three whose rows are edges of a graph rather than series or
 # categories, so they name a link's two ends with `x_col` (source) and `target_col` (far
 # end) and share one dedicated guard pair — target_col required, and source != target. Named
 # once here, the GAUGE_TYPES / X_IN_Y_GUARD_TYPES "name the family so the sites can't drift"
 # rule, so the required-target and source-vs-target guards (and the app's Target control and
-# collision warning) read one constant instead of re-spelling the pair. It is NOT the
-# numeric-columns gate's set: a sankey needs a numeric weight, a networkgraph needs none, so
-# only networkgraph is exempt there — that site stays keyed on `NETWORKGRAPH_TYPES` alone.
-NODE_LINK_TYPES = SANKEY_TYPES + NETWORKGRAPH_TYPES
+# collision warning) read one constant instead of re-spelling the trio. It is NOT the
+# numeric-columns gate's set: sankey and dependencywheel need a numeric weight, a networkgraph
+# needs none, so only networkgraph is exempt there — that site stays keyed on `NETWORKGRAPH_TYPES`
+# alone. And it is wider than WEIGHTED_NODE_LINK_TYPES above: the guards bind all three (every
+# link has two ends), but only the weighted two share a build branch.
+NODE_LINK_TYPES = WEIGHTED_NODE_LINK_TYPES + NETWORKGRAPH_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
 # and static PNG) share one look that matches the Streamlit theme in
@@ -742,14 +772,16 @@ def _themed(options: dict, *, dark: bool) -> dict:
         color_axis["gridLineColor"] = t["grid"]
         color_axis["tickColor"] = t["axis"]
         options["plotOptions"]["heatmap"]["nullColor"] = t["grid"]
-    if options["chart"].get("type") == "sankey":
+    node_link_type = options["chart"].get("type")
+    if node_link_type in WEIGHTED_NODE_LINK_TYPES:
         # Only the node/link borders need flipping: they default to light and would
         # read as white outlines against the dark background, as pie's slice gaps do.
         # The labels are deliberately left alone — Highcharts draws both the node
         # names and the link weights in its default `contrast` color, computed
         # against whatever each label sits on, so they stay legible in either theme
-        # (the treemap reasoning, not pie's).
-        options["plotOptions"]["sankey"]["borderColor"] = t["bg"]
+        # (the treemap reasoning, not pie's). Keyed on the type so it dissolves the border
+        # under `plotOptions.sankey` or `plotOptions.dependencywheel` to match the build branch.
+        options["plotOptions"][node_link_type]["borderColor"] = t["bg"]
     if options["chart"].get("type") == "waterfall":
         waterfall = options["plotOptions"]["waterfall"]
         # Two flips, and NEITHER is the column/bar case above — waterfall's bar border and
@@ -1897,6 +1929,13 @@ def build_options(
       both a target and a source chains the flow into a second hop. Rows missing
       any of the three are dropped, like pie's slices. Pulls in the
       ``modules/sankey`` module.
+    - ``dependencywheel``: a circular sankey. The SAME weighted node-link data (source
+      ``x_col``, ``target_col``, weight ``y_cols[0]``) and the same ``{from, to, weight}``
+      links, drop policy, node chaining, per-link weight labels and node/link tooltips as
+      ``sankey`` — the two share one build branch and differ only in ``chart.type`` (nodes on
+      a ring, links as curved ribbons, vs. a left-to-right flow). Pulls in the
+      ``modules/dependency-wheel`` module PLUS ``modules/sankey`` (both from ``chart.type``
+      alone), since the wheel builds on sankey's diagram infrastructure.
     - ``networkgraph``: a force-directed graph, sankey's cousin — each row is one UNWEIGHTED
       edge, from the node named in ``x_col`` to the node named in ``target_col`` (reused from
       sankey; there is no weight, so ``y_cols`` is EMPTY — the mirror of the gauge family's
@@ -1972,8 +2011,8 @@ def build_options(
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
     tooltip) for dark mode; the series palette itself is shared across modes.
     ``size_col`` names the marker-size column and is required for ``bubble``;
-    ``target_col`` names the destination-node column and is required for both
-    node-link types (``sankey`` and ``networkgraph``); ``parent_col`` names the
+    ``target_col`` names the destination-node column and is required for all three
+    node-link types (``sankey``, ``dependencywheel`` and ``networkgraph``); ``parent_col`` names the
     parent-label column and is required for ``sunburst``; ``end_col`` names the
     column each bar ends at and is required for ``xrange``. Each is ignored by the
     other types. ``networkgraph`` is the one type that takes an EMPTY ``y_cols``
@@ -2722,8 +2761,18 @@ def build_options(
             dark=dark,
         )
 
-    if chart_type in SANKEY_TYPES:  # node-link flows sized by weight
-        assert target_col is not None  # guarded above for sankey
+    if (
+        chart_type in WEIGHTED_NODE_LINK_TYPES
+    ):  # sankey + its circular twin dependencywheel
+        # ONE branch for both weighted node-link types: the {from, to, weight} links, the drop
+        # policy, the node/link tooltips and the legend are identical — `chart.type` and the
+        # matching `plotOptions` key are keyed on `chart_type` below, and the per-link weight labels
+        # are the one behavioural difference (sankey only; the wheel omits them — see the gate).
+        # It is the funnel/pyramid "differ only in the type string" pattern, plus that one gate.
+        # highcharts-core's DependencyWheelSeries IS SankeySeries' parent, so one
+        # WeightedConnectionData shape draws either a left-to-right flow or a ring — and both
+        # resolve their module from `chart.type` alone (dependencywheel pulls modules/sankey too).
+        assert target_col is not None  # guarded above for both weighted node-link types
         weight_col = y_cols[0]
         # Links are {from, to, weight} DICTS. Not the [x, y, value] arrays heatmap
         # builds: highcharts-core rejects the equivalent `keys`-plus-arrays sankey
@@ -2747,16 +2796,24 @@ def build_options(
             # so it is checked here.
             if _label_ok(src) and _label_ok(dst) and _plottable(weight)
         ]
-        if len(links) <= _SANKEY_DATALABEL_MAX_LINKS:
+        if chart_type in SANKEY_TYPES and len(links) <= _SANKEY_DATALABEL_MAX_LINKS:
+            # Per-link weight labels are a SANKEY choice, NOT a shared one — the one place the
+            # wheel diverges from the flow beyond the type string, and it was found only by
+            # RENDERING (the waterfall-vs-column/bar lesson). On a sankey each label sits neatly
+            # ON its link; on a dependencywheel the links anchor on the RING, and Highcharts
+            # stacks their labels in a clipped, overlapping column off the LEFT of the wheel
+            # (verified in both render modes), so a wheel shows its weights via ribbon WIDTH plus
+            # the hover/node tooltip instead — which is the canonical dependency-wheel presentation.
+            # The node NAMES (the series-level dataLabels below) render cleanly on the ring for both.
             for link in links:
                 # dict() copies the module constant so nothing downstream can mutate
                 # it, as _HEATMAP_GRADIENT is copied for _themed.
                 link["dataLabels"] = dict(_SANKEY_LINK_LABEL)
         return _themed(
             {
-                "chart": {"type": "sankey"},
-                # Cycled across the nodes (sankey colors its links from the node
-                # they leave), so this is a genuinely categorical use of the palette
+                "chart": {"type": chart_type},
+                # Cycled across the nodes (both types color a link from the node it
+                # leaves), so this is a genuinely categorical use of the palette
                 # — like pie/treemap, unlike heatmap's colors-for-consistency.
                 "colors": colors,
                 "title": {"text": title},
@@ -2776,7 +2833,12 @@ def build_options(
                 # only repeat those names (the treemap reasoning).
                 "legend": {"enabled": False},
                 "plotOptions": {
-                    "sankey": {
+                    # Keyed on `chart_type` so the block lands under `sankey` or
+                    # `dependencywheel` to match `chart.type` above — the one place the two
+                    # types diverge in this tree. Verified on the round-trip that a
+                    # `plotOptions.dependencywheel.tooltip.nodeFormat` survives exactly as
+                    # sankey's does (both drop a TOP-LEVEL `tooltip.nodeFormat`).
+                    chart_type: {
                         # The NODE tooltip (total throughput of a hovered node) MUST
                         # live here, not on the tooltip above: highcharts-core's
                         # Tooltip model has no nodeFormat, so a top-level one is
@@ -3551,8 +3613,9 @@ def count_marks(
     end_col: str | None = None,
 ) -> int:
     """The number of marks ``build_options`` will draw, for the app's count-adaptive KPI
-    (a heatmap's cells, a treemap's tiles, a sankey's flows, a networkgraph's links, a
-    boxplot's boxes, a waterfall's steps, a sunburst's sectors, a columnrange's ranges).
+    (a heatmap's cells, a treemap's tiles, a sankey's or dependencywheel's flows, a
+    networkgraph's links, a boxplot's boxes, a waterfall's steps, a sunburst's sectors, a
+    columnrange's ranges).
 
     Defined here, beside ``build_options`` and reusing its very ``_label_ok`` / ``_plottable``
     predicates, so the KPI number can never drift from what the chart actually renders — the
@@ -3674,7 +3737,12 @@ def count_marks(
         # the count-adaptive KPI ("Stages"), so this reuses the very `label_ok`/`value_ok` masks
         # its build branch drops rows by, and the number can't drift from the stages drawn.
         return int((label_ok & value_ok).sum())
-    if chart_type in SANKEY_TYPES:
+    if chart_type in WEIGHTED_NODE_LINK_TYPES:
+        # One mark per drawable weighted LINK — source, target and weight all present. Shared by
+        # sankey and dependencywheel, which build the identical {from, to, weight} links, so the
+        # KPI ("Flows") counts the same thing for the flow and the ring. Both masks are
+        # `.astype(bool)`-cast for the row-less frame (networkgraph's rule, minus its unweighted
+        # exemption — these two DO read `value_ok`).
         target_ok = df[target_col].map(_label_ok).astype(bool)
         return int((label_ok & target_ok & value_ok).sum())
     raise ValueError(f"count_marks has no rule for {chart_type!r}")
@@ -3716,6 +3784,53 @@ def make_chart(
     chart = Chart.from_options(options)
     chart.container = container_id
     return chart
+
+
+# A browser module load-order constraint that `get_script_tags` does NOT guarantee:
+# `modules/dependency-wheel.js` EXTENDS the sankey series, so it must load AFTER `modules/sankey.js`.
+# highcharts-core resolves modules by first-seen dedup, and for a dependencywheel it walks the
+# chart's `plotOptions.dependencywheel` (which pulls `modules/dependency-wheel`) BEFORE its
+# `series.dependencywheel` (which pulls `modules/sankey` first), so it emits the dependent ahead of
+# its prerequisite — the reverse of what the browser needs. Loaded first, dependency-wheel.js throws
+# "Cannot read properties of undefined (reading 'prototype')" and Highcharts reports the series type
+# missing (error #17), leaving the iframe BLANK. The export server (the Static PNG path) loads every
+# module regardless of order, so ONLY the interactive path hits this — the `_LIGHT_COLOR_SCHEME_CSS`
+# two-render-modes-must-agree rule, and the solidgauge-pane trap one function up, in mirror: there a
+# MISSING module blanks the iframe, here a MISORDERED one does. This is the ONE such edge today,
+# solved directly; a second would generalize it to a list, the way GAUGE_TYPES split only once a
+# second gauge existed.
+_SANKEY_MODULE = "modules/sankey.js"
+_DEPENDENCY_WHEEL_MODULE = "modules/dependency-wheel.js"
+
+
+def _order_script_tags(script_tags: str) -> str:
+    """Ensure ``modules/sankey.js`` loads before ``modules/dependency-wheel.js`` (the wheel module
+    extends the sankey series). Reorders the tag LINES from ``get_script_tags`` rather than
+    rebuilding them, so highcharts-core stays the single source of tag format.
+
+    RAISES when the wheel module is present without its sankey prerequisite: the chart pulled a
+    module that extends one it did not, so no reordering can make it render and the interactive
+    iframe would blank silently (the module-load bug this exists to prevent). A loud error beats an
+    invisible one, and it also catches the day a module is renamed or the tag format drifts, when
+    the substring match would otherwise just no-op. Any chart without the wheel module (a plain
+    sankey, or any other type) is returned untouched.
+    """
+    lines = script_tags.split("\n")
+    dep_idx = next(
+        (i for i, ln in enumerate(lines) if _DEPENDENCY_WHEEL_MODULE in ln), None
+    )
+    if dep_idx is None:
+        return script_tags  # no wheel module: nothing to order
+    pre_idx = next((i for i, ln in enumerate(lines) if _SANKEY_MODULE in ln), None)
+    if pre_idx is None:
+        raise ValueError(
+            f"{_DEPENDENCY_WHEEL_MODULE} is present without its prerequisite "
+            f"{_SANKEY_MODULE}: the chart pulled a module that extends one it did not, "
+            f"and cannot render"
+        )
+    if pre_idx > dep_idx:
+        lines.insert(dep_idx, lines.pop(pre_idx))
+    return "\n".join(lines)
 
 
 def build_chart_html(
@@ -3773,7 +3888,16 @@ def build_chart_html(
     # on it. Two sibling types, the same module, resolved by different keys — which is precisely
     # why this comment names solidgauge rather than "a gauge". Whoever reads it next will be
     # holding one of the two, and the wrong half is a silently blank iframe beside a perfect PNG.
-    script_tags = chart.get_script_tags(as_str=True)
+    #
+    # `_order_script_tags` then fixes the OTHER way a resolved module blanks this iframe while the
+    # PNG renders: a dependencywheel needs modules/sankey.js loaded BEFORE modules/dependency-
+    # wheel.js (the latter extends the former), but get_script_tags emits them reversed. See
+    # `_order_script_tags`.
+    # get_script_tags(as_str=True) returns str, but the stub types it list[str] | str — the
+    # to_js_literal `str | None` stub mismatch, one method over (see the module's ty notes).
+    script_tags = _order_script_tags(
+        chart.get_script_tags(as_str=True)  # ty: ignore[invalid-argument-type]
+    )
     chart_js = chart.to_js_literal()
     # Match the iframe body to the chart's own background so there's no light
     # flash at the edges (or during load) when the app is in dark mode.

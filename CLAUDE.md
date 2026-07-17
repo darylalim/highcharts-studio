@@ -11,8 +11,9 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
   `st.multiselect` on wide CSVs, plus the four type-specific extra column
-  selectors — Size (Z) for bubble, Target (to) for sankey (and **networkgraph**, which reuses
-  the very same control and `target_col`, since a link is a link), Parent for sunburst, End
+  selectors — Size (Z) for bubble, Target (to) for sankey (and **dependencywheel** and
+  **networkgraph**, all three of which reuse the very same control and `target_col`, since a link
+  is a link), Parent for sunburst, End
   for xrange, High (top) for **columnrange** (its Y control renamed **Low (bottom)** — the two
   ends of a range, both magnitudes, drawn from `numeric_cols`, *not* xrange's `coordinate_columns`,
   since a high can never be a date; the one two-value-column type whose second column is a new
@@ -35,7 +36,7 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   caching, a KPI metric row (its third metric adapts to the chart type — series
   plotted, or, for the one-series types, the mark count from the builder's
   `count_marks`: cells for a heatmap, tiles for a treemap, stages for a funnel or
-  pyramid, flows for a sankey,
+  pyramid, flows for a sankey or dependencywheel,
   links for a networkgraph,
   boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
   xrange, ranges for a columnrange — sourced there
@@ -309,8 +310,8 @@ renderers. Bubble charts also take a `size_col=` naming the numeric column that
 drives each marker's area (required for `bubble`, raising `ValueError` if
 omitted; ignored by the other types), threaded through the same renderers,
 sankey charts a `target_col=` naming the destination-node column (required for
-both node-link types — `sankey` and `networkgraph`, which share one `target_col`,
-raising `ValueError` if omitted or equal to `x_col`; likewise
+all three node-link types — `sankey`, `dependencywheel` and `networkgraph`, which share one
+`target_col`, raising `ValueError` if omitted or equal to `x_col`; likewise
 ignored by the other types), threaded the same way — and `networkgraph` reads *only* that
 plus `x_col`, taking an **empty** `y_cols` (it is unweighted), the one type that does, as the
 gauge family is the only one taking a `None` `x_col`, sunburst charts a
@@ -394,6 +395,42 @@ default node label and each link carries its weight as a *per-link* `dataLabels`
 — gated on link count like heatmap's cell labels — because highcharts-core drops
 `plotOptions.sankey.dataLabels.nodeFormat` and the `format` that survives there
 would label the links with the node format and blank the node names),
+`dependencywheel` (a circular sankey, and the one type that shares another's build branch
+without being its *inverted* twin the way pyramid is funnel's — it is sankey drawn on a **ring**.
+It reads the identical weighted node-link data (`x_col` source, `target_col`, `y_cols[0]` weight,
+`{from, to, weight}` links) because in highcharts-core `SankeySeries` is literally a **subclass**
+of `DependencyWheelSeries` — both carry `WeightedConnectionData` — so the link building, the
+drop-a-row-missing-any-of-three policy, the node chaining and the node/link tooltips (the same
+`plotOptions[type].tooltip.nodeFormat` that a top-level one is silently dropped in favour of) are
+byte-identical to sankey's. The **one** thing NOT shared is sankey's per-link weight labels, and it
+was found only by **rendering** (the waterfall-vs-column/bar lesson, one type family over): on a
+sankey each label sits neatly on its link, but on a ring the links anchor on the arc and Highcharts
+stacks their labels in a clipped, overlapping column off the LEFT of the wheel (both render modes),
+so the wheel **omits** them and shows weight by ribbon width plus the hover/node tooltip — the
+canonical dependency-wheel presentation — while keeping the node NAMES, which render cleanly on the
+ring for both. So the two still share **one** build branch, keyed by `chart_type` (that per-link
+label loop the lone `chart_type in SANKEY_TYPES` guard inside it) — the funnel/pyramid "differ only
+in the type string" pattern, *not* the sankey/networkgraph split, since networkgraph genuinely
+differs in several places (unweighted, no weight label, `contrast` node labels, no border hook)
+while the wheel differs in the type string, its layout and that single label line. `WEIGHTED_NODE_LINK_TYPES = SANKEY_TYPES + DEPENDENCYWHEEL_TYPES` names the shared pair at
+the three sites where they are identical modulo the type string — the build branch, the
+`count_marks` rule (sankey's `label_ok & target_ok & value_ok`, so the KPI reads the shared
+**"Flows"**) and the `_themed` `borderColor` dissolve — while the wider `NODE_LINK_TYPES` (now
+three) binds the guards all node-link types share (target required, source ≠ target). It reuses
+sankey's `target_col` — a link is a link, no new kwarg, so the cache layer is untouched
+(networkgraph's win) — and resolves **both** `modules/dependency-wheel` **and** `modules/sankey`
+from `chart.type` alone (the wheel builds on sankey's diagram infrastructure), *not*
+`highcharts-more`, the plausible guess the round-trip corrects. Those two modules are the one place
+this type touches the interactive path specially: `dependency-wheel.js` **extends** the sankey
+series, so it must load AFTER `sankey.js`, but `get_script_tags` emits them REVERSED (it walks the
+chart's `plotOptions` before its `series`, so the dependent is seen first). Loaded first it throws
+and Highcharts reports the series missing (**error #17**), blanking the iframe while the export
+server renders the PNG regardless — the `_LIGHT_COLOR_SCHEME_CSS` two-render-modes-must-agree rule,
+found only by rendering in a browser. `build_chart_html` fixes it with `_order_script_tags`
+(`_MODULE_LOAD_ORDER`), which reorders the tag lines so a prerequisite precedes its dependent;
+pinned by asserting the ORDER in the emitted HTML, not just the presence. Best read beside the sankey energy
+sample: that flow is a layered DAG whose source and target sets barely overlap, while a wheel is
+for the symmetric, cyclic matrix where every node is both an origin and a destination),
 `networkgraph` (a force-directed graph, sankey's cousin — rows are edges of a graph,
 read as `{from, to}` dicts over the same two node columns (`x_col` and `target_col`,
 reused from sankey — no new kwarg, so the cache layer is untouched), but **unweighted**,
@@ -988,7 +1025,13 @@ dicts over two node columns — the `keys`-plus-arrays form highcharts-core
 rejects outright — rows missing any of the three dropped, its per-link weight
 labels gated on link count, its node/link borders themed for dark mode while the
 labels ride Highcharts' `contrast` default, and resolving the `modules/sankey`
-module), boxplot's aggregated Tukey distributions (raw observations grouped by a
+module), dependencywheel's shared-branch reuse (the same `{from, to, weight}` links as sankey,
+pinned to emit `chart.type` `dependencywheel` under its OWN `plotOptions` key — not left under
+`sankey` — with the node tooltip surviving there as sankey's does; resolving **both**
+`modules/dependency-wheel` and `modules/sankey` from `chart.type` alone and *not* `highcharts-more`;
+sharing sankey's `count_marks` rule (proven in the count-vs-built sweep) and its dark border
+dissolve; the two node-link guards; and the migration sample where every region is both origin and
+destination), boxplot's aggregated Tukey distributions (raw observations grouped by a
 repeating `x_col` into positional `[low, q1, median, q3, high]` 5-arrays in
 first-appearance order; the outliers split into a linked scatter series that is
 emitted only when they exist; the `iqr == 0` degeneracies — a one-observation group,
@@ -1108,7 +1151,8 @@ series-level `radius` is — the *surviving* half of a pair whose point-level ha
 the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, treemap,
-sankey's Target (to) control (and networkgraph reusing it while drawing *no Y control at all*,
+sankey's Target (to) control (and dependencywheel reusing it identically, its KPI reading
+**Flows** like sankey's; and networkgraph reusing it while drawing *no Y control at all*,
 its KPI reading **Links** over an empty selection), sunburst's Parent control, xrange's End
 control, columnrange's **High (top)** control (over a renamed **Low (bottom)** single-select Y,
 its High picker offering only numeric columns and surviving a Low change via its constant index,

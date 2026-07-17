@@ -177,8 +177,9 @@ def _size_for(chart_type: str) -> str | None:
 
 
 def _target_for(chart_type: str) -> str | None:
-    """The target column those same sweeps pass for the node-link cases: BOTH sankey and
-    networkgraph require one (the far end of every edge, reusing one ``target_col``); other
+    """The target column those same sweeps pass for the node-link cases: sankey,
+    dependencywheel and networkgraph all require one (the far end of every edge, reusing one
+    ``target_col``); other
     types ignore it, so it's None. The
     ``_size_for`` idea, for the other types with a required companion column — the
     sweeps assert invariants that must hold for *every* type (it builds, it carries
@@ -483,7 +484,9 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
 
-@pytest.mark.parametrize("chart_type", ["treemap", "sankey", "networkgraph"])
+@pytest.mark.parametrize(
+    "chart_type", ["treemap", "sankey", "dependencywheel", "networkgraph"]
+)
 def test_count_marks_casts_every_mask_not_just_the_label_one(chart_type):
     # The types that AND their masks together (`label_ok & value_ok`, plus sankey's/
     # networkgraph's `target_ok` — networkgraph ANDs `label_ok & target_ok` with no value mask,
@@ -538,6 +541,7 @@ def test_row_less_frame_with_a_numeric_x_also_draws_an_empty_chart():
         "funnel",
         "pyramid",
         "sankey",
+        "dependencywheel",
         "boxplot",
         "waterfall",
         "sunburst",
@@ -639,6 +643,9 @@ def test_count_marks_matches_the_built_series(chart_type):
             "funnel": 2,
             "pyramid": 2,
             "sankey": 1,
+            # Dependencywheel shares sankey's rule and build exactly — same 4 rows dropped
+            # (the NaN weight, NaN source, inf weight and NaN target), leaving one link.
+            "dependencywheel": 1,
             "boxplot": 4,
             "waterfall": 5,
             "sunburst": 4,
@@ -1899,6 +1906,193 @@ def test_sankey_numeric_node_labels_coerce_to_strings():
         {"from": "1", "to": "10", "weight": 1.0},
         {"from": "2", "to": "20", "weight": 2.0},
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Dependencywheel (a circular sankey: weighted links around a ring) — SHARES
+# sankey's build branch, keyed by chart_type. So the {from, to, weight} links, the
+# drop policy, the per-link weight labels and the node/link tooltips are the ones the
+# sankey block above already pins; these tests pin only what is DISTINCT: the
+# chart.type / plotOptions key the branch parametrizes, and the TWO modules the wheel
+# resolves (modules/dependency-wheel PLUS modules/sankey) where sankey pulls one. In
+# highcharts-core, DependencyWheelSeries is literally SankeySeries' parent class.
+# --------------------------------------------------------------------------- #
+def test_dependencywheel_builds_weighted_links_like_sankey():
+    # The shared branch must emit chart.type 'dependencywheel' (not 'sankey') while
+    # producing the identical {from, to, weight} links — a row missing any of the three is
+    # dropped exactly as sankey's is (an invisible zero-width link otherwise). No colorAxis
+    # and no axes: a wheel colors its ribbons categorically from the palette (like pie /
+    # treemap / sankey) and, being a diagram, has no axes to draw.
+    df = pd.DataFrame(
+        {
+            "src": ["Coal", "Gas", "Wind"],
+            "dst": ["Power", "Power", "Power"],
+            "w": [42.0, float("nan"), 26.0],
+        }
+    )
+    opts = build_options(df, "dependencywheel", "src", ["w"], target_col="dst")
+    assert opts["chart"]["type"] == "dependencywheel"
+    assert opts["series"][0]["name"] == "w"
+    assert _links(opts) == [
+        {"from": "Coal", "to": "Power", "weight": 42.0},
+        {"from": "Wind", "to": "Power", "weight": 26.0},
+    ]
+    # A wheel prints NO per-link weight label — the ONE place it diverges from sankey beyond the
+    # type string, found by rendering: on the ring Highcharts stacks link labels in a clipped
+    # column off the left. The node NAMES still render, via the series-level dataLabels.
+    assert all("dataLabels" not in link for link in opts["series"][0]["data"])
+    assert opts["plotOptions"]["dependencywheel"]["dataLabels"] == {"enabled": True}
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    assert "colorAxis" not in opts
+    assert "xAxis" not in opts and "yAxis" not in opts
+
+
+def test_dependencywheel_plot_options_land_under_its_own_key():
+    # The one place the shared branch diverges from sankey: `chart.type` and the
+    # `plotOptions` key must key on 'dependencywheel', not 'sankey' — a copy-paste leaving
+    # them under 'sankey' would emit a block Highcharts ignores. The node tooltip (throughput
+    # of a hovered node) rides plotOptions[type].tooltip.nodeFormat, and — as with sankey — a
+    # TOP-LEVEL tooltip.nodeFormat is silently dropped, so it must live here; only the emitted
+    # JS proves it survived (verified on the round-trip that the wheel's nodeFormat does).
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0]})
+    opts = build_options(df, "dependencywheel", "src", ["w"], target_col="dst")
+    assert "sankey" not in opts["plotOptions"]  # not left under the wrong key
+    assert "nodeFormat" not in opts["tooltip"]  # would vanish if it were here
+    assert (
+        opts["plotOptions"]["dependencywheel"]["tooltip"]["nodeFormat"]
+        == "{point.name}: <b>{point.sum}</b>"
+    )
+    js = make_chart(
+        df, "dependencywheel", "src", ["w"], target_col="dst"
+    ).to_js_literal()
+    assert js and "nodeFormat" in js and "point.sum" in js
+
+
+def test_dependencywheel_serializes_and_pulls_in_both_modules():
+    # End to end, and the type's headline serialization fact: a dependencywheel resolves
+    # modules/dependency-wheel.js AND modules/sankey.js — BOTH, from chart.type alone (the
+    # wheel builds on sankey's diagram infrastructure) — and NOT highcharts-more (the
+    # plausible guess the round-trip corrects, as it does for columnrange/funnel). The link
+    # keys and the per-link weight label must reach the JS too, since highcharts-core silently
+    # discards any key its typed point model doesn't recognize.
+    from highcharts_builder import make_chart
+
+    df = pd.DataFrame({"src": ["A", "B"], "dst": ["C", "C"], "w": [1.0, 2.0]})
+    chart = make_chart(df, "dependencywheel", "src", ["w"], target_col="dst")
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'dependencywheel'" in js
+    assert "from: 'A'" in js and "to: 'C'" in js and "weight: 1.0" in js
+    # No per-link weight label on a wheel (they misplace on the ring), unlike sankey's JS.
+    assert "format: '{point.weight}'" not in js
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/dependency-wheel.js" in tags
+    assert "modules/sankey.js" in tags  # the wheel builds on sankey's module
+    assert "highcharts-more" not in tags  # the round-trip corrects the plausible guess
+
+
+def test_dependencywheel_html_loads_sankey_before_dependency_wheel():
+    # THE interactive-mode regression pin. modules/dependency-wheel.js EXTENDS the sankey series,
+    # so it must load AFTER modules/sankey.js — but highcharts-core's get_script_tags emits them
+    # REVERSED (it walks the chart's plotOptions before its series, so the dependent module is
+    # seen first). Loaded first, dependency-wheel.js throws "Cannot read properties of undefined
+    # (reading 'prototype')" and Highcharts reports the series missing (error #17), leaving a BLANK
+    # iframe while the export-server PNG renders fine — the two-render-modes-must-agree bug that
+    # build_chart_html fixes via _order_script_tags. So pin the ORDER in the emitted HTML, not just
+    # the presence the test above covers: sankey's tag must precede the wheel's. Verified by
+    # rendering in a real browser (the console showed error #17 before the fix, nothing after).
+    from highcharts_builder import build_chart_html
+
+    df = pd.DataFrame({"src": ["A", "B"], "dst": ["C", "C"], "w": [1.0, 2.0]})
+    html = build_chart_html(df, "dependencywheel", "src", ["w"], target_col="dst")
+    assert "modules/sankey.js" in html and "modules/dependency-wheel.js" in html
+    assert html.index("modules/sankey.js") < html.index("modules/dependency-wheel.js")
+
+
+def test_order_script_tags_puts_a_prerequisite_before_its_dependent():
+    # The pure reorder behind the fix above. Given the dependent's tag AHEAD of its prerequisite's
+    # (get_script_tags' actual output for a dependencywheel), it moves the prerequisite in front;
+    # it is a no-op when the pair is absent or already ordered, so it can't disturb a plain sankey
+    # (no dependency-wheel tag) or any other type, and it is idempotent.
+    from highcharts_builder import _order_script_tags
+
+    reversed_tags = (
+        '<script src="x/highcharts.js"></script>\n'
+        '<script src="x/modules/dependency-wheel.js"></script>\n'
+        '<script src="x/modules/sankey.js"></script>'
+    )
+    out = _order_script_tags(reversed_tags).split("\n")
+    assert out[0].endswith('highcharts.js"></script>')  # untouched
+    assert "modules/sankey.js" in out[1]  # prerequisite moved ahead of the dependent
+    assert "modules/dependency-wheel.js" in out[2]
+
+    # Idempotent on already-ordered input, and a no-op on a lone sankey tag (no dependent present).
+    assert _order_script_tags("\n".join(out)) == "\n".join(out)
+    lone_sankey = '<script src="x/modules/sankey.js"></script>'
+    assert _order_script_tags(lone_sankey) == lone_sankey
+
+
+def test_order_script_tags_raises_when_a_dependent_lacks_its_prerequisite():
+    # A dependent module present WITHOUT its prerequisite can't be saved by reordering — the chart
+    # pulled a module that extends one it did not, so the interactive iframe would blank. Raise
+    # loudly instead of silently no-opping (which is how a renamed module or a drifted tag format
+    # would otherwise re-introduce the very blank-iframe bug this helper exists to prevent).
+    from highcharts_builder import _order_script_tags
+
+    orphaned = (
+        '<script src="x/highcharts.js"></script>\n'
+        '<script src="x/modules/dependency-wheel.js"></script>'  # no modules/sankey.js
+    )
+    with pytest.raises(ValueError, match="prerequisite"):
+        _order_script_tags(orphaned)
+
+
+def test_dependencywheel_requires_a_target_column():
+    # A wheel without its target column has only one end per link — mandatory, a ValueError,
+    # exactly as sankey's is (both bind the shared NODE_LINK_TYPES guard).
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0]})
+    with pytest.raises(ValueError):
+        build_options(df, "dependencywheel", "src", ["w"])  # no target_col
+
+
+def test_dependencywheel_rejects_source_as_target():
+    # One column can't name both ends of a link — every row a self-loop. The shared
+    # node-link guard, not the category-x x-in-y rule (target_col is never among y_cols).
+    df = pd.DataFrame({"src": ["A"], "w": [1.0]})
+    with pytest.raises(ValueError):
+        build_options(df, "dependencywheel", "src", ["w"], target_col="src")
+
+
+def test_dependencywheel_light_mode_shape():
+    # Pin the light-mode choices nothing else guards: the link tooltip naming both ends and
+    # the disabled legend (each node is labelled on the ring, so a legend would only repeat
+    # them). Light mode injects no dark chrome, and the border hook must NOT fire (dark-only).
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0]})
+    opts = build_options(df, "dependencywheel", "src", ["w"], target_col="dst")
+    assert opts["legend"]["enabled"] is False
+    assert opts["tooltip"]["headerFormat"] == ""
+    assert opts["tooltip"]["pointFormat"] == "src → dst: <b>{point.weight}</b>"
+    # The border hook is dark-only, so light mode leaves no borderColor. (Key-correctness — that
+    # the block lands under 'dependencywheel', not a stale 'sankey' — is pinned explicitly by
+    # test_dependencywheel_plot_options_land_under_its_own_key, so it is not re-asserted here.)
+    assert "borderColor" not in opts["plotOptions"]["dependencywheel"]
+
+
+def test_dependencywheel_dark_mode_dissolves_borders_under_its_own_key():
+    # The border hook is keyed on the type, so in dark mode it must dissolve the border under
+    # plotOptions.dependencywheel (not a stale 'sankey' key), exactly as sankey's does under
+    # its own. The node/link labels ride Highcharts' `contrast` default (no color set), and
+    # the tooltip box is themed for dark mode.
+    df = pd.DataFrame({"src": ["A"], "dst": ["B"], "w": [1.0]})
+    opts = build_options(
+        df, "dependencywheel", "src", ["w"], target_col="dst", dark=True
+    )
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["plotOptions"]["dependencywheel"]["borderColor"] == "#0f172a"
+    assert "sankey" not in opts["plotOptions"]
+    assert "color" not in opts["plotOptions"]["dependencywheel"]["dataLabels"]
+    assert opts["tooltip"]["backgroundColor"] == "#0f172a"
 
 
 # --------------------------------------------------------------------------- #
@@ -5242,6 +5436,29 @@ def test_energy_flow_sample_builds_a_sankey_chart():
     assert generated == consumed == 150.0
 
 
+def test_regional_migration_sample_builds_a_dependencywheel_chart():
+    # Ties the new dependencywheel sample to its type end to end: two node columns plus a
+    # numeric weight produce one link per row. It is the MIRROR of the sankey energy sample —
+    # where that is a layered flow (its source and target sets barely overlap), here EVERY
+    # region is BOTH an origin and a destination: the symmetric, cyclic matrix a wheel is
+    # built for, and a straight sankey would draw as a tangle of back-crossing links.
+    from sample_data import _regional_migration
+
+    df = _regional_migration()
+    opts = build_options(
+        df, "dependencywheel", "origin", ["people"], target_col="destination"
+    )
+    assert opts["chart"]["type"] == "dependencywheel"
+    assert opts["series"][0]["name"] == "people"
+    links = _links(opts)
+    assert len(links) == len(df)  # every row is a drawable link
+    assert links[0] == {"from": "North", "to": "South", "weight": 1200.0}
+    origins = {link["from"] for link in links}
+    destinations = {link["to"] for link in links}
+    # The wheel's defining shape: every region is BOTH an origin and a destination.
+    assert origins == destinations == {"North", "South", "East", "West", "Central"}
+
+
 def test_service_dependencies_sample_builds_a_networkgraph_chart():
     # Ties the new networkgraph sample to its intended type end to end: two node columns and
     # NO value column produce one unweighted edge per row. Like the sankey sample (and unlike
@@ -5533,6 +5750,41 @@ def test_app_sankey_kpi_shows_flows(app):
     from sample_data import SAMPLES
 
     app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    assert metrics["Flows"] == f"{len(default_df):,}"
+
+
+def test_app_switch_to_dependencywheel_shows_target_control_and_regenerates_config(app):
+    # Dependencywheel is sankey's circular twin, so switching to it reveals the SAME
+    # "Target (to)" selectbox and single-select "Flow value (weight)" Y (the node-link controls,
+    # keyed on NODE_LINK_TYPES) and drives the config through the shared target_col plumbing —
+    # but the emitted `type: 'dependencywheel'` proves the WHEEL branch, not sankey's, produced
+    # it. The source==target guard and the keyless Target's survival are shared code paths,
+    # already pinned on sankey. Network-free.
+    assert not any(
+        sb.label == "Target (to)" for sb in app.selectbox
+    )  # absent by default
+    app.selectbox[1].set_value("dependencywheel").run()  # Chart type -> dependencywheel
+    assert not app.exception
+    assert any(sb.label == "Target (to)" for sb in app.selectbox)  # now present
+    assert any(sb.label == "Flow value (weight)" for sb in app.selectbox)
+    assert not app.pills  # single-select Y (the weight), not the multi-select pills
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'dependencywheel'" in app.code[0].value
+
+
+def test_app_dependencywheel_kpi_shows_flows(app):
+    # A dependencywheel is one series of links like sankey, so the KPI swaps "Series plotted"
+    # (which would read a bare 1) for "Flows" — sharing sankey's label because it counts the
+    # same {from, to, weight} links. The default dataset has no missing values, so every row
+    # becomes a flow.
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("dependencywheel").run()  # Chart type -> dependencywheel
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics

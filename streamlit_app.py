@@ -24,6 +24,7 @@ from highcharts_builder import (
     NETWORKGRAPH_TYPES,
     NODE_LINK_TYPES,
     SUPPORTED_TYPES,
+    WEIGHTED_NODE_LINK_TYPES,
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
     build_chart_png,
@@ -73,6 +74,11 @@ MARK_METRICS = {
     "funnel": "Stages",
     "pyramid": "Stages",
     "sankey": "Flows",
+    # Dependencywheel is sankey's circular twin — the same single weighted-link series, so its
+    # default "Series plotted" would misreport as a bare 1 exactly as sankey's does. Its marks are
+    # the same {from, to, weight} links, so it shares sankey's count_marks rule AND its "Flows"
+    # label: the KPI counts the same thing for the flow and the ring.
+    "dependencywheel": "Flows",
     # Networkgraph is the OTHER single-series node-link type, so — like sankey — its default
     # "Series plotted" would misreport its one edge-series as a bare 1. Its marks are the edges,
     # counted by count_marks (one per drawable row, both node ends present). It needs this entry
@@ -290,6 +296,9 @@ with st.sidebar:
             "- **sankey** — a Source and a Target column of node names plus a "
             "numeric flow value; each link's width shows how much moves from one "
             "node to the next\n"
+            "- **dependencywheel** — the same Source, Target and flow value as sankey, "
+            "drawn as a circle: nodes sit on a ring and each curved ribbon's width shows "
+            "the flow between them (best when nodes are both sources and targets)\n"
             "- **networkgraph** — a Source and a Target column of node names (no value "
             "column); each row is one edge, laid out as a force-directed graph of who "
             "connects to whom\n"
@@ -366,9 +375,12 @@ with st.sidebar:
         # re-listed literal) so the family can't drift between builder and app — the
         # X_IN_Y_GUARD_TYPES / GAUGE_TYPES rule.
         x_label, y_label, multi = "Stage labels", "Stage values", False
-    elif chart_type == "sankey":
-        # Node-link flow: two label columns naming a link's ends (the X selectbox
-        # plus the Target one below) and one numeric column weighting it.
+    elif chart_type in WEIGHTED_NODE_LINK_TYPES:
+        # The two WEIGHTED node-link types — sankey and its circular twin dependencywheel — read
+        # the identical shape: two label columns naming a link's ends (the X selectbox plus the
+        # Target one below) and one numeric column weighting it. Keyed on the shared constant (not
+        # a re-listed literal) so the family can't drift between builder and app, exactly as
+        # FUNNEL_TYPES / NODE_LINK_TYPES are.
         x_label, y_label, multi = "Source (from)", "Flow value (weight)", False
     elif chart_type == "networkgraph":
         # Sankey's cousin: two label columns naming an edge's ends (the X selectbox plus the
@@ -445,8 +457,9 @@ with st.sidebar:
 
     # The node-link types' second node column, sitting next to Source so the two ends of a link
     # read as a pair. Drawn from every column, not numeric_cols like bubble's
-    # Size (Z): a node name is a label. Shown for BOTH node-link types — sankey and networkgraph,
-    # which reuse one Target control and one `target_col` (None otherwise, and
+    # Size (Z): a node name is a label. Shown for ALL THREE node-link types — sankey, its circular
+    # twin dependencywheel, and networkgraph — which reuse one Target control and one `target_col`
+    # (None otherwise, and
     # ignored by the other builders). The index is a CONSTANT for the same reason
     # the Y default below is: these widgets are keyless, so Streamlit folds it into
     # their identity — the tempting "the column after Source" default would re-mint
