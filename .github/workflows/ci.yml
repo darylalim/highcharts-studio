@@ -121,7 +121,6 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          current="$($PY version)"
           # The latest release is the watermark; anything above it still needs one.
           latest="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
           to_cut="$($PY to-release "$latest")"
@@ -130,6 +129,9 @@ jobs:
             echo "Nothing above the latest release (${latest:-none}) — nothing to cut."
             exit 0
           fi
+
+          # The current (highest) version — read only now that there's work to do.
+          current="$($PY version)"
 
           # to_cut is oldest-first; version strings are whitespace-free tokens.
           for version in $to_cut; do
@@ -143,12 +145,14 @@ jobs:
             notes="$RUNNER_TEMP/notes-$tag.md"
             $PY notes "$version" > "$notes"
 
-            # Tag the commit that declares this version: HEAD for the current one
-            # (so its post-bump commits are in the release), else the commit that
-            # first introduced the bump — either way the tag's one checkable fact
-            # holds, that its commit declares this version in pyproject.toml.
+            # The current (highest) version is tagged at HEAD (so its post-bump
+            # commits ride along) and marked Latest; an older one is tagged at the
+            # commit that first introduced its bump and is not Latest — either way
+            # the tag's one checkable fact holds, that its commit declares this
+            # version in pyproject.toml.
             if [ "$version" = "$current" ]; then
               commit="$GITHUB_SHA"
+              latest_flag=true
             else
               commits="$(git log --reverse --format=%H \
                 -S "version = \"$version\"" -- pyproject.toml)"
@@ -157,6 +161,7 @@ jobs:
                 echo "::error::No commit declares version $version in pyproject.toml."
                 exit 1
               fi
+              latest_flag=false
             fi
 
             # Annotated tag (matching the v0.7.0–v0.11.0 convention), created only
@@ -167,8 +172,6 @@ jobs:
               git push origin "$tag"
             fi
 
-            # Only the current (highest) version is marked Latest.
-            if [ "$version" = "$current" ]; then latest_flag=true; else latest_flag=false; fi
             gh release create "$tag" \
               --title "$tag" \
               --notes-file "$notes" \

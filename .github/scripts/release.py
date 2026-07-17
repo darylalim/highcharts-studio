@@ -83,56 +83,44 @@ def versions_to_release(changelog_text: str, latest_released: str | None) -> lis
     ``latest_released`` is the latest release's tag (e.g. ``"v0.11.0"``, the
     leading ``v`` optional) or empty/``None`` when the repo has no releases yet.
     Because the changelog is newest-first, "newer than the watermark" is simply
-    "listed above it", so this walks from the top and stops at the watermark,
-    returning what it collected oldest-first (so a caller creates them in
-    ascending order and marks only the newest ``--latest``).
+    "listed above it" — the prefix up to the watermark, returned oldest-first so a
+    caller creates them in ascending order and marks only the newest ``--latest``.
 
     With no watermark it returns just the newest version — the conservative choice
     that matches the old single-version behaviour rather than back-filling the
     entire history (this repo's ``0.1.0``–``0.6.0`` carry tags but deliberately no
     releases; the watermark keeps the job from resurrecting them).
     """
-    versions = changelog_versions(changelog_text)
-    if not versions:
-        return []
+    versions = changelog_versions(changelog_text)  # newest-first
     watermark = (latest_released or "").lstrip("v")
     if not watermark:
-        return [versions[0]]
-    newer: list[str] = []
-    for v in versions:
-        if v == watermark:
-            break
-        newer.append(v)
-    return list(reversed(newer))
+        return versions[:1]
+    cut = versions.index(watermark) if watermark in versions else len(versions)
+    return versions[:cut][::-1]
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI for the release job.
 
-    ``version``            prints ``pyproject.toml``'s current version.
-    ``notes [VERSION]``    prints VERSION's (default: current) changelog section.
-    ``to-release TAG``     prints the versions above the latest-release TAG,
-                           oldest-first, one per line.
+    ``version``          prints ``pyproject.toml``'s current version.
+    ``notes VERSION``    prints VERSION's changelog section.
+    ``to-release TAG``   prints the versions above the latest-release TAG,
+                         oldest-first, one per line.
     """
-    args = list(sys.argv[1:] if argv is None else argv)
+    args = sys.argv[1:] if argv is None else argv
     cmd = args[0] if args else ""
     if cmd == "version" and len(args) == 1:
         print(read_version((ROOT / "pyproject.toml").read_text()))
         return 0
-    if cmd == "notes" and len(args) in (1, 2):
-        version = (
-            args[1]
-            if len(args) == 2
-            else read_version((ROOT / "pyproject.toml").read_text())
-        )
-        print(extract_release_notes((ROOT / "CHANGELOG.md").read_text(), version))
+    if cmd == "notes" and len(args) == 2:
+        print(extract_release_notes((ROOT / "CHANGELOG.md").read_text(), args[1]))
         return 0
     if cmd == "to-release" and len(args) == 2:
         for v in versions_to_release((ROOT / "CHANGELOG.md").read_text(), args[1]):
             print(v)
         return 0
     print(
-        "usage: release.py {version | notes [VERSION] | to-release LATEST_TAG}",
+        "usage: release.py {version | notes VERSION | to-release LATEST_TAG}",
         file=sys.stderr,
     )
     return 2

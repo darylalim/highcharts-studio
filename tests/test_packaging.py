@@ -36,27 +36,20 @@ version bump, a section renamed out from under the table of contents, or a
 version bumped without cutting a changelog section all fail fast here.
 """
 
-import importlib.util
 import re
 import tomllib
 from pathlib import Path
 
+from conftest import load_script
+
 ROOT = Path(__file__).resolve().parent.parent
 
-
-def _load_release():
-    """Import ``.github/scripts/release.py`` — the canonical CHANGELOG parser, so
-    the changelog-version test reuses its heading logic instead of re-encoding the
-    ``## [x.y.z]`` regex (which would give the format a second home to drift in)."""
-    path = ROOT / ".github" / "scripts" / "release.py"
-    spec = importlib.util.spec_from_file_location("_release_for_packaging", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-_release = _load_release()
+# The release script is the canonical CHANGELOG parser, reused here so the
+# changelog-version test doesn't re-encode the ``## [x.y.z]`` heading regex (which
+# would give the format a second home to drift in).
+_release = load_script(
+    ROOT / ".github" / "scripts" / "release.py", "_release_for_packaging"
+)
 
 
 def _project_metadata() -> dict:

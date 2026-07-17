@@ -252,9 +252,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   — main pushes serialize instead of cancelling, so a release job can't be killed
   mid-run and strand a pushed tag with no release.
 - `.github/scripts/release.py` — the pure, stdlib-only reader CI's `release` job
-  calls: `version` prints `pyproject.toml`'s version; `notes [VERSION]` prints a
-  changelog section (stripped, raising if absent or empty so a release is never cut
-  blank); `to-release LATEST_TAG` prints, oldest-first, the `CHANGELOG.md` versions
+  calls: `version` prints `pyproject.toml`'s version; `notes VERSION` prints that
+  version's changelog section (stripped, raising if absent or empty so a release is
+  never cut blank); `to-release LATEST_TAG` prints, oldest-first, the `CHANGELOG.md`
+  versions
   above the latest-release watermark (just the current version when the repo has no
   releases, so it never back-fills the deliberately release-less `0.1.0`–`0.6.0`
   tags). It only *reads* facts that already live in `pyproject.toml`/`CHANGELOG.md`

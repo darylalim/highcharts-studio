@@ -19,25 +19,14 @@ The script lives outside any importable package, so it's loaded by file path via
 ``if __name__ == "__main__"`` guard, so there are no import side effects).
 """
 
-import importlib.util
 from pathlib import Path
 
 import pytest
+from conftest import load_script
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / ".github" / "scripts" / "release.py"
 
-
-def _load():
-    """Import ``.github/scripts/release.py`` by file path."""
-    spec = importlib.util.spec_from_file_location("_release", SCRIPT)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-release = _load()
+release = load_script(ROOT / ".github" / "scripts" / "release.py", "_release")
 
 # A miniature CHANGELOG in the repo's real shape: a prose preamble (which must not
 # be mistaken for a section), then reverse-chronological ``## [x.y.z]`` entries,
@@ -88,16 +77,11 @@ def test_changelog_versions_ignores_prose_and_non_semver_headings():
 # extract_release_notes
 # --------------------------------------------------------------------------- #
 def test_extract_release_notes_is_bounded_by_its_two_headings():
-    notes = release.extract_release_notes(SAMPLE, "0.10.0")
-    # Own body, verbatim, including the sub-headings.
-    assert notes.startswith("### Added")
-    assert "columnrange." in notes
-    assert "### Notes" in notes
-    assert "a measured note." in notes
-    # No bleed from the newer section above it...
-    assert "funnel and pyramid" not in notes
-    # ...nor into the older one below it.
-    assert "older stuff" not in notes
+    # Exact match pins the whole body verbatim (sub-headings included) and, being
+    # exact, proves no bleed from the newer section above or the older one below.
+    assert release.extract_release_notes(SAMPLE, "0.10.0") == (
+        "### Added\n\n- columnrange.\n\n### Notes\n\n- a measured note."
+    )
 
 
 def test_extract_release_notes_last_section_runs_to_eof():

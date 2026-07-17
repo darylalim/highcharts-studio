@@ -27,7 +27,6 @@ via ``importlib``; importing only defines functions (the work is behind an
 ``if __name__ == "__main__"`` guard), so it has no side effects.
 """
 
-import importlib.util
 import io
 import json
 import subprocess
@@ -35,6 +34,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import load_script
 
 ROOT = Path(__file__).resolve().parent.parent
 HOOKS_DIR = ROOT / ".claude" / "hooks"
@@ -42,13 +42,7 @@ HOOKS_DIR = ROOT / ".claude" / "hooks"
 
 def _load(name: str):
     """Import a hook script from ``.claude/hooks/<name>.py`` by file path."""
-    spec = importlib.util.spec_from_file_location(
-        f"_hook_{name}", HOOKS_DIR / f"{name}.py"
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_script(HOOKS_DIR / f"{name}.py", f"_hook_{name}")
 
 
 guard = _load("guard_paths")
