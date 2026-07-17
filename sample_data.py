@@ -613,6 +613,83 @@ def _temperature_range() -> pd.DataFrame:
     )
 
 
+def _forecast_range() -> pd.DataFrame:
+    """A product's projected monthly active users as a low/high FORECAST BAND — one row per month,
+    each a low and a high estimate (thousands of MAU).
+
+    Tailored to arearange, and deliberately NOT another temperature range: it is the mirror of
+    ``_temperature_range`` on the axis that matters, which is not the data shape (both are a low and
+    a high per category) but the USE. A record-temperature range is a set of INDEPENDENT monthly
+    facts, so columnrange draws it as separate bars. A forecast is a CONTINUOUS estimate that
+    tightens or widens as it runs, so its natural shape is a band you read for its OUTLINE — the
+    uncertainty cone — which is exactly what an arearange draws and what a row of discrete bars
+    cannot show. Reading this sample beside the temperature range is the fastest way to see the
+    columnrange/arearange split: same two magnitude columns, but one is a set of bars and the other
+    a shape over time.
+
+    The band WIDENS month over month (``low`` climbs slowly while ``high`` climbs faster), because
+    the point of the type is the outline and the point of a forecast is that it grows less certain
+    the further out it runs — so the sample is built to SHOW the cone opening. Every ``low`` sits
+    below its ``high`` (a clean band), like the temperature sample and for the same reason: the
+    headline is "a continuous min–max band" and the demo is meant to draw it cleanly; the
+    missing-slot (band break) and inverted-range edge cases are the tests' job, not a demo's.
+
+    ``month`` leads with the category column rather than a value, like every sample here and for the
+    same load-bearing reason: the app opens on ``line`` with the first column as X, so a numeric
+    first column would trip the x-in-y guard the instant the dataset is selected. Both value columns
+    are genuine numbers, so the frame stays a good citizen for line/area/column and the no-numeric
+    gate has something to find. One estimate drawn in one hue: an arearange does not colour its band
+    by month, since the months are positions along the band, not separate kinds.
+    """
+    return pd.DataFrame(
+        {
+            "month": [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ],
+            # thousands of MAU: low climbs slowly, high faster, so the cone opens over the year.
+            "forecast_low": [
+                120,
+                128,
+                137,
+                145,
+                154,
+                162,
+                171,
+                180,
+                188,
+                197,
+                205,
+                214,
+            ],
+            "forecast_high": [
+                130,
+                142,
+                155,
+                168,
+                182,
+                196,
+                212,
+                228,
+                244,
+                262,
+                280,
+                300,
+            ],
+        }
+    )
+
+
 def _weekly_bookings() -> pd.DataFrame:
     """Weekly bookings by sales region — four teams, eight weeks of observations.
 
@@ -731,6 +808,7 @@ SAMPLES = {
     "Company headcount (sunburst)": _org_headcount,
     "Product release plan (xrange)": _release_plan,
     "Monthly temperature range (columnrange)": _temperature_range,
+    "Projected monthly active users (arearange)": _forecast_range,
     "Weekly bookings by region (solidgauge)": _weekly_bookings,
     "Server utilization (gauge)": _server_utilization,
 }

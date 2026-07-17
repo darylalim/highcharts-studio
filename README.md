@@ -74,6 +74,7 @@ theme, which you can toggle from Streamlit's settings menu.
 | `sunburst` | A hierarchy as concentric rings from a parent column and leaf values | Parent |
 | `xrange` | A Gantt-style timeline; bars span Start→End on named lanes (dates or numbers) | End |
 | `columnrange` | Floating bars, each spanning a Low→High per category (a min–max range) | High |
+| `arearange` | A continuous filled band spanning a Low→High per category (columnrange's area mirror) | High |
 | `solidgauge` | An activity gauge: each column reduced to one reading, drawn as an arc | Aggregation, Dial (no X) |
 | `gauge` | A needle per column on a drawn tick scale | Aggregation, Dial (no X) |
 

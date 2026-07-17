@@ -21,6 +21,7 @@ from highcharts_builder import (
     FUNNEL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
+    MAGNITUDE_RANGE_TYPES,
     NETWORKGRAPH_TYPES,
     NODE_LINK_TYPES,
     SUPPORTED_TYPES,
@@ -97,6 +98,13 @@ MARK_METRICS = {
     # per surviving category — a missing/inverted range keeps its slot as a null bar and still
     # counts (waterfall's rule without the appended total, so it never exceeds the row count).
     "columnrange": "Ranges",
+    # Arearange is columnrange's filled-band mirror — one continuous band, so its single series
+    # would misreport as a bare 1 exactly as columnrange's does. Its marks are the (low, high)
+    # POINTS the band is sampled at (one per surviving category, shared count_marks rule), so it
+    # is count-adaptive too. The noun differs from columnrange's "Ranges" deliberately: a band is
+    # ONE shape, so "Points" describes what is counted (its vertices) rather than implying N
+    # discrete ranges.
+    "arearange": "Points",
     # Gauge is deliberately ABSENT, and it is the first type whose absence is worth stating.
     # Its marks ARE its series — one ring per y column, and a column with no data keeps its ring
     # as a null rather than being dropped — so "Series plotted" is already literally the ring
@@ -327,6 +335,10 @@ with st.sidebar:
             "each category gets a bar floating from its low to its high (a min–max range). A "
             "row missing either end draws no bar but keeps its slot; an inverted range "
             "(high < low) still draws, spanning both values\n"
+            "- **arearange** — the same **Low** and **High** columns as columnrange, but drawn as "
+            "one continuous **filled band** between a low line and a high line (best when the X "
+            "axis is an ordered progression, e.g. a forecast band over time). A row missing either "
+            "end breaks the band there; an inverted range still draws\n"
             "- **solidgauge / gauge** — one mark per **numeric column**, each collapsed to a "
             "single number by the aggregation you choose (sum / mean / …), all read against one "
             "shared dial. There is **no X column**: a gauge has no labels, only readings. "
@@ -417,13 +429,16 @@ with st.sidebar:
         # HOW MUCH. Single-select, like every other extra-column type — a second start column
         # would be a second bar per row, which is a second chart.
         x_label, y_label, multi = "Lane / task labels", "Start", False
-    elif chart_type == "columnrange":
-        # A category X axis (the bars stand on it, drawn vertically — column/bar's shape), plus
-        # TWO magnitude columns: the Y control carries the bar's LOW (bottom) and the dedicated
-        # High selectbox below carries its top. Single-select Y like every other extra-column
-        # type — a second low column would be a second range per row, which is a second chart.
-        # Labelled "Low (bottom)" rather than a bare "Y" because a reader picking a value should
-        # be told which END of the range it becomes (xrange's Start/End reasoning, magnitudes).
+    elif chart_type in MAGNITUDE_RANGE_TYPES:
+        # A category X axis (the bars stand on it / the band runs along it — column/bar's shape),
+        # plus TWO magnitude columns: the Y control carries the LOW (bottom) and the dedicated High
+        # selectbox below carries the top. Shared by columnrange and its filled-band mirror
+        # arearange, keyed on the family constant (not a re-listed literal) so the two can't drift —
+        # the FUNNEL_TYPES / WEIGHTED_NODE_LINK_TYPES rule. Single-select Y like every other
+        # extra-column type — a second low column would be a second range per row, which is a
+        # second chart. Labelled "Low (bottom)" rather than a bare "Y" because a reader picking a
+        # value should be told which END of the range it becomes (xrange's Start/End reasoning,
+        # magnitudes).
         x_label, y_label, multi = "Category (X) axis", "Low (bottom)", False
     elif chart_type in GAUGE_TYPES:
         # The two types with NO X control at all (see the selectbox below): their marks are the
@@ -559,26 +574,28 @@ with st.sidebar:
             ),
         )
 
-    # Columnrange's second MAGNITUDE column, sitting right after Low so the two ends of a bar
-    # read as the pair they are (Category -> Low -> High). Drawn from numeric_cols, NOT coord_cols
-    # like xrange's End: a high is a value, not a coordinate, so it can never be a date and must be
-    # a plottable number — the "a coordinate is not a magnitude" distinction that kept this off
-    # xrange's `end_col` kwarg. The index is a CONSTANT, exactly as End's / Size's are: these
-    # widgets are keyless, so Streamlit folds `index` into their identity, and a default derived
-    # from the current Low would re-mint this widget and silently reset the user's High every time
-    # they changed Low. min() lands on the SECOND numeric column so it starts distinct from Low
-    # (which leads with the first) and clamps a single-column frame. Low == High is caught by the
-    # guard in the main panel.
+    # The magnitude-range family's second MAGNITUDE column, sitting right after Low so the two ends
+    # of a bar/band read as the pair they are (Category -> Low -> High). Shared by columnrange and
+    # its filled-band mirror arearange, keyed on the family constant. Drawn from numeric_cols, NOT
+    # coord_cols like xrange's End: a high is a value, not a coordinate, so it can never be a date
+    # and must be a plottable number — the "a coordinate is not a magnitude" distinction that kept
+    # this off xrange's `end_col` kwarg. The index is a CONSTANT, exactly as End's / Size's are:
+    # these widgets are keyless, so Streamlit folds `index` into their identity, and a default
+    # derived from the current Low would re-mint this widget and silently reset the user's High
+    # every time they changed Low. min() lands on the SECOND numeric column so it starts distinct
+    # from Low (which leads with the first) and clamps a single-column frame. Low == High is caught
+    # by the guard in the main panel.
     high_col = None
-    if chart_type == "columnrange":
+    if chart_type in MAGNITUDE_RANGE_TYPES:
         high_col = st.selectbox(
             "High (top)",
             numeric_cols,
             index=min(1, len(numeric_cols) - 1),
             help=(
-                "Each bar's top — a numeric column, the **same kind** as Low but a distinct "
-                "column. A row missing either end draws no bar but keeps its category slot; a "
-                "range whose high is below its low still draws, spanning both values."
+                "Each bar/band's top — a numeric column, the **same kind** as Low but a distinct "
+                "column. A row missing either end draws nothing but keeps its category slot (an "
+                "arearange band breaks there); a range whose high is below its low still draws, "
+                "spanning both values."
             ),
         )
 
@@ -778,15 +795,17 @@ with left.container(border=True, height="stretch"):
             icon=":material/warning:",
         )
         st.stop()
-    # Columnrange's own collision, xrange's one type over: a bar's low and high. Like the others
-    # it is not the x-in-y rule — the High column is the `high_col` selector, not among the Y
-    # series — and it fails the same SILENT way xrange's does: every bar would span zero height, so
-    # the chart would come back a row of hairlines on the axis. Unlike xrange there is no column
-    # contradiction to report below it: an inverted low/high is KEPT (drawn spanning both values),
-    # not an error, so the builder never raises for columnrange and no explain_* call is needed.
-    if chart_type == "columnrange" and y_cols[0] == high_col:
+    # The magnitude-range family's own collision, xrange's one type over: a bar/band's low and high.
+    # Like the others it is not the x-in-y rule — the High column is the `high_col` selector, not
+    # among the Y series — and it fails the same SILENT way xrange's does: every columnrange bar
+    # would span zero height (a row of hairlines) and an arearange band would collapse to a line.
+    # Unlike xrange there is no column contradiction to report below it: an inverted low/high is
+    # KEPT (drawn spanning both values), not an error, so the builder never raises for the family
+    # and no explain_* call is needed. Keyed on the family constant so columnrange and arearange
+    # share the one guard.
+    if chart_type in MAGNITUDE_RANGE_TYPES and y_cols[0] == high_col:
         st.warning(
-            "Low and High must be different columns — every bar would have zero height.",
+            "Low and High must be different columns — the bar/band would have zero height.",
             icon=":material/warning:",
         )
         st.stop()

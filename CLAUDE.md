@@ -14,10 +14,13 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   selectors — Size (Z) for bubble, Target (to) for sankey (and **dependencywheel** and
   **networkgraph**, all three of which reuse the very same control and `target_col`, since a link
   is a link), Parent for sunburst, End
-  for xrange, High (top) for **columnrange** (its Y control renamed **Low (bottom)** — the two
-  ends of a range, both magnitudes, drawn from `numeric_cols`, *not* xrange's `coordinate_columns`,
-  since a high can never be a date; the one two-value-column type whose second column is a new
-  kwarg — `high_col` — rather than a reuse, because a magnitude is not xrange's coordinate) — and
+  for xrange, High (top) for **columnrange** and its filled-band mirror **arearange** (which reuse
+  one High control and one `high_col`, keyed on `MAGNITUDE_RANGE_TYPES` — a link is a link, and a
+  band's top is a bar's top; their shared Y control is renamed **Low (bottom)** — the two ends of a
+  range, both magnitudes, drawn from `numeric_cols`, *not* xrange's `coordinate_columns`, since a
+  high can never be a date; columnrange is the type that first introduced `high_col` as a new kwarg
+  rather than a reuse — because a magnitude is not xrange's coordinate — and arearange then reuses
+  it, so the cache layer is untouched, networkgraph's/dependencywheel's win) — and
   the **gauge family's** two, which are the only ones that name a **policy** and
   a **scale** rather than a column: an aggregation picker sourced from the builder's
   `GAUGE_AGGREGATIONS`, and a Dial min/max pair *seeded* from its `gauge_dial`. The gauge family is
@@ -39,15 +42,18 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   pyramid, flows for a sankey or dependencywheel,
   links for a networkgraph,
   boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
-  xrange, ranges for a columnrange — sourced there
+  xrange, ranges for a columnrange, points for an **arearange** (its band's vertices) — sourced
+  there
   rather than recomputed
   here so it can't drift from what the chart draws; waterfall's and sunburst's are the
   two that *exceed* their drawable mark count, by one, since each appends a mark the
   frame never held (a total bar, a root sector) — not necessarily their row count,
-  since an undrawable label drops its row; xrange and columnrange append nothing, so their
-  count is
-  exactly their surviving rows (columnrange counts by label like waterfall, a missing/inverted
-  range kept as a null slot and still counted);
+  since an undrawable label drops its row; xrange, columnrange and arearange append nothing, so
+  their count is
+  exactly their surviving rows (columnrange and arearange share **one** count rule, keyed on
+  `MAGNITUDE_RANGE_TYPES`, counting by label like waterfall — a missing/inverted
+  range kept as a null slot and still counted; their nouns differ, "Ranges" vs "Points", since a
+  band is one shape whose vertices are counted, not N discrete ranges);
   membership of the `MARK_METRICS` dict is what makes a type count-adaptive, so the
   KPI stays one branch however many such types there are — and gauge is the first type
   whose *absence* from that dict is a decision worth stating: its marks ARE its series
@@ -137,6 +143,14 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   columnrange/xrange distinction turns on. Every low sits below its high (a clean range), because
   the type's headline is "a min–max per category" and the sample is meant to *show* it; the
   missing-slot and inverted-range edge cases are the tests' job, not a demo's.
+  `Projected monthly active users (arearange)` is that temperature sample's own **mirror**, one
+  axis over again: both read the same two magnitude columns (a low and a high per category), but a
+  record-temperature range is a set of **independent** monthly facts (columnrange draws them as
+  separate bars) while a forecast is a **continuous** estimate read for its **outline** — so the
+  band **widens** month over month to show the uncertainty cone opening, the shape a row of bars
+  cannot draw. It leads with a category (`month`) column and keeps every low below its high, like
+  the temperature sample and for the same reason (the demo shows the clean band; the band-break and
+  inverted edge cases are the tests' job).
   `Marketing conversion funnel (funnel)` and `Customer loyalty pyramid (pyramid)` are the same
   single-value **stage** shape drawn two ways: both lead with their **largest** stage and decrease,
   but the funnel puts it at the top and narrows downward (a shrinking purchase journey) while the
@@ -163,7 +177,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   inverted range that is xrange's dropped backwards bar in mirror; the single hue and the
   `colorByPoint` that must appear nowhere; the low-required and low≠high guards and the x-in-y
   one; the `highcharts-more` module resolved from `chart.type` alone; and the one border-dissolve
-  `_themed` hook), the **gauge family's** reduced marks
+  `_themed` hook), arearange's filled band (the same coverage sharing columnrange's helpers, plus
+  the two facts unique to the shared-branch mirror: `test_arearange_and_columnrange_differ_only_in_
+  chart_type`, a byte-diff proving the branch stays shared, and `test_arearange_has_no_dark_mode_
+  theme_hook`, which pins the *absence* of the border-dissolve hook — the mirror of columnrange's
+  presence, and the render-verified divergence — plus the "Points" KPI distinct from "Ranges"),
+  the **gauge family's** reduced marks
   (`solidgauge`'s rings: the empty-column
   trap, swept over all six reductions because only `sum` lies; the dial derived from the
   *readings* rather than the raw column; `threshold: 0`; the three levels a ring's hue has to
@@ -322,15 +341,20 @@ xrange charts an `end_col=` naming the column each bar ends at (required for `xr
 raising `ValueError` if omitted or equal to the *start* column — `y_cols[0]`, not
 `x_col`, which is the one collision of the four that is not against `x_col` at all — and,
 like sunburst, also raising when its columns cannot place a bar on one axis: see
-`explain_xrange_error`), and columnrange charts a `high_col=` naming the column each bar
-reaches up to (required for `columnrange`, raising `ValueError` if omitted or equal to the
+`explain_xrange_error`), and the **magnitude-range family** (`columnrange` and its filled-band
+mirror `arearange`, named by `MAGNITUDE_RANGE_TYPES`) charts a `high_col=` naming the column each
+bar/band reaches up to (required for both, raising `ValueError` if omitted or equal to the
 *low* column — `y_cols[0]`, xrange's start-is-end collision one type over). It is the fifth
-column kwarg and the one that is **not** a reuse: xrange's `end_col` is a **coordinate** (it
-may be a date, sniffed by `_coordinates`), while a high is a **magnitude** that must be
-`_plottable`, so a shared kwarg would be a lie. Unlike xrange it raises no *column*-level
-contradiction — an inverted `high < low` is drawable (a bar spanning `[min, high]`), so it is
-kept, not raised — so there is no `explain_columnrange_error`. Its `x_col` **is** a real
-category axis, so `x_col == low` is caught by the shared `X_IN_Y_GUARD_TYPES` rule, the only one
+column kwarg, and the one that is **not** a reuse *of xrange's `end_col`*: xrange's is a
+**coordinate** (it may be a date, sniffed by `_coordinates`), while a high is a **magnitude** that
+must be `_plottable`, so a shared kwarg would be a lie — but *within* the magnitude-range family it
+is itself reused, since arearange's high is a magnitude too (a link is a link, a high is a high), so
+no new kwarg and the cache layer is untouched. Neither type raises a *column*-level
+contradiction — an inverted `high < low` is drawable (a bar spanning `[min, high]`; a band as an
+honest crossover), so it is kept, not raised — so there is no `explain_columnrange_error` (nor an
+arearange one). Their `x_col` **is** a real
+category axis, so `x_col == low` is caught by the shared `X_IN_Y_GUARD_TYPES` rule (both join it via
+`MAGNITUDE_RANGE_TYPES`), the only one
 of the extra-column types whose x-collision that rule can express.
 
 The **gauge family** (`solidgauge` and `gauge`) takes the fifth and sixth, and they are the only
@@ -739,7 +763,36 @@ categories are on the X axis, so `{point.category}` reads the right one) plus `{
 **column/bar/xrange**, and *not* waterfall, which was **measured** (its default border is pure
 white, the background variable, exactly column/bar's case, not waterfall's fixed `#333333`) rather
 than inferred from the shared bar base class. Pulls in `highcharts-more` from `chart.type` alone
-— like bubble/boxplot/waterfall, and *not* a phantom `modules/columnrange`), and `solidgauge` (concentric
+— like bubble/boxplot/waterfall, and *not* a phantom `modules/columnrange`), and `arearange`
+(columnrange's **filled-band mirror** — the same low/high magnitude data (`low` = `y_cols[0]`,
+`high` = a **reused** `high_col`), drawn as **one continuous filled band** between a low line and a
+high line instead of N discrete bars. The two are byte-identical in the options tree **modulo the
+`chart.type` string**, so arearange **shares columnrange's build branch**, keyed by `chart_type` —
+the **funnel/pyramid** "differ only in the type string" pattern, *not* the columnrange/xrange split
+(a coordinate is not a magnitude, but a band **is** a bar's fill). The shared sites — the build
+branch, the two `high_col` guards, the `count_marks` rule, `X_IN_Y_GUARD_TYPES` membership and the
+app's High control — are bound by a new **`MAGNITUDE_RANGE_TYPES` = `COLUMNRANGE_TYPES` +
+`AREARANGE_TYPES`** constant (the `WEIGHTED_NODE_LINK_TYPES` "name the family so the sites can't
+drift" rule), and it reuses columnrange's `high_col` — a high is a high, **no new kwarg**, so the
+cache layer is untouched (networkgraph's/dependencywheel's win). It reuses `_range_point` intact: a
+missing/non-finite end is a bare `EnforcedNull` that **breaks the band** (verified by rendering: the
+fill splits, honestly "no data here", rather than bridging the gap and implying data — a *keep-the-
+slot* that reads differently on a continuous band than on independent bars), and an inverted range
+(`high < low`) is **kept**, drawn as an honest crossover pinch (verified by rendering), the mirror of
+xrange's *dropped* backwards bar exactly as columnrange keeps it. Single **brand hue**, `colorByPoint`
+off (a band is one measurement); `{point.category}` tooltip (categories on the X axis). The **one**
+thing NOT shared, and the reason a shared branch is still honest, is the `_themed` hook: columnrange
+dissolves a white **bar border**, but an area **fill has none** (`area`/`areaspline` "paint no white
+against the dark background"), so arearange is deliberately **out** of the border-dissolve group and
+needs **no `_themed` hook at all** — **measured by rendering** in both themes (a dark-mode band with
+no white ring), never inferred from the shared area base class (the waterfall lesson, in mirror: there
+the inference from the *bar* base class was unsound, here the render *confirms* the analogy to the
+*area* base class rather than trusting it). The divergence is orthogonal to the branch — `_themed` is
+keyed on `chart.type` independently — which is what lets the branch stay shared. Its marks are the
+band's `(low, high)` **points**, so like columnrange it needs a `count_marks` rule and a `MARK_METRICS`
+entry — **"Points"**, a noun *distinct* from columnrange's "Ranges" on purpose: a band is one shape, so
+the count names its vertices rather than implying N discrete ranges. Pulls in `highcharts-more` from
+`chart.type` alone, *not* a phantom `modules/arearange`), and `solidgauge` (concentric
 rings on one shared dial — an "activity gauge", and the only type with **no label channel
 at all**. Every other type names its marks from a column: a slice, an axis category, a
 node, a box, a lane. A gauge's marks are the **selected columns themselves**, each
@@ -1098,6 +1151,15 @@ label like waterfall (a null slot still counted) and agreeing with the built len
 resolved from `chart.type` **alone** and NOT a phantom `modules/columnrange`; and the one
 border-dissolve dark hook it shares with column/bar/xrange, measured rather than inferred from the
 shared bar base class),
+arearange's filled band (columnrange's coverage in mirror, reusing its `_range_df`/`_ranges`
+helpers: the same `[low, high]` 2-array, null-slot, kept-inverted, single-hue/no-`colorByPoint`,
+`{point.category}` tooltip, three guards, `count_marks`-agrees-with-built and `highcharts-more`-
+from-`chart.type`-alone checks — plus the two facts unique to the shared-branch mirror:
+`test_arearange_and_columnrange_differ_only_in_chart_type`, a **byte-diff** proving the branch stays
+shared once `chart.type` and the type-derived default title are set aside, and
+`test_arearange_has_no_dark_mode_theme_hook`, which pins the *absence* of the border-dissolve hook —
+the render-verified divergence, the mirror of columnrange's presence — and the "Points" KPI distinct
+from "Ranges"),
 gauge's reduced rings (the **empty-column trap**, swept over all six reductions because only
 `sum` lies — `pd.Series([nan, ...]).sum()` is `0.0`, an additive identity drawn as a real ring
 at the dial's floor — with the assertion that pandas really does say `0.0` standing IN the test
@@ -1128,8 +1190,9 @@ column rather than from `x_col`, gauge's known `agg` and its dial-with-a-span, a
 mirror of gauge's own exemption — the `x_col` that every OTHER type now requires) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
-to serialize — bubble, radar, boxplot, waterfall and columnrange all pulling in the
-`highcharts-more` module (columnrange from `chart.type` alone, with no `modules/columnrange` — the
+to serialize — bubble, radar, boxplot, waterfall, columnrange and arearange all pulling in the
+`highcharts-more` module (columnrange and arearange from `chart.type` alone, with no
+`modules/columnrange` or `modules/arearange` — the
 plausible guess the round-trip corrects),
 heatmap the `modules/heatmap` module, treemap the `modules/treemap` module,
 funnel and pyramid the `modules/funnel` module (shared, from `chart.type` alone — and *not*
@@ -1156,7 +1219,9 @@ sankey's Target (to) control (and dependencywheel reusing it identically, its KP
 its KPI reading **Links** over an empty selection), sunburst's Parent control, xrange's End
 control, columnrange's **High (top)** control (over a renamed **Low (bottom)** single-select Y,
 its High picker offering only numeric columns and surviving a Low change via its constant index,
-its KPI reading **Ranges**), gauge's
+its KPI reading **Ranges**) — and arearange **reusing that very control and `high_col`**, its KPI
+reading **Points** instead (the shared-control mirror of dependencywheel reusing sankey's Target),
+gauge's
 aggregation picker and Dial min/max inputs — and gauge's *absent* X control and networkgraph's
 *absent* Y control, the two mirror-image subtractive changes — and boxplot's
 and waterfall's

@@ -119,6 +119,7 @@ from highcharts_builder import (  # noqa: E402
     DEFAULT_COLORS,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
+    MAGNITUDE_RANGE_TYPES,
     NETWORKGRAPH_TYPES,
     NODE_LINK_TYPES,
     SUPPORTED_TYPES,
@@ -211,16 +212,18 @@ def _end_for(chart_type: str) -> str | None:
 
 
 def _high_for(chart_type: str) -> str | None:
-    """The high column those same sweeps pass for the columnrange case: columnrange requires
-    one (each bar's top); other types ignore it, so it's None. The fifth of the
-    ``_size_for``/``_target_for``/``_parent_for``/``_end_for`` family — see ``_target_for``.
+    """The high column those same sweeps pass for the MAGNITUDE_RANGE case: columnrange and its
+    filled-band mirror arearange each require one (each bar's / band's top); other types ignore it,
+    so it's None. The fifth of the ``_size_for``/``_target_for``/``_parent_for``/``_end_for``
+    family — see ``_target_for``. Keyed on the family constant so arearange rides every
+    ``SUPPORTED_TYPES`` sweep the day it is added, exactly as columnrange does.
 
     It reuses the fixtures' ``"end"`` column, the one extra that is NUMERIC, exactly as
-    ``_end_for`` does — but reading it as a MAGNITUDE (the bar's high), not a coordinate. The
+    ``_end_for`` does — but reading it as a MAGNITUDE (the bar's/band's high), not a coordinate. The
     pair is ("value", "end") as it is for xrange, and for the same reason the fixtures keep
     "end" strictly above "value": here that makes every range a clean ``low < high`` rather than
     an inverted one, so the sweeps exercise the ordinary drawable case."""
-    return "end" if chart_type == "columnrange" else None
+    return "end" if chart_type in MAGNITUDE_RANGE_TYPES else None
 
 
 # Radar remains the ONE "meta" type: Highcharts has no radar series, so it renders as a polar
@@ -4245,6 +4248,217 @@ def test_temperature_range_sample_builds_a_columnrange_chart():
 
 
 # --------------------------------------------------------------------------- #
+# Arearange — columnrange's filled-band mirror (one band spanning [low, high])
+# --------------------------------------------------------------------------- #
+# Reuses the columnrange block's `_range_df` (four categories, Apr inverted) and `_ranges`
+# helpers above — arearange reads the identical low/high shape, which is the whole point.
+def _ar(df: pd.DataFrame | None = None, **kwargs) -> dict:
+    return build_options(
+        df if df is not None else _range_df(),
+        "arearange",
+        "month",
+        ["low"],
+        high_col="high",
+        **kwargs,
+    )
+
+
+def test_arearange_builds_one_band_of_low_high_pairs():
+    opts = _ar()
+    # Its OWN chart.type (not columnrange's) — a real highcharts-core series, so it serializes as
+    # its own name, the module's "every type is its own Highcharts name" rule (radar excepted).
+    assert opts["chart"]["type"] == "arearange"
+    # x_col is a genuine category X axis (the band runs ALONG it) — column/bar's shape.
+    assert opts["xAxis"]["categories"] == ["Jan", "Feb", "Mar", "Apr"]
+    # The SAME `[low, high]` 2-array points columnrange builds (verified against the round-trip in
+    # the serialization test below), Apr's inverted pair kept as-is.
+    assert _ranges(opts) == [[-2.0, 8.0], [1.0, 12.0], [4.0, 18.0], [8.0, -3.0]]
+    # One series (one band), legend off: a single-hue band legends as one useless bullet, and the
+    # categories are on the X axis already (columnrange's/xrange's/treemap's reasoning).
+    assert len(opts["series"]) == 1
+    assert opts["legend"]["enabled"] is False
+
+
+def test_arearange_and_columnrange_differ_only_in_chart_type():
+    # The funnel/pyramid "one branch, differ only in the type string" invariant, as a test: the two
+    # share ONE build branch, so their options must be byte-identical once chart.type is set aside.
+    # This is what lets the shared branch stay shared — if a future edit diverges them, this fails.
+    # A shared explicit title is passed so the chart_type-DERIVED default title ("Arearange chart"
+    # vs "Columnrange chart") — a separate behavior pinned by test_default_title_per_type, not a
+    # branch divergence — doesn't masquerade as one.
+    ar, cr = _ar(title="t"), _cr(title="t")
+    assert ar["chart"]["type"] == "arearange" and cr["chart"]["type"] == "columnrange"
+    ar["chart"]["type"] = cr["chart"]["type"] = "_"
+    assert ar == cr
+
+
+def test_arearange_keeps_a_missing_or_non_finite_end_as_a_null_slot():
+    # `_range_point` for a PAIR, shared verbatim with columnrange: a band vertex needs BOTH ends, so
+    # if either is missing (NaN) or non-finite (inf) the whole slot becomes a bare EnforcedNull —
+    # which BREAKS the band there (verified by rendering: the band splits, honestly "no data here",
+    # rather than bridging the gap and implying data). A bare null, not `{"low": ..., "high": null}`.
+    # And no bare `inf` reaches the JS (the `_plottable` rule the module shares).
+    df = pd.DataFrame(
+        {
+            "month": ["Jan", "Feb", "Mar", "Apr"],
+            "low": [-2.0, float("nan"), 4.0, float("inf")],
+            "high": [8.0, 12.0, float("nan"), 20.0],
+        }
+    )
+    opts = _ar(df)
+    assert _ranges(opts) == [[-2.0, 8.0], EnforcedNull, EnforcedNull, EnforcedNull]
+    assert opts["xAxis"]["categories"] == ["Jan", "Feb", "Mar", "Apr"]  # slots KEPT
+    js = make_chart(df, "arearange", "month", ["low"], high_col="high").to_js_literal()
+    assert js
+    for token in ("inf", "nan", "NaN"):
+        assert token not in js, f"arearange emitted a non-finite literal: {token}"
+
+
+def test_arearange_keeps_an_inverted_range_spanning_both_values():
+    # The mirror of xrange's DROPPED backwards bar, kept exactly as columnrange keeps it: a band is
+    # bounded by its two values, so an inverted low/high (Apr's 8 -> -3) draws an honest crossover
+    # (verified by rendering), not the whole-axis lie xrange's backwards bar would be. Kept, order
+    # preserved, counted.
+    assert _ranges(_ar())[3] == [8.0, -3.0]
+    assert count_marks(_range_df(), "arearange", "month", ["low"]) == 4
+
+
+def test_arearange_colors_the_band_one_hue_and_never_uses_color_by_point():
+    # A band is ONE continuous measurement, so it takes the single series hue (colors[0]) and
+    # `colorByPoint` stays OFF (its Highcharts default) — the opposite call from pie/treemap/xrange,
+    # exactly as columnrange makes it. So the data carry NO per-point color and `colorByPoint`
+    # appears NOWHERE in the emitted JS.
+    opts = _ar()
+    assert all(not isinstance(pt, dict) or "color" not in pt for pt in _ranges(opts))
+    assert opts["colors"] == list(DEFAULT_COLORS)  # carried and OVERRIDABLE
+    assert _ar(colors=["#abcabc"])["colors"] == ["#abcabc"]
+    js = make_chart(
+        _range_df(), "arearange", "month", ["low"], high_col="high"
+    ).to_js_literal()
+    assert js and "colorByPoint" not in js
+
+
+def test_arearange_tooltip_names_the_category_and_the_range():
+    # {point.category} (categories are on the X axis, the band stands ON it) plus the two ends —
+    # columnrange's tooltip verbatim, waterfall's fix rather than xrange's {point.name} bug.
+    tip = _ar()["tooltip"]["pointFormat"]
+    assert "{point.category}" in tip
+    assert "{point.low}" in tip and "{point.high}" in tip
+    assert "{point.name}" not in tip and "{point.y}" not in tip
+
+
+def test_arearange_requires_a_high_column():
+    with pytest.raises(ValueError, match="requires a high column"):
+        build_options(_range_df(), "arearange", "month", ["low"])
+
+
+def test_arearange_rejects_the_low_column_as_the_high_column():
+    # The magnitude-range family's low==high guard, shared with columnrange: a band would collapse
+    # to a line. It must be a guard rather than a tolerated oddity because it fails SILENTLY.
+    with pytest.raises(ValueError, match="cannot also be the high column"):
+        build_options(_range_df(), "arearange", "month", ["low"], high_col="low")
+
+
+def test_arearange_rejects_x_as_a_y_series():
+    # arearange joins X_IN_Y_GUARD_TYPES via MAGNITUDE_RANGE_TYPES (its x_col is a real category X
+    # axis, exactly columnrange's), so x_col == low is the classic x-in-y collision.
+    with pytest.raises(ValueError, match="cannot also be a y series"):
+        build_options(_range_df(), "arearange", "low", ["low"], high_col="high")
+
+
+def test_arearange_uses_only_first_y_col():
+    # low = y_cols[0]; further y columns are ignored (high comes from high_col, not y_cols[1]).
+    opts = build_options(
+        _range_df(), "arearange", "month", ["low", "high"], high_col="high"
+    )
+    assert len(_ranges(opts)) == 4
+
+
+def test_arearange_count_marks_counts_drawable_categories():
+    # The shared MAGNITUDE_RANGE rule: one mark per drawable LABEL (the band's vertices), value
+    # columns NOT consulted (a missing/inverted range keeps its slot). A None-label row drops.
+    df = pd.DataFrame(
+        {
+            "month": ["Jan", None, "Mar"],
+            "low": [
+                1.0,
+                2.0,
+                float("nan"),
+            ],  # Mar low missing -> null slot, still counted
+            "high": [5.0, 6.0, 7.0],
+        }
+    )
+    built = _ranges(_ar(df))
+    assert built == [
+        [1.0, 5.0],
+        EnforcedNull,
+    ]  # None-label dropped; Mar kept as a null slot
+    assert count_marks(df, "arearange", "month", ["low"]) == 2 == len(built)
+
+
+def test_arearange_serializes_and_resolves_highcharts_more():
+    # End to end: the [low, high] pairs must survive `to_js_literal` (NOT collapse) AND resolve
+    # `highcharts-more` — from `chart.type` ALONE, like bubble/boxplot/waterfall/columnrange, and
+    # NOT a phantom `modules/arearange.js`. Only the round-trip can show which module a type pulls.
+    chart = make_chart(_range_df(), "arearange", "month", ["low"], high_col="high")
+    js = chart.to_js_literal()
+    assert js and "type: 'arearange'" in js
+    for token in ("-2", "8", "12", "18"):
+        assert (
+            token in js
+        )  # low/high reached the JS as array elements, not a collapsed [x, y]
+    tags = chart.get_script_tags(as_str=True)
+    assert "highcharts-more" in tags
+    assert (
+        "modules/arearange" not in tags
+    )  # no such module — it lives in highcharts-more
+
+
+def test_arearange_light_mode_shape():
+    # As columnrange: NO plotOptions in light mode (which is also how it carries no data labels —
+    # there is no plotOptions.arearange to hold any).
+    opts = _ar()
+    assert opts["legend"]["enabled"] is False
+    assert "plotOptions" not in opts
+
+
+def test_arearange_has_no_dark_mode_theme_hook():
+    # THE distinguishing test, and the one the render verified: arearange is columnrange's mirror in
+    # the DATA but NOT in `_themed`. columnrange dissolves a white BAR BORDER; an area FILL has none
+    # (area/areaspline "paint no white against the dark background"), so arearange is deliberately
+    # OUT of the border-dissolve group and adds NO plotOptions even in dark mode. Pins the decision
+    # against a future edit that "helpfully" adds arearange to the dissolve set on the false analogy
+    # to columnrange — the waterfall lesson (inference from a shared base class is unsound).
+    opts = _ar(dark=True)
+    assert "plotOptions" not in opts  # no border hook, unlike columnrange
+    assert (
+        opts["chart"]["backgroundColor"] == "#0f172a"
+    )  # generic dark chrome still applied
+    assert _ranges(opts)[0] == [
+        -2.0,
+        8.0,
+    ]  # the single hue is unchanged (reads on both backgrounds)
+
+
+def test_forecast_range_sample_builds_an_arearange_chart():
+    from sample_data import _forecast_range
+
+    df = _forecast_range()
+    opts = build_options(
+        df, "arearange", "month", ["forecast_low"], high_col="forecast_high"
+    )
+    assert opts["chart"]["type"] == "arearange"
+    ranges = _ranges(opts)
+    assert len(ranges) == 12  # one band vertex per month
+    # Every low sits below its high — a clean forecast cone, no inverted or missing slots.
+    assert all(low < high for low, high in ranges)
+    # And the band WIDENS: the sample is built to SHOW the cone opening over the year.
+    spans = [high - low for low, high in ranges]
+    assert spans[-1] > spans[0]
+    assert count_marks(df, "arearange", "month", ["forecast_low"]) == 12
+
+
+# --------------------------------------------------------------------------- #
 # Gauge — concentric rings, each one COLUMN reduced to one number
 # --------------------------------------------------------------------------- #
 @pytest.fixture
@@ -6315,6 +6529,96 @@ def test_app_columnrange_kpi_shows_ranges(app):
     assert "Series plotted" not in metrics
     expected = count_marks(df, "columnrange", "month", ["record_low"])
     assert metrics["Ranges"] == f"{expected:,}"
+    assert expected == len(df) == 12
+
+
+def _pick_arearange_sample(app):
+    """Select the arearange sample dataset and switch the chart type to arearange.
+
+    The forecast sample is the one whose two numeric columns ARE a low and a high (a projected
+    band), so the KPI and picker tests read the numbers the type is meant to draw."""
+    from sample_data import SAMPLES
+
+    label = next(key for key in SAMPLES if "(arearange)" in key)
+    app.selectbox[0].set_value(label).run()  # Dataset
+    app.selectbox[1].set_value("arearange").run()  # Chart type
+    return SAMPLES[label]()
+
+
+def test_app_switch_to_arearange_shows_high_control_and_regenerates_config(app):
+    # Arearange reuses columnrange's "High (top)" control (the shared MAGNITUDE_RANGE High selector)
+    # and its "Low (bottom)" Y label, driving the config through the same high_col plumbing — no new
+    # cache kwarg. It reveals the High selectbox no plain type shows, and serializes as its OWN
+    # chart.type. Network-free.
+    assert not any(
+        sb.label == "High (top)" for sb in app.selectbox
+    )  # absent by default
+    _pick_arearange_sample(app)
+    assert not app.exception
+    assert (
+        len([sb for sb in app.selectbox if sb.label == "High (top)"]) == 1
+    )  # now present
+    assert any(
+        sb.label == "Low (bottom)" for sb in app.selectbox
+    )  # single-select magnitude
+    assert not app.pills
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'arearange'" in app.code[0].value
+
+
+def test_app_arearange_low_and_high_pickers_offer_only_numeric_columns(app):
+    # Like columnrange: High is a MAGNITUDE from numeric_cols (never a date), and the `month`
+    # category must appear in NEITHER value picker.
+    _pick_arearange_sample(app)  # columns: month, forecast_low, forecast_high
+    low = next(sb for sb in app.selectbox if sb.label == "Low (bottom)")
+    high = next(sb for sb in app.selectbox if sb.label == "High (top)")
+    for picker in (low, high):
+        assert "month" not in picker.options
+        assert set(picker.options) == {"forecast_low", "forecast_high"}
+
+
+def test_app_arearange_high_survives_a_low_change(app):
+    # The keyless-widget trap High's constant `index` guards against — the shared control, so the
+    # same guarantee columnrange has. A 3-numeric CSV gives room to change Low without colliding.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        ("bands.csv", b"category,a,b,c\nX,1,5,9\nY,2,6,10\n", "text/csv")
+    ).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("arearange").run()
+    high = next(sb for sb in app.selectbox if sb.label == "High (top)")
+    high.set_value("c").run()  # not the default (the 2nd numeric, "b")
+    assert not app.exception
+    low = next(sb for sb in app.selectbox if sb.label == "Low (bottom)")
+    low.set_value("b").run()  # change Low a -> b
+    assert not app.exception
+    high = next(sb for sb in app.selectbox if sb.label == "High (top)")
+    assert high.value == "c"  # not reset to the default
+
+
+def test_app_arearange_low_equals_high_shows_guard_warning(app):
+    # The shared MAGNITUDE_RANGE low==high guard, so arearange gets it for free: a band would
+    # collapse to a line. It fires a warning and stops rather than blowing up the page.
+    _pick_arearange_sample(
+        app
+    )  # Low defaults forecast_low, High defaults forecast_high
+    high = next(sb for sb in app.selectbox if sb.label == "High (top)")
+    high.set_value("forecast_low").run()  # == the Low column
+    assert not app.exception
+    assert app.warning
+    assert "Low and High must be different" in app.warning[0].value
+
+
+def test_app_arearange_kpi_shows_points(app):
+    # Arearange is one continuous band, so the KPI swaps "Series plotted" (a bare 1) for "Points" —
+    # its own noun, distinct from columnrange's "Ranges", counting the band's (low, high) vertices.
+    df = _pick_arearange_sample(app)
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    expected = count_marks(df, "arearange", "month", ["forecast_low"])
+    assert metrics["Points"] == f"{expected:,}"
     assert expected == len(df) == 12
 
 

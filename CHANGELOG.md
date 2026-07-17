@@ -33,6 +33,36 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.13.0] - 2026-07-17
+
+### Added
+
+- **`arearange` chart type** — columnrange's filled-band mirror. It reads the **same** low/high
+  magnitude data as `columnrange` (a category `x_col`, a low `y_cols[0]`, and a high `high_col`,
+  encoded as a `[low, high]` 2-array per category) and draws it as one continuous **filled band**
+  between a low line and a high line instead of N discrete bars. The two are byte-identical in the
+  options tree **modulo the `chart.type` string**, so they share **one** build branch keyed by
+  `chart_type` (the funnel/pyramid "differ only in the type string" pattern), plus the
+  `high_col` guards, the `_range_point` missing-slot/kept-inverted policy, the `count_marks` rule,
+  the `X_IN_Y_GUARD_TYPES` membership and the app's High control — all via the new
+  `MAGNITUDE_RANGE_TYPES` constant, so columnrange and arearange can't drift. It reuses
+  columnrange's `high_col` (no new kwarg, so the cache layer is untouched) and resolves
+  `highcharts-more` from `chart.type` alone (**not** a phantom `modules/arearange`). The **one**
+  thing NOT shared — decided by **rendering** in both themes — is the dark-mode hook: columnrange
+  dissolves a white *bar border*, but an area *fill* has none (like `area`/`areaspline`), so
+  arearange is deliberately **out** of the border-dissolve group and needs no `_themed` hook at
+  all. A row missing either end keeps its category slot and **breaks** the band there (honestly "no
+  data here", not a bridge across the gap); an inverted range is kept and drawn as an honest
+  crossover, exactly as columnrange keeps it. Its marks are the band's `(low, high)` points, so it
+  is count-adaptive with its own **"Points"** KPI (distinct from columnrange's "Ranges": a band is
+  one shape, so the noun counts its vertices rather than implying N discrete ranges).
+- **`Projected monthly active users (arearange)` sample** — a low/high forecast band over twelve
+  months, and the deliberate **mirror** of the columnrange temperature-range sample: both read the
+  same two magnitude columns, but a record-temperature range is a set of independent monthly facts
+  (discrete bars) while a forecast is a continuous estimate read for its **outline** — so the band
+  **widens** month over month to show the uncertainty cone opening, the shape a row of bars can't
+  draw. It leads with a category (`month`) column so the app opens cleanly on `line`.
+
 ## [0.12.0] - 2026-07-16
 
 ### Added
