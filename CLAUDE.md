@@ -1181,6 +1181,17 @@ A few highcharts-core stub mismatches (Optional `options`/`chart`,
 `# ty: ignore[rule]`, not by downgrading rules globally — so the rules still
 catch the same problems in our own code.
 
+## Release
+
+Releases are cut by CI, never by hand. To ship a version, bump `version` in
+`pyproject.toml` **and** add a matching `## [x.y.z]` section to `CHANGELOG.md`
+(pinned together by `test_changelog_documents_the_current_version`, so a bump
+without notes fails the suite). On the next push to `main`, the `release` job in
+`ci.yml` cuts the annotated tag + GitHub release from that section — for every
+version above the latest release, so two bumps in one push both ship — and marks
+only the highest `--latest`. It is idempotent (a push that doesn't bump the
+version cuts nothing), so do not tag or `gh release create` by hand.
+
 ## Hooks
 
 `.claude/settings.json` wires three project hooks (committed; the per-developer
@@ -1218,7 +1229,15 @@ before it runs.
 - Keep each hook's decision logic in a pure, importable function in
   `.claude/hooks/` (as the builder is), so `tests/test_hooks.py` can cover it
   without subprocesses; the `main()` wrapper handles the stdin/exit-code plumbing
-  and any impure subprocess orchestration (ruff/ty/pytest/git).
+  and any impure subprocess orchestration (ruff/ty/pytest/git). `.github/scripts/
+  release.py` follows the same split for CI (pure logic + thin `main()`, tested by
+  `tests/test_release.py`); both load their script by file path via
+  `tests/conftest.py`'s `load_script`.
+- The `release` job in `ci.yml` carries real bash, so validate edits before
+  pushing: `shellcheck -s bash` the extracted `run:` block and structure-check the
+  file with `uv run --with pyyaml` (neither is a project dep). Exercise the script
+  on the interpreter the job uses:
+  `uv run --no-project --python 3.12 python .github/scripts/release.py to-release vX.Y.Z`.
 - Render every visualization with Highcharts (`highcharts-core`); do not use
   native Streamlit charts.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
