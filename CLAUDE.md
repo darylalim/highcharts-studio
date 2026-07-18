@@ -677,8 +677,9 @@ Highcharts draws no bar and carries the running total straight through, which is
 exactly true. The builder then **appends** a closing `Total` bar (`{"isSum": True}`,
 which makes Highcharts sum the preceding deltas itself so the bar reaches down to zero
 as a *level* rather than stacking as one more delta) — it is what makes the chart a
-bridge rather than a row of floating bars, and it makes waterfall the one type whose
-mark count exceeds its row count; it is appended only when there is at least one step
+bridge rather than a row of floating bars, and it made waterfall the **first** type whose
+mark count exceeds its row count (`sunburst`'s appended root is the second, and says so);
+it is appended only when there is at least one step
 to sum. Bars are colored by **meaning**, not identity — green rise, red fall, brand-blue
 total, read straight from `DEFAULT_COLORS` by index rather than from the *overridable*
 `colors` list, the `_BOXPLOT_OUTLIER_COLOR` rule for both of its reasons (a short custom
@@ -695,7 +696,9 @@ its delta — gated on step count like heatmap's cells and sankey's links — be
 column/bar (which carry no labels) a waterfall's bar floats at the running total and
 encodes its value as a *length*, not a height above the axis, so no axis can be read
 against it. It shares bubble's, radar's and boxplot's `highcharts-more` module, and it is
-the one type needing **two** `_themed` hooks — and *neither* is the column/bar case, since
+the **first** type to need **two** `_themed` hooks (`bullet` is the second, and the two pairs
+have nothing in common: bullet's *is* the column/bar dissolve plus a hue flip on a MARK) — and
+here *neither* is the column/bar case, since
 waterfall's border and connectors both default to a fixed `#333333` (measured off the
 rendered PNG) rather than the background variable that resolves to white for column/bar,
 so its bars are never ringed white. `borderColor`: that crisp definition line on the white
