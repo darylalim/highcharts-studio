@@ -291,7 +291,10 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   heatmap/boxplot/waterfall x-in-y rule, and
   an end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
-  interaction tests.
+  interaction tests. The AppTests find widgets by **label**, not by position —
+  `_pick_sample(app, chart_type)` is the shared body of the five `_pick_*_sample` helpers, each
+  of which keeps its own name and its own argument for why that type needs a dedicated sample
+  rather than the landing dataset.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
   decision functions (path guard, `.py` routing, git-dirty detection) plus a
   black-box check of the exit-code contract for `guard_paths.py` and
@@ -1341,6 +1344,17 @@ by the Claude-in-Chrome extension), then screenshot it in a browser in **both** 
 Run scratchpad scripts with `PYTHONPATH=<repo> uv run python …` — the script's own dir,
 not the cwd, is on `sys.path`, so a bare `import highcharts_builder` fails otherwise.
 
+**Verify a new test by breaking the code** — the mutation counterpart to the above, and this
+file's "a vacuous pass is worse than no test" rule turned into a procedure. Copy the source,
+make the one edit the test claims to catch (delete the `_themed` hook, flip the null policy,
+swap the two slots of a point array, revert a call site to positional), run *that test alone*,
+restore, and diff to confirm the source came back byte-identical. A test that stays green is
+pinning nothing. Read the failure, not just the exit code: a mutant caught by `SyntaxError`
+rather than by the intended assertion is still a hole. It has already caught a dark-mode test
+asserting `"#e2e8f0" in js` — that is `_DARK_CHROME["text"]`, which `_themed` writes to the
+title, both axis labels and the tooltip on *every* dark chart, so the test passed with the hook
+it existed for deleted outright.
+
 ## Test
 
 ```bash
@@ -1574,6 +1588,17 @@ a key, `value=` is honoured only on the FIRST render, so the stale number become
 silent. One test pins that a typed dial **survives** an inert rerun (a title edit); its twin pins
 that it is **re-derived** when the aggregation changes.
 
+The app's **cache layer** is the one part of the app no runtime test reaches.
+`cached_chart_html`/`cached_chart_js` are covered only *indirectly* — an AppTest runs the app,
+which calls them — and `cached_chart_png` is executed by **nothing**: the AppTests stay on the
+network-free interactive path, and `test_app_render_mode_selector_offers_the_two_modes` pins
+that Static PNG is *offered* without ever selecting it. So its wiring is pinned **statically**,
+by two `ast` tests that read `streamlit_app.py` as source: every cached wrapper forwards each
+column/policy argument under its **own** name, and all three call sites pass them by keyword.
+`test_packaging.py`'s mechanical-sync idea applied to argument passing. Static because
+`import streamlit_app` **executes the whole Streamlit script** — and because it catches what the
+keyword form cannot: `goal_col=high_col` type-checks, caches and renders the wrong column.
+
 `tests/test_hooks.py` covers the `.claude/hooks/` scripts: the extracted pure
 functions (`protected_reason`, `is_python_target`, `has_dirty_python`) directly,
 plus a black-box pass that drives `guard_paths.py` / `post_edit_py.py` over stdin
@@ -1648,7 +1673,10 @@ excluded), so the tooling that enforces the app enforces the hooks too.
   gates. Gotcha: since this runs `ruff check --fix` after **every** `.py` edit, add a
   new import and its first use in the **same** edit (or the use first) — split across
   two edits, the fix prunes the not-yet-used import and the next `ty` pass fails on the
-  now-undefined name.
+  now-undefined name. `Edit` replaces exactly one region, so when the import and its first use
+  are far apart (an import block at the top, a use 200 lines down) *no* pair of Edits can
+  satisfy this — land both with a single `Write`, or a one-shot script that does the two
+  replacements in one pass.
 - `pytest_stop.py` (Stop) — runs `uv run pytest` when the working tree has
   uncommitted `.py` changes (app, test, or the hook scripts under
   `.claude/hooks/`); exits 2 on a real failure (pytest exit 1/2) to feed the
@@ -1679,6 +1707,15 @@ before it runs.
   file with `uv run --with pyyaml` (neither is a project dep). Exercise the script
   on the interpreter the job uses:
   `uv run --no-project --python 3.12 python .github/scripts/release.py to-release vX.Y.Z`.
+- **Adding a chart type falsifies prose nobody edited.** This file is dense with uniqueness
+  claims, and each is a claim about *every other type* — including ones that don't exist yet —
+  so a new type can make a sentence false in a passage no diff touched, locally correct on both
+  sides, with only the *pair* contradicting. Nothing mechanical can see it. Sweep
+  ``grep -noE 'the (one|only) [a-zA-Z*`_.]+ [a-zA-Z*`_.]+' CLAUDE.md`` after adding a type and
+  check each hit against the code. Two were stale when `bullet` landed: waterfall's "the one type
+  needing **two** `_themed` hooks" (bullet is the second), and its "the one type whose mark count
+  exceeds its row count" — which `sunburst`'s appended root had falsified long before, while
+  sunburst's own passage already said "this is the second such type".
 - Render every visualization with Highcharts (`highcharts-core`); do not use
   native Streamlit charts.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
