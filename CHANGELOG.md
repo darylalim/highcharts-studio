@@ -33,6 +33,45 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.14.0] - 2026-07-17
+
+### Added
+
+- **`organization` chart type** — a titled reporting hierarchy, and the **fourth node-link type**
+  (with `sankey`, `dependencywheel` and `networkgraph`). Its input is one row per person — an
+  employee (`x_col`), their manager (`target_col`) and a job title (the new `title_col`) — which the
+  builder turns into Highcharts' sankey-style `{from, to}` links, **swapped** to `{from: manager,
+  to: employee}` so the tree flows down from a manager (Highcharts draws `from` as the parent). A
+  blank/whitespace/missing manager is a **root** (the CEO): no incoming link rather than a dropped
+  row, reusing sunburst's `_is_top_level` verbatim (a manager is a parent). It is **unweighted**
+  like `networkgraph` (empty `y_cols`, no Y control) — the two are named `UNWEIGHTED_NODE_LINK_TYPES`
+  so the empty-`y_cols` guard, the app's numeric-columns gate and its Y-control removal read one
+  constant — and joins `NODE_LINK_TYPES` for the shared target-required and source≠target guards and
+  the Target control (relabelled **"Manager (to)"**). The KPI reads **"Reports"** (reporting lines,
+  counted by `not _is_top_level`, so a root's box draws but its non-existent line does not).
+- **Per-node title cards** are the type's reason to exist and the one thing highcharts-core lets an
+  organization keep that `sankey`/`networkgraph` silently drop: a modeled `nodes` array (`{id, name,
+  title}`, deduped by node key, keyed with `_node_key` so an integral-float employee id matches
+  itself across the two columns). It is the **one** node-link type to add a kwarg — `title_col`,
+  since a title is not a weight — so this one does touch the cache layer; the Title control is
+  optional (a name-only hierarchy — `title_col=None` — is reachable from the pure builder API).
+- **`_order_script_tags` generalized** from a single hardcoded `sankey → dependency-wheel` pair to a
+  `_MODULE_LOAD_ORDER` **list**, because `modules/organization.js` extends the sankey series and hits
+  the identical reversed-emission bug (a blank iframe beside a working PNG, **error #17**) — the
+  "second edge would generalize it" the code's own comment predicted. Organization pulls in
+  `modules/organization` **plus** `modules/sankey` (both from `chart.type` alone), and **not**
+  `highcharts-more`.
+- Rendering decisions, all **verified in a browser in both themes**: drawn top-down
+  (`chart.inverted`); nodes **cycle the palette** (each box a distinct identity like a pie slice —
+  Highcharts' default, so the builder sets no per-node color and no `colorByPoint`); and — unlike
+  every weighted node-link type — it needs **no `_themed` hook at all** (its boxes carry no white
+  border to dissolve; the name/title text rides Highcharts' `contrast` color), joining `boxplot` and
+  `networkgraph` in that.
+- **`Company reporting lines (organization)` sample** — the edge-list cousin of the sunburst
+  `_org_headcount` sample: one row per person with a blank-manager root, a `title` column feeding the
+  cards, and a throwaway numeric `tenure_years` (ignored by the chart, carried so the roster clears
+  the no-numeric-columns gate).
+
 ## [0.13.0] - 2026-07-17
 
 ### Added

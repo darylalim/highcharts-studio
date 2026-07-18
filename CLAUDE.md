@@ -11,9 +11,11 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
   `st.multiselect` on wide CSVs, plus the four type-specific extra column
-  selectors — Size (Z) for bubble, Target (to) for sankey (and **dependencywheel** and
-  **networkgraph**, all three of which reuse the very same control and `target_col`, since a link
-  is a link), Parent for sunburst, End
+  selectors — Size (Z) for bubble, Target (to) for sankey (and **dependencywheel**,
+  **networkgraph** and **organization**, all four of which reuse the very same control and
+  `target_col`, since a link is a link — organization relabels it **Manager (to)** and adds a
+  **Title** selector, the one extra control a node-link type has ever added, since a title is not a
+  weight), Parent for sunburst, End
   for xrange, High (top) for **columnrange** and its filled-band mirror **arearange** (which reuse
   one High control and one `high_col`, keyed on `MAGNITUDE_RANGE_TYPES` — a link is a link, and a
   band's top is a bar's top; their shared Y control is renamed **Low (bottom)** — the two ends of a
@@ -27,11 +29,13 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   **not** the only thing that **removes** a control, though it was the first: neither gauge draws an
   X selectbox at all — a *subtractive* change, since a control that does nothing is a lie in
   the UI and passing a column the builder must ignore is a lie in the call site and
-  in three cache keys — and **networkgraph** is the MIRROR of it, drawing no **Y** control at all
-  (it is unweighted, so a value picker would drive nothing). Gauge removes the label channel and
-  keeps the value; networkgraph removes the value channel and keeps the label. Each is exempted
+  in three cache keys — and the two **UNWEIGHTED node-link types** (**networkgraph** and
+  **organization**, named `UNWEIGHTED_NODE_LINK_TYPES`) are the MIRROR of it, drawing no **Y**
+  control at all (they are unweighted, so a value picker would drive nothing). Gauge removes the
+  label channel and keeps the value; the unweighted pair remove the value channel and keep the
+  label. Each is exempted
   from the empty-selection guard that the other's channel still enforces (`x_col is None` for
-  gauge, `y_cols == []` for networkgraph — pinned both ways, by an exclusion and a positive test). Every one of those controls is keyed on `GAUGE_TYPES`, so `gauge` inherited
+  gauge, `y_cols == []` for the unweighted pair — pinned both ways, by an exclusion and a positive test). Every one of those controls is keyed on `GAUGE_TYPES`, so `gauge` inherited
   the lot without a new branch — and the AppTests that pin them are *parametrized over the family*
   rather than written twice, which is what stops the two drifting. The single difference is a noun:
   the Y control says **Rings** for one and **Needles** for the other, because a reader picking
@@ -40,7 +44,7 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   plotted, or, for the one-series types, the mark count from the builder's
   `count_marks`: cells for a heatmap, tiles for a treemap, stages for a funnel or
   pyramid, flows for a sankey or dependencywheel,
-  links for a networkgraph,
+  links for a networkgraph, reports for an organization,
   boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
   xrange, ranges for a columnrange, points for an **arearange** (its band's vertices) — sourced
   there
@@ -109,12 +113,15 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   branches must remember into a **signature**, since a function that cannot see a DataFrame cannot
   derive a dial from a raw column. And `count_marks()`, which
   returns how many marks `build_options` will draw (a heatmap's cells, a treemap's
-  tiles, a funnel's or pyramid's stages, a sankey's flows, a networkgraph's links, a boxplot's
+  tiles, a funnel's or pyramid's stages, a sankey's flows, a networkgraph's links, an
+  organization's reporting lines, a boxplot's
   boxes, a waterfall's steps, a
   sunburst's sectors, an
   xrange's bars, a columnrange's ranges — funnel/pyramid counting `label_ok & value_ok` exactly
-  like treemap, and columnrange counting by label like waterfall, minus the
-  appended total)
+  like treemap, columnrange counting by label like waterfall minus the
+  appended total, and organization counting `label_ok & not _is_top_level(mgr)` — its own second
+  mask, since a blank manager is a root that draws a box but no reporting line, so a bare
+  `_label_ok` would overcount)
   for the app's KPI
   row — reusing the same `_label_ok`/`_plottable` drop predicates so the count can't
   drift from the chart (sunburst and xrange go further and reuse their *whole* build, for
@@ -158,6 +165,14 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   the biggest group at the bottom) — so reading the two side by side shows the only difference is
   which way the shape points, not the data (the row-0-at-base direction was **verified by
   rendering**, since Highcharts draws a pyramid as the vertical flip of a funnel).
+  `Company reporting lines (organization)` is the **edge-list cousin** of the sunburst
+  `_org_headcount` sample: both describe a hierarchy, but that one sizes concentric rings by a
+  headcount **value** while this one draws titled boxes and carries no magnitude at all (an org
+  chart is unweighted). One person (Nadia, the CEO) has a **blank manager** — the root, which draws
+  no reporting line but leads the chart — and several are both a manager and a report; the `title`
+  column is the **third**, so the app's Title control defaults to it and the cards show without a
+  click, and `tenure_years` is a throwaway numeric column (ignored by the chart, carried so the
+  roster clears the no-numeric-columns gate — the `_service_dependencies`/`calls_per_min` rule).
   Every sample leads with a **category column**, and that is load-bearing rather than tidy: the app
   opens on `line` with the first column as X, so a numeric first column would trip the x-in-y guard
   the moment the dataset was selected.
@@ -202,8 +217,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   brand
   palette, the validation
   guards including bubble's required size column, sankey's required and distinct
-  target column (shared verbatim by networkgraph, whose *empty* `y_cols` is pinned both ways — an
-  exclusion from the empty-Y sweep and a positive build — the mirror of gauge's `None` `x_col`),
+  target column (shared verbatim by networkgraph and organization, whose *empty* `y_cols` are pinned
+  both ways — an exclusion from the empty-Y sweep (now keyed on `UNWEIGHTED_NODE_LINK_TYPES`) and a
+  positive build — the mirror of gauge's `None` `x_col`; organization's own tests add the
+  root-vs-phantom-link distinction, the `_node_key` int/float match, the deduped title `nodes`
+  array, the `modules/sankey`-before-`modules/organization` load-order pin, the no-`_themed`-hook /
+  palette-cycling render facts, and the `count_marks`-matches-the-built-links can't-drift check),
   sunburst's required and distinct parent column, xrange's required end
   column (distinct from the *start* column, not from `x_col`), the gauge family's known aggregation
   and its dial-with-a-span, and the
@@ -329,10 +348,13 @@ renderers. Bubble charts also take a `size_col=` naming the numeric column that
 drives each marker's area (required for `bubble`, raising `ValueError` if
 omitted; ignored by the other types), threaded through the same renderers,
 sankey charts a `target_col=` naming the destination-node column (required for
-all three node-link types — `sankey`, `dependencywheel` and `networkgraph`, which share one
+all four node-link types — `sankey`, `dependencywheel`, `networkgraph` and `organization`
+(which reads it as each employee's manager), all sharing one
 `target_col`, raising `ValueError` if omitted or equal to `x_col`; likewise
-ignored by the other types), threaded the same way — and `networkgraph` reads *only* that
-plus `x_col`, taking an **empty** `y_cols` (it is unweighted), the one type that does, as the
+ignored by the other types), threaded the same way — and the two UNWEIGHTED node-link types
+(`networkgraph` and `organization`) read *only* that
+plus `x_col` (organization also an optional `title_col`), taking an **empty** `y_cols` (they are
+unweighted), the only types that do, as the
 gauge family is the only one taking a `None` `x_col`, sunburst charts a
 `parent_col=` naming the parent-label column (required for `sunburst`, raising
 `ValueError` if omitted or equal to `x_col` — and, unlike the other two, also raising
@@ -356,6 +378,15 @@ arearange one). Their `x_col` **is** a real
 category axis, so `x_col == low` is caught by the shared `X_IN_Y_GUARD_TYPES` rule (both join it via
 `MAGNITUDE_RANGE_TYPES`), the only one
 of the extra-column types whose x-collision that rule can express.
+
+And `organization` — the fourth node-link type — charts a `title_col=` naming an optional per-node
+job-title column, drawn inside each box under the name (read only by organization; a name-only
+hierarchy without it). It is the one node-link type to add a **new** kwarg — a title is not a
+weight, so unlike `dependencywheel`/`networkgraph` reusing `target_col` this one *does* touch the
+cache layer — and the manager it reads through `target_col` is the far end of the reporting link,
+so the `{from, to}` link is built `{from: manager, to: employee}` (a blank manager is a ROOT, via
+sunburst's reused `_is_top_level`, since a manager is a parent — not `_label_ok`, because
+`_label_ok("")` is True and would draw a phantom link from a nameless node).
 
 The **gauge family** (`solidgauge` and `gauge`) takes the fifth and sixth, and they are the only
 two that are **not column names**: `agg=` names the reduction each mark applies to its column (one
@@ -490,6 +521,41 @@ explicitly at all — and Highcharts' OWN default is correct (it prints the node
 only way to get it. So the tooltip is left default (`_themed` still paints its box for dark mode).
 Pulls in `modules/networkgraph` from `chart.type` alone, and — correcting the common lore —
 *not* `highcharts-more`),
+`organization` (a titled org chart — a reporting hierarchy, and the **fourth** node-link type. Its
+input is one row per PERSON: an employee (`x_col`), their manager (`target_col`, reused from sankey —
+a link is a link) and an optional job **title** (the one **new** kwarg, `title_col`, since a title is
+not a weight — so this is the one node-link type whose cache layer is **not** untouched). The manager
+is the far end of the reporting link, so the `{from, to}` link is built `{from: manager, to:
+employee}` — the one node-link type whose two columns are **swapped** into from/to, because the
+natural CSV names the child first and Highcharts draws `from` as the parent (the tree flows **down**).
+A blank/whitespace/missing manager is a **root** (the CEO): it draws no incoming link, so — unlike
+sankey, which *drops* a link missing an end — the row simply contributes no edge, its person still a
+node via the nodes array and via being someone else's manager. `_is_top_level` decides "root" and is
+reused **verbatim** from sunburst, because a manager IS a parent — and it is why the build and
+`count_marks` both read `not _is_top_level(mgr)` and **not** `_label_ok(mgr)`: `_label_ok("")` is
+True, so a bare label check would draw a phantom link from a nameless `""` node (the bug the render
+caught). Both node columns go through sunburst's `_node_key`, so an integral-float employee id matches
+itself across the two columns. It is **unweighted** like networkgraph — empty `y_cols`, no Y control —
+the two named `UNWEIGHTED_NODE_LINK_TYPES` so the empty-`y_cols` guard, the app's numeric-columns
+gate, its Y-control removal and its empty-selection warning read one constant; and it joins
+`NODE_LINK_TYPES` for the shared target-required and source≠target guards and the Target control
+(relabelled **Manager (to)**). What makes it a distinct **type** and not a networkgraph re-skin is
+the one thing highcharts-core lets it *keep* that sankey/networkgraph silently drop — a modeled
+`nodes` array — so each box carries a per-node **title** drawn under the name (deduped by node key,
+first title wins; omitted entirely without a `title_col`, a plain name-box hierarchy). Its marks are
+the reporting lines, so it needs a `count_marks` rule and a `MARK_METRICS` entry (**Reports** — one
+per employee with a real manager; a root's box draws but its non-existent line does not, so the count
+never exceeds the row count). Drawn top-down (`chart.inverted`); it **cycles** the palette across
+nodes (each box a distinct identity like a pie slice — Highcharts' *default*, so the builder sets no
+per-node color and no `colorByPoint`, an explicit series `color` being overridden), and — unlike
+every weighted node-link type — needs **no `_themed` hook at all** (its boxes carry no white border
+to dissolve; the name/title text rides Highcharts' `contrast` color), joining boxplot and networkgraph
+in that. Pulls in `modules/organization` **plus** `modules/sankey` (both from `chart.type` alone;
+*not* `highcharts-more`), and — organization.js **extending** the sankey series — hits the identical
+reversed-emission bug dependencywheel does, so `_order_script_tags`/`_MODULE_LOAD_ORDER` was
+**generalized** from a single hardcoded pair to a **list** (the "a second edge would generalize it"
+the code's own comment predicted). All of the palette / no-hook / inverted / cycle facts were decided
+by **rendering** in both themes),
 `boxplot` (per-category Tukey distributions — the only type whose builder
 *aggregates*: every other maps rows 1:1 onto marks, but a box summarizes many rows.
 The data is long/tidy — `x_col`'s values *repeat*, one row per observation — and each

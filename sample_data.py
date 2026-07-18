@@ -788,6 +788,71 @@ def _server_utilization() -> pd.DataFrame:
     )
 
 
+def _reporting_lines() -> pd.DataFrame:
+    """A company's reporting lines — the who-reports-to-whom an organization chart is built for:
+    each row is one PERSON (their name, their manager, their job title), and Highcharts lays the
+    boxes out top-down from the manager->report links, printing the title INSIDE each box under the
+    name (the title card that makes this an org chart rather than the networkgraph mirror above).
+
+    Tailored to organization. It is the EDGE-LIST cousin of the sunburst sample ``_org_headcount``:
+    both describe a hierarchy, but that one sizes concentric rings by a headcount VALUE, while this
+    one draws titled boxes and carries no magnitude at all (an org chart is unweighted — a reporting
+    line has no width). One row has a BLANK manager — ``Nadia``, the CEO — which the builder reads as
+    a ROOT (no incoming link, the top box) exactly as the sunburst sample's blank parent means a
+    top-level branch; every other person names a real manager, and several are BOTH a manager and a
+    report (``Priya`` reports to Nadia and manages Sana and Tom), which is what gives the chart its
+    depth.
+
+    The first column is the employee, a *label*, so — like every sample and load-bearingly so — the
+    app can open on ``line`` without a numeric first column tripping the x-in-y guard. ``title`` is
+    the THIRD column on purpose: the app's Title control defaults to the column at that index, so the
+    sample shows its cards without a click. ``tenure_years`` is a genuine numeric column carried for
+    the reason ``_service_dependencies``'s ``calls_per_min`` is — so the roster stays usable by the
+    value-based types and the app's no-numeric-columns gate has something to find — and the org chart
+    ignores it, the honest place for a per-person number an org chart cannot draw."""
+    return pd.DataFrame(
+        {
+            "employee": [
+                "Nadia",
+                "Owen",
+                "Priya",
+                "Raj",
+                "Sana",
+                "Tom",
+                "Uma",
+                "Vik",
+                "Wei",
+                "Xena",
+            ],
+            "manager": [
+                "",  # Nadia is the CEO — a blank manager, so the builder draws her as the root
+                "Nadia",
+                "Nadia",
+                "Nadia",
+                "Priya",
+                "Priya",
+                "Owen",
+                "Sana",
+                "Sana",
+                "Tom",
+            ],
+            "title": [
+                "Chief Executive Officer",
+                "VP Product",
+                "VP Engineering",
+                "Chief Financial Officer",
+                "Engineering Manager",
+                "Engineering Manager",
+                "Product Lead",
+                "Senior Engineer",
+                "Engineer",
+                "Engineer",
+            ],
+            "tenure_years": [12, 7, 9, 6, 4, 5, 3, 2, 1, 2],
+        }
+    )
+
+
 # Label -> factory. Each label hints at the chart types the dataset suits.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
@@ -803,6 +868,7 @@ SAMPLES = {
     "Energy flow (sankey)": _energy_flow,
     "Regional migration flows (dependencywheel)": _regional_migration,
     "Service dependencies (networkgraph)": _service_dependencies,
+    "Company reporting lines (organization)": _reporting_lines,
     "Service response times (boxplot)": _response_times,
     "Quarterly profit bridge (waterfall)": _profit_bridge,
     "Company headcount (sunburst)": _org_headcount,

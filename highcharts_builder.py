@@ -84,6 +84,30 @@ DEPENDENCYWHEEL_TYPES = (
 NETWORKGRAPH_TYPES = (
     "networkgraph",
 )  # a force-directed graph: rows are UNWEIGHTED edges
+# ORGANIZATION is the fourth node-link type and the family's odd cousin. In highcharts-core it is
+# NOT a SankeySeries subclass at all (its MRO is OrganizationSeries(BarSeries, OrganizationOptions)),
+# yet it reads the SAME {from, to} link data — its point class OutgoingWeightedConnectionData is a
+# WeightedConnectionData, sankey's shape one level on — and it builds ON the sankey JS module
+# (modules/organization EXTENDS modules/sankey, so the load-order fix dependencywheel forced recurs;
+# see `_order_script_tags`). So it belongs to NODE_LINK_TYPES (the two node-column guards) but is
+# UNWEIGHTED like networkgraph (a reporting line has no magnitude): empty y_cols, no weight, no Y
+# control. What makes it a distinct TYPE rather than a networkgraph re-skin is the one thing the
+# library lets it keep that the others silently drop — a modeled `nodes` array — so each box carries
+# a per-node TITLE (a job title under the name). That title is the type's whole reason to exist, and
+# it is the one node-link type to add a NEW kwarg for it (`title_col`): a link is a link, but a
+# title is not a weight, so — unlike dependencywheel/networkgraph reusing `target_col` — this one
+# does touch the cache layer. Its input is one row per PERSON (employee, manager, title); the
+# manager is the far end of the reporting link, so the link is built {from: manager, to: employee}
+# (the tree flows DOWN from a manager, and Highcharts draws `from` as the parent) — the one node-
+# link type whose two columns are SWAPPED into from/to, because the natural CSV names the child
+# first. A blank manager is a ROOT (the CEO): no incoming link, but its person still becomes a node
+# (via the nodes array and via being someone else's manager), so — unlike sankey, which DROPS a link
+# missing an end — that row simply contributes no edge. Drawn top-down (`chart.inverted`); unlike
+# networkgraph's single-hue mesh it CYCLES the palette across nodes (Highcharts' default, verified by
+# rendering), each box a distinct identity like a pie slice, and — unlike every weighted node-link
+# type — needs NO dark-mode `_themed` hook: its boxes carry no white border to dissolve (verified by
+# rendering both themes), so it is out of that group with boxplot and networkgraph.
+ORGANIZATION_TYPES = ("organization",)  # an org chart: a titled reporting hierarchy
 BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw rows
 WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
 SUNBURST_TYPES = ("sunburst",)  # a hierarchy as concentric rings, re-rootable by click
@@ -162,6 +186,7 @@ SUPPORTED_TYPES = (
     + SANKEY_TYPES
     + DEPENDENCYWHEEL_TYPES
     + NETWORKGRAPH_TYPES
+    + ORGANIZATION_TYPES
     + BOXPLOT_TYPES
     + WATERFALL_TYPES
     + SUNBURST_TYPES
@@ -231,17 +256,27 @@ X_IN_Y_GUARD_TYPES = (
 # hook), only the node-link GUARDS below.
 WEIGHTED_NODE_LINK_TYPES = SANKEY_TYPES + DEPENDENCYWHEEL_TYPES
 
-# The NODE-LINK types: the three whose rows are edges of a graph rather than series or
-# categories, so they name a link's two ends with `x_col` (source) and `target_col` (far
-# end) and share one dedicated guard pair — target_col required, and source != target. Named
-# once here, the GAUGE_TYPES / X_IN_Y_GUARD_TYPES "name the family so the sites can't drift"
-# rule, so the required-target and source-vs-target guards (and the app's Target control and
-# collision warning) read one constant instead of re-spelling the trio. It is NOT the
-# numeric-columns gate's set: sankey and dependencywheel need a numeric weight, a networkgraph
-# needs none, so only networkgraph is exempt there — that site stays keyed on `NETWORKGRAPH_TYPES`
-# alone. And it is wider than WEIGHTED_NODE_LINK_TYPES above: the guards bind all three (every
-# link has two ends), but only the weighted two share a build branch.
-NODE_LINK_TYPES = WEIGHTED_NODE_LINK_TYPES + NETWORKGRAPH_TYPES
+# The NODE-LINK types: the four whose rows name a link's two ends rather than series or
+# categories, so they name those ends with `x_col` (source) and `target_col` (far end) and share
+# one dedicated guard pair — target_col required, and source != target. Named once here, the
+# GAUGE_TYPES / X_IN_Y_GUARD_TYPES "name the family so the sites can't drift" rule, so the
+# required-target and source-vs-target guards (and the app's Target control and collision warning)
+# read one constant instead of re-spelling the four. It is NOT the numeric-columns gate's set:
+# sankey and dependencywheel need a numeric weight, while networkgraph and organization need none,
+# so the two unweighted types are exempt there — that site is keyed on UNWEIGHTED_NODE_LINK_TYPES
+# (below). And it is wider than WEIGHTED_NODE_LINK_TYPES above: the guards bind all four (every link
+# has two ends), but only the weighted two share a build branch.
+NODE_LINK_TYPES = WEIGHTED_NODE_LINK_TYPES + NETWORKGRAPH_TYPES + ORGANIZATION_TYPES
+
+# The UNWEIGHTED node-link types: networkgraph and organization, the two whose links carry NO
+# value, so they take an EMPTY `y_cols` and draw no Y control (the mirror of the gauge family's
+# `None` x_col). Named once so the four sites that exempt them — the empty-`y_cols` guard in
+# build_options, and the app's numeric-columns gate, its Y-control removal and its empty-selection
+# warning — read one constant instead of re-spelling the pair, exactly as WEIGHTED_NODE_LINK_TYPES
+# names the other split. (Organization additionally carries a `title_col`, but that is a LABEL
+# channel, not a value one, so it does not change this set: an org chart is unweighted like a
+# networkgraph.)
+UNWEIGHTED_NODE_LINK_TYPES = NETWORKGRAPH_TYPES + ORGANIZATION_TYPES
 
 # Default series palette, applied to every chart so both render modes (iframe
 # and static PNG) share one look that matches the Streamlit theme in
@@ -985,13 +1020,13 @@ def _sizable(value) -> bool:
 
 
 def _node_key(value) -> str:
-    """The string a sunburst node label is matched BY — and displayed AS.
+    """The string a node label is matched BY — and displayed AS — for sunburst and organization.
 
-    Sunburst is the only type whose two label columns must COMPARE EQUAL to one another: the
-    parent column names a parent BY ITS LABEL, so a bare ``str()`` is a trap rather than a
-    formality. pandas widens any column holding a blank cell to ``float64``, and a blank
-    parent cell is precisely how a top-level branch is spelled — so the most canonical
-    adjacency-list CSV there is::
+    These are the two types whose two label columns must COMPARE EQUAL to one another: sunburst's
+    parent column names a parent BY ITS LABEL, and organization's manager column names a manager the
+    same way, so a bare ``str()`` is a trap rather than a formality. pandas widens any column holding
+    a blank cell to ``float64``, and a blank parent/manager cell is precisely how a top-level
+    branch/root is spelled — so the most canonical adjacency-list CSV there is::
 
         node,parent,value
         1,,
@@ -1012,17 +1047,19 @@ def _node_key(value) -> str:
 
 
 def _is_top_level(parent) -> bool:
-    """True when a sunburst parent cell names NO parent, so its row is a top-level branch.
+    """True when a parent/manager cell names NO parent, so its row is a top-level branch/root.
 
-    Sunburst's parent column is the one place in this module where a MISSING label is not an
-    error but a STATEMENT. Everywhere else ``_label_ok`` returning False means "this names
-    nothing drawable, so drop the row"; here it means "this node hangs off the root".
+    Sunburst's parent column and organization's manager column are the two places in this module
+    where a MISSING label is not an error but a STATEMENT (a manager IS a parent, so organization
+    reuses this verbatim). Everywhere else ``_label_ok`` returning False means "this names nothing
+    drawable, so drop the row"; here it means "this node hangs off the root" (a sunburst top-level
+    branch, an organization root such as the CEO).
 
     A non-finite parent folds into the same answer by the module's own equation (a non-finite
     value IS a missing one — see ``_plottable``). So does an empty or whitespace-only string,
     which is what a blank cell becomes in a hand-built frame and in a quoted CSV: read as a
     LABEL it would match no node, dangle, and drop the row — the silently wrong answer, where
-    "top-level branch" is the visibly right one.
+    "top-level branch"/"root" is the visibly right one.
     """
     if not _label_ok(parent):
         return True
@@ -1921,6 +1958,7 @@ def build_options(
     parent_col: str | None = None,
     end_col: str | None = None,
     high_col: str | None = None,
+    title_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
 ) -> dict:
@@ -1984,6 +2022,17 @@ def build_options(
       settle to the same picture), labelled by name, and painted one brand hue — a networkgraph
       neither cycles the palette across nodes nor lets a node carry its own color. Pulls in the
       ``modules/networkgraph`` module (from ``chart.type`` alone; not ``highcharts-more``).
+    - ``organization``: an org chart — a titled reporting hierarchy, the fourth node-link type.
+      Each row is one person: ``x_col`` names them, ``target_col`` names their manager, and
+      ``title_col`` (optional) a job title drawn inside the box. The manager is the far end of the
+      reporting link, so the ``{from, to}`` link is built ``{from: manager, to: employee}`` (the
+      tree flows DOWN from a manager); a blank manager is a ROOT with no incoming link rather than a
+      dropped row. It is UNWEIGHTED like networkgraph (empty ``y_cols``, no value), and the one
+      node-link type to add a kwarg — ``title_col`` — since a title is not a weight. Titles ride a
+      modeled ``nodes`` array (deduped by node key), the one thing an organization keeps that
+      sankey/networkgraph silently drop. Drawn top-down (``chart.inverted``). Pulls in
+      ``modules/organization`` PLUS ``modules/sankey`` (which it extends), both from ``chart.type``
+      alone; not ``highcharts-more``.
     - ``boxplot``: per-category Tukey distributions. The one type that AGGREGATES —
       every other maps rows 1:1 onto marks, but a box summarizes many rows. The data
       is long/tidy (``x_col``'s values REPEAT, one row per observation) and each
@@ -2059,12 +2108,15 @@ def build_options(
     ``dark=True`` themes the chart chrome (background, text, axes, gridlines,
     tooltip) for dark mode; the series palette itself is shared across modes.
     ``size_col`` names the marker-size column and is required for ``bubble``;
-    ``target_col`` names the destination-node column and is required for all three
-    node-link types (``sankey``, ``dependencywheel`` and ``networkgraph``); ``parent_col`` names the
+    ``target_col`` names the destination-node column and is required for all four
+    node-link types (``sankey``, ``dependencywheel``, ``networkgraph`` and ``organization`` — the
+    last reading it as each employee's manager); ``parent_col`` names the
     parent-label column and is required for ``sunburst``; ``end_col`` names the
-    column each bar ends at and is required for ``xrange``. Each is ignored by the
-    other types. ``networkgraph`` is the one type that takes an EMPTY ``y_cols``
-    (it has no value channel), as the gauge family takes a ``None`` ``x_col``. ``agg`` and ``dial`` are read only by the
+    column each bar ends at and is required for ``xrange``; ``title_col`` names an optional
+    per-node job-title column read only by ``organization``. Each is ignored by the
+    other types. ``networkgraph`` and ``organization`` are the two types that take an EMPTY
+    ``y_cols`` (they have no value channel), as the gauge family takes a ``None`` ``x_col``. ``agg``
+    and ``dial`` are read only by the
     GAUGE FAMILY, and are the only two parameters here that name a POLICY and a SCALE rather
     than a column.
 
@@ -2087,13 +2139,14 @@ def build_options(
         raise ValueError(
             f"Unsupported chart_type {chart_type!r}; expected one of {SUPPORTED_TYPES}"
         )
-    if not y_cols and chart_type not in NETWORKGRAPH_TYPES:
-        # Networkgraph is the one type with no VALUE channel — its marks are the edges, sized by
-        # nothing — so an empty `y_cols` is legitimate for it exactly as `x_col is None` is for the
-        # gauge family, and the two are mirror exemptions. Every OTHER type needs at least one y
-        # column, so the guard still fires for them (and networkgraph never reaches the `y_cols[0]`
-        # reads below, which belong to types this exemption does not touch). Pinned both ways:
-        # `test_rejects_empty_y_cols` excludes networkgraph, and a positive test builds it with `[]`.
+    if not y_cols and chart_type not in UNWEIGHTED_NODE_LINK_TYPES:
+        # The two UNWEIGHTED node-link types (networkgraph and organization) have no VALUE channel —
+        # their marks are the edges/reporting lines, sized by nothing — so an empty `y_cols` is
+        # legitimate for them exactly as `x_col is None` is for the gauge family, the mirror
+        # exemption. Every OTHER type needs at least one y column, so the guard still fires for them
+        # (and neither unweighted type reaches the `y_cols[0]` reads below, which belong to types
+        # this exemption does not touch). Pinned both ways: `test_rejects_empty_y_cols` excludes the
+        # pair, and positive tests build each with `[]`.
         raise ValueError("At least one y column is required.")
     if chart_type in BUBBLE_TYPES and not size_col:
         raise ValueError("A bubble chart requires a size (z) column via size_col.")
@@ -2983,6 +3036,86 @@ def build_options(
             dark=dark,
         )
 
+    if chart_type in ORGANIZATION_TYPES:  # an org chart: a titled reporting hierarchy
+        assert target_col is not None  # guarded above for every node-link type
+        # The INPUT is one row per person — employee (`x_col`), their manager (`target_col`) and,
+        # optionally, a job title (`title_col`) — but Highcharts' organization series wants sankey-
+        # style {from, to} link DICTS (verified: the array form raises, as sankey's does). The tree
+        # flows DOWN from a manager, and Highcharts draws `from` as the parent, so the link is
+        # {from: manager, to: employee} — the one node-link type whose two columns are SWAPPED into
+        # from/to, because the natural CSV names the child first. A manager that is blank, whitespace
+        # or missing means a ROOT (the CEO): `_is_top_level` is reused verbatim from sunburst here,
+        # because a manager IS a parent and "blank parent = top-level branch" is exactly "blank
+        # manager = root". Such a row has no incoming link, so — unlike sankey, which DROPS a link
+        # missing an end — it simply contributes no edge (its person still becomes a node, via the
+        # nodes array and via being someone else's manager). Note this is NOT `_label_ok(mgr)`:
+        # `_label_ok("")` is True (an empty string is a fine *label* elsewhere), so a quoted CSV's
+        # empty manager cell would otherwise draw a phantom link from a nameless node. Both ends go
+        # through `_node_key`, so an integral-float employee id matches itself across the two columns
+        # (sunburst's int/float trap: a bare str() would make "3" and "3.0" two different people).
+        # The x_col (employee) filter already ran up front (this is a label channel).
+        links = [
+            {"from": _node_key(mgr), "to": _node_key(emp)}
+            for emp, mgr in zip(df[x_col], df[target_col], strict=True)
+            if _label_ok(emp) and not _is_top_level(mgr)
+        ]
+        # The TITLE cards are the type's reason to exist and the one thing highcharts-core lets an
+        # organization keep that sankey/networkgraph silently drop: a modeled `nodes` array (a job
+        # title rendered under the name inside each box). One entry per titled person, deduped by
+        # node key — a person named in several rows keeps the FIRST title, a later disagreeing one
+        # ignored rather than drawn twice. `id` must equal the {from, to} string it refers to, so it
+        # too goes through `_node_key`. Untitled people need no entry: Highcharts auto-generates
+        # their node from the links and labels it by name. Skipped entirely when no title column is
+        # chosen, so an org chart is a plain hierarchy of name boxes without one.
+        nodes: list[dict[str, object]] = []
+        if title_col is not None:
+            seen: set[str] = set()
+            for emp, node_title in zip(df[x_col], df[title_col], strict=True):
+                if not _label_ok(emp) or not _label_ok(node_title):
+                    continue
+                key = _node_key(emp)
+                if key in seen:
+                    continue
+                seen.add(key)
+                nodes.append({"id": key, "name": key, "title": str(node_title)})
+        # `nodes` rides the series next to `data`; omitted when empty so an untitled chart's JS
+        # carries no empty `nodes: []`.
+        org_series: dict[str, object] = {"name": str(x_col), "data": links}
+        if nodes:
+            org_series["nodes"] = nodes
+        return _themed(
+            {
+                # `inverted` draws the hierarchy TOP-DOWN (root at the top), the conventional org
+                # chart; left unset Highcharts draws it left-to-right.
+                "chart": {"type": "organization", "inverted": True},
+                # LOAD-BEARING here, not merely carried for the palette tests: an organization
+                # CYCLES this palette across its nodes (verified by rendering — each box a distinct
+                # color), so a person reads as its own identity like a pie slice or a treemap tile,
+                # NOT networkgraph's one-brand-hue mesh (its nodes are abstract graph vertices; these
+                # are labelled people read one at a time). Highcharts colours the nodes by point by
+                # DEFAULT, so — the funnel/pyramid "the defaults are right" call — the builder sets no
+                # per-node color and no `colorByPoint`: a series-level `color` is simply OVERRIDDEN by
+                # the cycle (verified: it painted nothing), so setting one would be a lie.
+                "colors": colors,
+                "title": {"text": title},
+                # Every node is labelled in its own box, so a legend would only repeat those names —
+                # sankey's/networkgraph's reasoning.
+                "legend": {"enabled": False},
+                "plotOptions": {
+                    "organization": {
+                        # The NODE tooltip names the box (its job title is already drawn INSIDE the
+                        # box by the organization series). It MUST live under
+                        # plotOptions[type].tooltip.nodeFormat, never the top-level tooltip: a
+                        # top-level `nodeFormat` is silently dropped (sankey's trap, verified on the
+                        # round-trip), while the series-level DiagramTooltip keeps it.
+                        "tooltip": {"nodeFormat": "{point.name}"},
+                    }
+                },
+                "series": [org_series],
+            },
+            dark=dark,
+        )
+
     if chart_type in XY_TYPES:  # scatter
         numeric_x = pd.api.types.is_numeric_dtype(df[x_col])
         series = []
@@ -3670,21 +3803,23 @@ def count_marks(
 ) -> int:
     """The number of marks ``build_options`` will draw, for the app's count-adaptive KPI
     (a heatmap's cells, a treemap's tiles, a sankey's or dependencywheel's flows, a
-    networkgraph's links, a boxplot's boxes, a waterfall's steps, a sunburst's sectors, a
-    columnrange's ranges, an arearange band's points).
+    networkgraph's links, an organization's reporting lines, a boxplot's boxes, a waterfall's
+    steps, a sunburst's sectors, a columnrange's ranges, an arearange band's points).
 
     Defined here, beside ``build_options`` and reusing its very ``_label_ok`` / ``_plottable``
     predicates, so the KPI number can never drift from what the chart actually renders — the
     reason the drop rules live in this module at all. Reads only the columns each type needs,
-    so it stays correct above ``streamlit_app``'s empty-``y_cols`` guard (heatmap and networkgraph
-    return without touching ``y_cols[0]`` — heatmap needs only the label count, networkgraph only
-    its two node columns, and networkgraph's ``y_cols`` is empty by design; every other
-    count-adaptive type uses a single-value Y control, which guarantees one y column). A row whose
+    so it stays correct above ``streamlit_app``'s empty-``y_cols`` guard (heatmap, networkgraph and
+    organization return without touching ``y_cols[0]`` — heatmap needs only the label count, and the
+    two unweighted node-link types only their two node columns, their ``y_cols`` being empty by
+    design; every other count-adaptive type uses a single-value Y control, which guarantees one y
+    column). A row whose
     label is not drawable is dropped in
     every type (the uniform
-    label policy); for treemap/sankey a non-plottable value/weight drops it too, and for
-    networkgraph a missing SECOND node (``target_col``) does — an edge needs both ends but no
-    value, since it is unweighted. A
+    label policy); for treemap/sankey a non-plottable value/weight drops it too, for
+    networkgraph a missing SECOND node (``target_col``) does, and for organization a manager that is
+    not a real node (``_is_top_level``) makes the row a root that draws a box but no reporting line —
+    an edge/line needs both ends but no value, since neither type is weighted. A
     heatmap keeps every drawable-label cell (missing ones as ``EnforcedNull``), a boxplot
     keeps one box per distinct drawable label (an all-missing group included), and a
     waterfall keeps one bar per drawable label (a missing delta included, as an
@@ -3787,6 +3922,16 @@ def count_marks(
         # Both masks are `.astype(bool)`-cast for the row-less frame, exactly as sankey's are.
         target_ok = df[target_col].map(_label_ok).astype(bool)
         return int((label_ok & target_ok).sum())
+    if chart_type in ORGANIZATION_TYPES:
+        # One mark per drawable REPORTING LINE ("Reports") — the employee drawable AND a real
+        # manager. It reuses `not _is_top_level` (NOT `_label_ok`) to match the build branch exactly:
+        # a blank/whitespace/missing manager is a ROOT that draws no edge, so `_label_ok("")` being
+        # True would overcount a quoted CSV's empty manager cell. A root's box is still drawn (its
+        # person appears as someone else's manager), but a reporting *line* it is not. Sits above the
+        # `value_ok` line (empty `y_cols`, like networkgraph); both masks `.astype(bool)`-cast for
+        # the row-less frame.
+        has_manager = df[target_col].map(lambda m: not _is_top_level(m)).astype(bool)
+        return int((label_ok & has_manager).sum())
     value_ok = df[y_cols[0]].map(_plottable).astype(bool)
     if chart_type in TREEMAP_TYPES:
         return int((label_ok & value_ok).sum())
@@ -3821,6 +3966,7 @@ def make_chart(
     parent_col: str | None = None,
     end_col: str | None = None,
     high_col: str | None = None,
+    title_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
 ) -> Chart:
@@ -3837,6 +3983,7 @@ def make_chart(
         parent_col=parent_col,
         end_col=end_col,
         high_col=high_col,
+        title_col=title_col,
         agg=agg,
         dial=dial,
     )
@@ -3845,50 +3992,54 @@ def make_chart(
     return chart
 
 
-# A browser module load-order constraint that `get_script_tags` does NOT guarantee:
-# `modules/dependency-wheel.js` EXTENDS the sankey series, so it must load AFTER `modules/sankey.js`.
-# highcharts-core resolves modules by first-seen dedup, and for a dependencywheel it walks the
-# chart's `plotOptions.dependencywheel` (which pulls `modules/dependency-wheel`) BEFORE its
-# `series.dependencywheel` (which pulls `modules/sankey` first), so it emits the dependent ahead of
-# its prerequisite — the reverse of what the browser needs. Loaded first, dependency-wheel.js throws
-# "Cannot read properties of undefined (reading 'prototype')" and Highcharts reports the series type
-# missing (error #17), leaving the iframe BLANK. The export server (the Static PNG path) loads every
-# module regardless of order, so ONLY the interactive path hits this — the `_LIGHT_COLOR_SCHEME_CSS`
+# Browser module load-order constraints that `get_script_tags` does NOT guarantee: a module that
+# EXTENDS another must load AFTER it. Two of this app's types hit this — `modules/dependency-wheel`
+# and `modules/organization` both extend the sankey series, so both must load after
+# `modules/sankey.js`. highcharts-core resolves modules by first-seen dedup, and for either type it
+# walks the chart's `plotOptions.<type>` (which pulls only the dependent module) BEFORE its
+# `series.<type>` (which pulls `modules/sankey` first), so it emits the dependent AHEAD of its
+# prerequisite — the reverse of what the browser needs. Loaded first, the dependent throws "Cannot
+# read properties of undefined (reading 'prototype')" and Highcharts reports the series type missing
+# (error #17), leaving the iframe BLANK. The export server (the Static PNG path) loads every module
+# regardless of order, so ONLY the interactive path hits this — the `_LIGHT_COLOR_SCHEME_CSS`
 # two-render-modes-must-agree rule, and the solidgauge-pane trap one function up, in mirror: there a
-# MISSING module blanks the iframe, here a MISORDERED one does. This is the ONE such edge today,
-# solved directly; a second would generalize it to a list, the way GAUGE_TYPES split only once a
-# second gauge existed.
+# MISSING module blanks the iframe, here a MISORDERED one does. A LIST of (prerequisite, dependent)
+# pairs — the generalization the single dependency-wheel edge's own comment predicted the day a
+# second such edge (organization) arrived, the way GAUGE_TYPES split only once a second gauge did.
 _SANKEY_MODULE = "modules/sankey.js"
-_DEPENDENCY_WHEEL_MODULE = "modules/dependency-wheel.js"
+_MODULE_LOAD_ORDER = (
+    (_SANKEY_MODULE, "modules/dependency-wheel.js"),
+    (_SANKEY_MODULE, "modules/organization.js"),
+)
 
 
 def _order_script_tags(script_tags: str) -> str:
-    """Ensure ``modules/sankey.js`` loads before ``modules/dependency-wheel.js`` (the wheel module
-    extends the sankey series). Reorders the tag LINES from ``get_script_tags`` rather than
-    rebuilding them, so highcharts-core stays the single source of tag format.
+    """Ensure each module that EXTENDS another loads after it — ``modules/dependency-wheel.js`` and
+    ``modules/organization.js`` both extend the sankey series, so both must follow
+    ``modules/sankey.js`` (see ``_MODULE_LOAD_ORDER``). Reorders the tag LINES from
+    ``get_script_tags`` rather than rebuilding them, so highcharts-core stays the single source of
+    tag format.
 
-    RAISES when the wheel module is present without its sankey prerequisite: the chart pulled a
-    module that extends one it did not, so no reordering can make it render and the interactive
-    iframe would blank silently (the module-load bug this exists to prevent). A loud error beats an
+    RAISES when a dependent module is present without its prerequisite: the chart pulled a module
+    that extends one it did not, so no reordering can make it render and the interactive iframe
+    would blank silently (the module-load bug this exists to prevent). A loud error beats an
     invisible one, and it also catches the day a module is renamed or the tag format drifts, when
-    the substring match would otherwise just no-op. Any chart without the wheel module (a plain
+    the substring match would otherwise just no-op. Any chart without a dependent module (a plain
     sankey, or any other type) is returned untouched.
     """
     lines = script_tags.split("\n")
-    dep_idx = next(
-        (i for i, ln in enumerate(lines) if _DEPENDENCY_WHEEL_MODULE in ln), None
-    )
-    if dep_idx is None:
-        return script_tags  # no wheel module: nothing to order
-    pre_idx = next((i for i, ln in enumerate(lines) if _SANKEY_MODULE in ln), None)
-    if pre_idx is None:
-        raise ValueError(
-            f"{_DEPENDENCY_WHEEL_MODULE} is present without its prerequisite "
-            f"{_SANKEY_MODULE}: the chart pulled a module that extends one it did not, "
-            f"and cannot render"
-        )
-    if pre_idx > dep_idx:
-        lines.insert(dep_idx, lines.pop(pre_idx))
+    for prerequisite, dependent in _MODULE_LOAD_ORDER:
+        dep_idx = next((i for i, ln in enumerate(lines) if dependent in ln), None)
+        if dep_idx is None:
+            continue  # this dependent module absent: nothing to order for it
+        pre_idx = next((i for i, ln in enumerate(lines) if prerequisite in ln), None)
+        if pre_idx is None:
+            raise ValueError(
+                f"{dependent} is present without its prerequisite {prerequisite}: the "
+                f"chart pulled a module that extends one it did not, and cannot render"
+            )
+        if pre_idx > dep_idx:
+            lines.insert(dep_idx, lines.pop(pre_idx))
     return "\n".join(lines)
 
 
@@ -3907,6 +4058,7 @@ def build_chart_html(
     parent_col: str | None = None,
     end_col: str | None = None,
     high_col: str | None = None,
+    title_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
 ) -> str:
@@ -3934,6 +4086,7 @@ def build_chart_html(
         parent_col=parent_col,
         end_col=end_col,
         high_col=high_col,
+        title_col=title_col,
         agg=agg,
         dial=dial,
     )
@@ -3996,6 +4149,7 @@ def build_chart_png(
     parent_col: str | None = None,
     end_col: str | None = None,
     high_col: str | None = None,
+    title_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
 ) -> bytes:
@@ -4020,6 +4174,7 @@ def build_chart_png(
         parent_col=parent_col,
         end_col=end_col,
         high_col=high_col,
+        title_col=title_col,
         agg=agg,
         dial=dial,
     )

@@ -120,9 +120,9 @@ from highcharts_builder import (  # noqa: E402
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     MAGNITUDE_RANGE_TYPES,
-    NETWORKGRAPH_TYPES,
     NODE_LINK_TYPES,
     SUPPORTED_TYPES,
+    UNWEIGHTED_NODE_LINK_TYPES,
     _gauge_reading_label,
     _needle_radii,
     _pct,
@@ -179,15 +179,16 @@ def _size_for(chart_type: str) -> str | None:
 
 def _target_for(chart_type: str) -> str | None:
     """The target column those same sweeps pass for the node-link cases: sankey,
-    dependencywheel and networkgraph all require one (the far end of every edge, reusing one
-    ``target_col``); other
+    dependencywheel, networkgraph and organization all require one (the far end of every
+    edge/reporting link, reusing one ``target_col``); other
     types ignore it, so it's None. The
     ``_size_for`` idea, for the other types with a required companion column — the
     sweeps assert invariants that must hold for *every* type (it builds, it carries
     the palette, dark mode paints the background), so a type that needs an extra
-    column adapts its input rather than dropping out. Networkgraph is built by the sweeps with
-    the shared ``y_cols=["value"]``, which it simply IGNORES (it has no value channel); its own
-    empty-``y_cols`` behaviour is pinned separately (``test_networkgraph_builds_with_empty_y_cols``)."""
+    column adapts its input rather than dropping out. Networkgraph and organization are built by the
+    sweeps with the shared ``y_cols=["value"]``, which both simply IGNORE (neither has a value
+    channel); their own empty-``y_cols`` behaviour is pinned separately
+    (``test_networkgraph_builds_with_empty_y_cols`` / ``test_organization_builds_with_empty_y_cols``)."""
     return "target" if chart_type in NODE_LINK_TYPES else None
 
 
@@ -488,13 +489,15 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
 
 
 @pytest.mark.parametrize(
-    "chart_type", ["treemap", "sankey", "dependencywheel", "networkgraph"]
+    "chart_type",
+    ["treemap", "sankey", "dependencywheel", "networkgraph", "organization"],
 )
 def test_count_marks_casts_every_mask_not_just_the_label_one(chart_type):
     # The types that AND their masks together (`label_ok & value_ok`, plus sankey's/
-    # networkgraph's `target_ok` — networkgraph ANDs `label_ok & target_ok` with no value mask,
-    # since it is unweighted). On a row-less frame each `.map()` returns a non-boolean Series, and
-    # once
+    # networkgraph's/organization's `target_ok` — the two unweighted node-link types AND
+    # `label_ok & target_ok` with no value mask, since they carry no weight; organization's
+    # second mask reads `not _is_top_level` rather than `_label_ok`, but is cast the same way).
+    # On a row-less frame each `.map()` returns a non-boolean Series, and once
     # the label mask alone is cast, `bool & str` still evaluates — so a missing cast on the
     # OTHER masks is invisible to an ordinary assertion. It is not harmless: pandas emits a
     # deprecation saying the operation will RAISE in pandas 4 and that the operand must be
@@ -1033,14 +1036,16 @@ def test_rejects_unsupported_type():
 
 
 @pytest.mark.parametrize(
-    "chart_type", [t for t in SUPPORTED_TYPES if t not in NETWORKGRAPH_TYPES]
+    "chart_type", [t for t in SUPPORTED_TYPES if t not in UNWEIGHTED_NODE_LINK_TYPES]
 )
 def test_rejects_empty_y_cols(chart_type):
-    # Every type needs at least one y column — EXCEPT networkgraph, the one type with no value
-    # channel (its marks are the edges between two node columns). It is excluded here and pinned
-    # the other way by `test_networkgraph_builds_with_empty_y_cols`: the exclusion is the mirror
-    # of the gauge family's exclusion from the label sweep — a positive assertion of the missing
-    # channel, not an oversight.
+    # Every type needs at least one y column — EXCEPT the two UNWEIGHTED node-link types
+    # (networkgraph and organization), whose marks are edges/reporting lines sized by nothing. They
+    # are excluded here and pinned the other way by `test_networkgraph_builds_with_empty_y_cols` /
+    # `test_organization_builds_with_empty_y_cols`: the exclusion is the mirror of the gauge
+    # family's exclusion from the label sweep — a positive assertion of the missing channel, not an
+    # oversight. (Excluding them here also matters because organization would otherwise pass this
+    # test for the WRONG reason — the missing target_col raises before empty y_cols is even reached.)
     df = pd.DataFrame({"x": [1, 2], "y": [3, 4]})
     with pytest.raises(ValueError):
         build_options(df, chart_type, "x", [])
@@ -2267,6 +2272,320 @@ def test_networkgraph_count_marks_counts_drawable_edges():
     # type is unweighted). The KPI's "Links" reads this. A row missing either node drops.
     df = pd.DataFrame({"src": ["A", None, "C", "D"], "dst": ["B", "Y", None, "E"]})
     assert count_marks(df, "networkgraph", "src", [], target_col="dst") == 2
+
+
+# --------------------------------------------------------------------------- #
+# Organization (a titled reporting hierarchy — the fourth node-link type). Its
+# data is one row per PERSON (employee, manager, title); the manager is the far
+# end of the reporting link, so the link is {from: manager, to: employee}, a
+# blank manager is a ROOT, and the title rides a modeled `nodes` array. Unweighted
+# like networkgraph (empty y_cols); the one node-link type with a `title_col`.
+# --------------------------------------------------------------------------- #
+def test_organization_builds_links_and_nodes():
+    # The core shape: one row per PERSON becomes a {from: manager, to: employee} link (SWAPPED —
+    # the tree flows down from a manager, which Highcharts draws as `from`), plus a `nodes` array
+    # carrying each person's job title. Drawn top-down (chart.inverted). Ada has a blank manager, so
+    # she is the ROOT: no incoming link, but a titled node that Bo and Cy hang off.
+    df = pd.DataFrame(
+        {
+            "emp": ["Ada", "Bo", "Cy"],
+            "mgr": ["", "Ada", "Ada"],
+            "title": ["CEO", "VP", "VP"],
+        }
+    )
+    opts = build_options(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    assert opts["chart"]["type"] == "organization"
+    assert opts["chart"]["inverted"] is True  # top-down, the conventional org chart
+    assert opts["series"][0]["data"] == [
+        {"from": "Ada", "to": "Bo"},
+        {"from": "Ada", "to": "Cy"},
+    ]
+    assert opts["series"][0]["nodes"] == [
+        {"id": "Ada", "name": "Ada", "title": "CEO"},
+        {"id": "Bo", "name": "Bo", "title": "VP"},
+        {"id": "Cy", "name": "Cy", "title": "VP"},
+    ]
+    assert "xAxis" not in opts and "yAxis" not in opts  # a node diagram, no axes
+    assert "colorAxis" not in opts
+
+
+def test_organization_builds_with_empty_y_cols():
+    # The positive half of test_rejects_empty_y_cols' organization EXCLUSION: an org chart is
+    # unweighted, so an empty y_cols is its normal state and must BUILD, not raise (networkgraph's
+    # mirror, and gauge's with a None x_col).
+    df = pd.DataFrame({"emp": ["A", "B"], "mgr": ["", "A"], "title": ["CEO", "CTO"]})
+    opts = build_options(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    assert opts["series"][0]["data"] == [{"from": "A", "to": "B"}]
+
+
+def test_organization_ignores_any_y_cols_it_is_given():
+    # Unweighted: a y column passed through the pure API (the sweeps do this) changes nothing — the
+    # links are identical with y_cols=["v"] and with []. The day organization reads y_cols, this
+    # fails.
+    df = pd.DataFrame({"emp": ["A", "B"], "mgr": ["", "A"], "v": [9.0, 9.0]})
+    with_y = build_options(df, "organization", "emp", ["v"], target_col="mgr")
+    without_y = build_options(df, "organization", "emp", [], target_col="mgr")
+    assert with_y["series"][0]["data"] == without_y["series"][0]["data"]
+
+
+def test_organization_root_has_no_link_but_is_still_a_node():
+    # A manager that is blank, whitespace or missing means a ROOT — `_is_top_level`, reused from
+    # sunburst (a manager IS a parent). Such a row draws NO reporting link (unlike sankey, which
+    # would drop it), but the person is still a node. This is why the build uses `not _is_top_level`
+    # and NOT `_label_ok`: `_label_ok("")` is True, so a bare label check would draw a phantom link
+    # from a nameless "" source node (the exact bug the render caught).
+    df = pd.DataFrame(
+        {
+            "emp": ["CEO", "VP", "IC", "Solo"],
+            "mgr": ["", "CEO", "VP", "   "],  # CEO blank + Solo whitespace = roots
+            "title": ["Chief", "VP Eng", "Engineer", "Founder"],
+        }
+    )
+    opts = build_options(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    links = opts["series"][0]["data"]
+    assert links == [{"from": "CEO", "to": "VP"}, {"from": "VP", "to": "IC"}]
+    assert all(
+        link["from"].strip() for link in links
+    )  # no blank/whitespace source node
+    # Every titled person is still a node, roots included (CEO leads; Solo is an island).
+    assert {n["id"] for n in opts["series"][0]["nodes"]} == {"CEO", "VP", "IC", "Solo"}
+
+
+def test_organization_titles_ride_a_nodes_array_deduped():
+    # Titles are the type's differentiator and the one thing highcharts-core lets an organization
+    # keep (sankey/networkgraph drop a `nodes` array). One entry per titled person, deduped by node
+    # key — a person named in several rows keeps the FIRST title. Without a title_col the series
+    # carries no `nodes` at all (a plain name-box hierarchy, the render-verified path).
+    df = pd.DataFrame(
+        {
+            "emp": ["Ann", "Bo", "Ann"],  # Ann appears twice
+            "mgr": ["", "Ann", "Bo"],
+            "title": ["CEO", "CTO", "Chair"],  # Ann's second title (Chair) is ignored
+        }
+    )
+    opts = build_options(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    assert opts["series"][0]["nodes"] == [
+        {"id": "Ann", "name": "Ann", "title": "CEO"},  # first title wins
+        {"id": "Bo", "name": "Bo", "title": "CTO"},
+    ]
+    plain = build_options(df, "organization", "emp", [], target_col="mgr")
+    assert "nodes" not in plain["series"][0]  # no title column -> no nodes array
+
+
+def test_organization_node_key_matches_integral_float_ids():
+    # The sunburst int/float trap, one type over: a blank manager cell widens the manager column to
+    # float64, so an integer employee id (int64) and its appearance as a manager (float64) must
+    # still MATCH. `_node_key` renders an integral float as its integer, so `2` (an employee) and
+    # `2.0` (a manager reference) are the SAME node — a bare str() would make "2" and "2.0" two
+    # people and break the tree.
+    df = pd.DataFrame({"emp": [1, 2, 3], "mgr": [None, 1, 2], "title": ["A", "B", "C"]})
+    opts = build_options(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    assert opts["series"][0]["data"] == [
+        {"from": "1", "to": "2"},
+        {"from": "2", "to": "3"},
+    ]
+    assert {n["id"] for n in opts["series"][0]["nodes"]} == {"1", "2", "3"}
+
+
+def test_organization_requires_a_manager_column():
+    # Every reporting link needs a manager end, so target_col is mandatory (a ValueError naming the
+    # type) — the shared node-link guard.
+    df = pd.DataFrame({"emp": ["A"], "mgr": ["B"]})
+    with pytest.raises(ValueError, match="organization"):
+        build_options(df, "organization", "emp", [])  # no target_col
+
+
+def test_organization_rejects_employee_as_manager():
+    # One column can't name both the employee and their manager — every person would report to
+    # themselves. The shared node-link source-vs-target guard (a fact about the two node columns).
+    df = pd.DataFrame({"emp": ["A", "B"]})
+    with pytest.raises(ValueError):
+        build_options(df, "organization", "emp", [], target_col="emp")
+
+
+def test_organization_numeric_node_labels_coerce_to_strings():
+    # Both node columns stringify via _node_key (highcharts-core rejects a non-string node name), so
+    # numeric employee/manager ids get named boxes rather than a blank chart.
+    df = pd.DataFrame({"emp": [10, 20], "mgr": [None, 10]})
+    opts = build_options(df, "organization", "emp", [], target_col="mgr")
+    assert opts["series"][0]["data"] == [{"from": "10", "to": "20"}]
+
+
+def test_organization_serializes_and_pulls_in_sankey_and_organization_modules():
+    # End to end, the type's headline serialization facts: an organization resolves
+    # modules/organization.js AND modules/sankey.js — BOTH, from chart.type alone (organization
+    # builds on sankey's diagram infrastructure, like the wheel) — and NOT highcharts-more (the
+    # plausible guess the round-trip corrects). The node TITLE must reach the JS (highcharts-core
+    # drops any key its point model doesn't model, and — unlike sankey/networkgraph — it DOES model
+    # a node `title`). colorByPoint must appear NOWHERE: the palette cycles by Highcharts' own
+    # default, and the builder sets no per-point color.
+    df = pd.DataFrame({"emp": ["A", "B"], "mgr": ["", "A"], "title": ["CEO", "CTO"]})
+    chart = make_chart(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    js = chart.to_js_literal()  # stubbed str | None; `js and` guards the None case
+    assert js and "type: 'organization'" in js
+    assert "inverted: true" in js  # drawn top-down
+    assert (
+        "title: 'CTO'" in js
+    )  # the node title survives serialization (org's differentiator)
+    assert "colorByPoint" not in js
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/organization.js" in tags
+    assert "modules/sankey.js" in tags  # organization builds on sankey's module
+    assert "highcharts-more" not in tags  # the round-trip corrects the plausible guess
+
+
+def test_organization_html_loads_sankey_before_organization():
+    # THE interactive-mode regression pin, the dependency-wheel bug recurring: modules/
+    # organization.js EXTENDS the sankey series, so it must load AFTER modules/sankey.js — but
+    # get_script_tags emits them REVERSED (it walks plotOptions before series, so the dependent is
+    # seen first). Loaded first, organization.js throws and Highcharts reports the series missing
+    # (error #17), blanking the iframe while the export-server PNG renders fine. build_chart_html
+    # fixes it via _order_script_tags (now a LIST of prerequisite/dependent pairs). Verified by
+    # rendering in a real browser. Pin the ORDER in the emitted HTML, not just the presence.
+    df = pd.DataFrame({"emp": ["A", "B"], "mgr": ["", "A"], "title": ["CEO", "CTO"]})
+    html = build_chart_html(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    assert "modules/sankey.js" in html and "modules/organization.js" in html
+    assert html.index("modules/sankey.js") < html.index("modules/organization.js")
+
+
+def test_order_script_tags_orders_organization_after_sankey():
+    # The pure reorder for the SECOND dependent pair — the generalization of _order_script_tags from
+    # one hardcoded pair to _MODULE_LOAD_ORDER. Given organization's tag ahead of sankey's
+    # (get_script_tags' actual output), it moves the prerequisite in front, idempotently; and it
+    # RAISES when the prerequisite is absent, exactly as it does for the wheel.
+    from highcharts_builder import _order_script_tags
+
+    reversed_tags = (
+        '<script src="x/highcharts.js"></script>\n'
+        '<script src="x/modules/organization.js"></script>\n'
+        '<script src="x/modules/sankey.js"></script>'
+    )
+    out = _order_script_tags(reversed_tags).split("\n")
+    assert "modules/sankey.js" in out[1]  # prerequisite moved ahead of the dependent
+    assert "modules/organization.js" in out[2]
+    assert _order_script_tags("\n".join(out)) == "\n".join(out)  # idempotent
+
+    orphaned = (
+        '<script src="x/highcharts.js"></script>\n'
+        '<script src="x/modules/organization.js"></script>'  # no modules/sankey.js
+    )
+    with pytest.raises(ValueError, match="prerequisite"):
+        _order_script_tags(orphaned)
+
+
+def test_organization_light_mode_shape():
+    # Light-mode choices nothing else guards: the legend is OFF (each node is labelled in its own
+    # box), and the node tooltip lives under plotOptions[type].tooltip.nodeFormat (a top-level one
+    # is silently dropped, sankey's trap). No `color` is set on the plotOptions — the palette cycles
+    # by Highcharts' default (an explicit series color is OVERRIDDEN, verified by rendering) — and
+    # in light mode _themed injects no dark chrome.
+    df = pd.DataFrame({"emp": ["A", "B"], "mgr": ["", "A"], "title": ["CEO", "CTO"]})
+    opts = build_options(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    assert opts["legend"]["enabled"] is False
+    assert (
+        opts["plotOptions"]["organization"]["tooltip"]["nodeFormat"] == "{point.name}"
+    )
+    assert "nodeFormat" not in opts.get(
+        "tooltip", {}
+    )  # not top-level, where it would vanish
+    assert (
+        "color" not in opts["plotOptions"]["organization"]
+    )  # palette cycles by default
+    assert "borderColor" not in opts["plotOptions"]["organization"]
+
+
+def test_organization_dark_mode_needs_no_type_hook():
+    # Organization needs NO type-specific _themed hook (like boxplot/networkgraph, and VERIFIED BY
+    # RENDERING in both themes): its boxes carry no white border to dissolve, the name/title text
+    # rides Highcharts' `contrast` color, and the palette hues and grey links read on either
+    # background. So dark mode themes only the shared chrome (background/tooltip) and touches
+    # plotOptions.organization not at all.
+    df = pd.DataFrame({"emp": ["A", "B"], "mgr": ["", "A"], "title": ["CEO", "CTO"]})
+    opts = build_options(
+        df, "organization", "emp", [], target_col="mgr", title_col="title", dark=True
+    )
+    assert opts["chart"]["backgroundColor"] == "#0f172a"
+    assert opts["tooltip"]["backgroundColor"] == "#0f172a"
+    assert "borderColor" not in opts["plotOptions"]["organization"]
+    assert "color" not in opts["plotOptions"]["organization"]
+    assert "xAxis" not in opts and "yAxis" not in opts
+
+
+def test_organization_cycles_the_palette_across_nodes():
+    # Unlike networkgraph's one-brand-hue mesh, an organization CYCLES the palette across nodes
+    # (each box a distinct identity like a pie slice — Highcharts' default, verified by rendering).
+    # So `colors` is carried and LOAD-BEARING, colorByPoint appears nowhere (the default does the
+    # cycling), and no per-node `color` is set on the node entries.
+    df = pd.DataFrame({"emp": ["A", "B"], "mgr": ["", "A"], "title": ["CEO", "CTO"]})
+    opts = build_options(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    )
+    assert opts["colors"] == list(DEFAULT_COLORS)
+    js = make_chart(
+        df, "organization", "emp", [], target_col="mgr", title_col="title"
+    ).to_js_literal()
+    assert js and "colorByPoint" not in js
+    assert all("color" not in n for n in opts["series"][0]["nodes"])
+
+
+def test_organization_count_marks_counts_reporting_lines():
+    # Its marks (for the KPI) are the REPORTING LINES: one per employee with a real manager. A root
+    # (blank/whitespace/missing manager) draws a box but no line, so it does NOT count — the count
+    # uses `not _is_top_level`, matching the build, not `_label_ok` (which would overcount a blank
+    # manager). "Reports" reads this.
+    df = pd.DataFrame(
+        {
+            "emp": ["CEO", "A", "B", "C"],
+            "mgr": [
+                "",
+                "CEO",
+                "CEO",
+                None,
+            ],  # CEO blank root; C's manager missing = also a root
+        }
+    )
+    assert count_marks(df, "organization", "emp", [], target_col="mgr") == 2
+
+
+def test_organization_count_marks_matches_the_built_links():
+    # The can't-drift invariant AS a test: count_marks and the build must agree on the SAME frame,
+    # so a future edit to one and not the other is caught (count_marks runs on the RAW frame, the
+    # build on the _label_ok-FILTERED one — they must still land on the same number). One frame with
+    # every drop kind: a root (blank manager), a nameless employee, a missing manager, and two real
+    # reports.
+    df = pd.DataFrame(
+        {
+            "emp": ["CEO", "A", None, "B", "C"],
+            "mgr": [
+                "",
+                "CEO",
+                "CEO",
+                None,
+                "CEO",
+            ],  # CEO=root; None-emp & None-mgr drop; A/C report
+        }
+    )
+    links = build_options(df, "organization", "emp", [], target_col="mgr")["series"][0][
+        "data"
+    ]
+    assert links == [{"from": "CEO", "to": "A"}, {"from": "CEO", "to": "C"}]
+    assert count_marks(df, "organization", "emp", [], target_col="mgr") == len(links)
 
 
 # --------------------------------------------------------------------------- #
@@ -5703,6 +6022,41 @@ def test_service_dependencies_sample_builds_a_networkgraph_chart():
     assert all(set(e) == {"from", "to"} for e in edges)
 
 
+def test_reporting_lines_sample_builds_an_organization_chart():
+    # Ties the org sample to its type end to end: one row per person, drawn as titled boxes. Its
+    # first person (Nadia) has a BLANK manager — the root — so she draws no reporting line but leads
+    # the chart; everyone else names a real manager, and several are BOTH a manager and a report,
+    # which gives the tree depth. The `title` column feeds the node cards; the numeric
+    # `tenure_years` is IGNORED (an org chart is unweighted) but carried so the roster clears the
+    # app's no-numeric-columns gate.
+    from sample_data import _reporting_lines
+
+    df = _reporting_lines()
+    opts = build_options(
+        df, "organization", "employee", [], target_col="manager", title_col="title"
+    )
+    assert opts["chart"]["type"] == "organization"
+    links = opts["series"][0]["data"]
+    assert (
+        len(links) == len(df) - 1
+    )  # everyone but the one root (Nadia) is a reporting line
+    assert {"from": "Nadia", "to": "Priya"} in links  # a VP reports to the CEO
+    assert {
+        "from": "Priya",
+        "to": "Sana",
+    } in links  # ...and a manager reports to that VP
+    assert all(link["to"] != "Nadia" for link in links)  # the root has no incoming link
+    nodes = {n["id"]: n["title"] for n in opts["series"][0]["nodes"]}
+    assert (
+        nodes["Nadia"] == "Chief Executive Officer"
+    )  # the root still carries its title card
+    # A genuine numeric column (clears the gate), which the org chart never reads.
+    from pandas.api.types import is_numeric_dtype
+
+    assert is_numeric_dtype(df["tenure_years"])
+    assert all(set(link) == {"from", "to"} for link in links)  # no weight
+
+
 def test_response_times_sample_builds_a_boxplot_chart():
     # Ties the new boxplot sample to its intended type end to end. Like the sankey sample
     # (and unlike every other, which has one row per unique x value) its x values REPEAT
@@ -6077,6 +6431,83 @@ def test_app_networkgraph_kpi_shows_links(app):
     assert "Series plotted" not in metrics
     default_df = next(iter(SAMPLES.values()))()
     assert metrics["Links"] == f"{len(default_df):,}"
+
+
+def test_app_switch_to_organization_shows_manager_title_hides_y(app):
+    # Organization is unweighted like networkgraph (no Y control), but ADDS a Title control — so
+    # after switching it shows Employee/Manager/Title selectboxes and NO Y widget (neither pills nor
+    # a Y selectbox). The Target control is relabelled "Manager (to)". The config still generates
+    # without a Y, an empty y_cols being valid here. Network-free.
+    assert app.pills  # the default `line` type shows multi-select Y pills...
+    app.selectbox[1].set_value("organization").run()  # Chart type -> organization
+    assert not app.exception
+    assert not app.pills  # ...gone, and NOT replaced by a Y selectbox
+    labels = {sb.label for sb in app.selectbox}
+    assert labels == {
+        "Dataset",
+        "Chart type",
+        "Employee (node)",
+        "Manager (to)",
+        "Title",
+    }
+    _reveal_config(app)
+    assert not app.exception
+    assert "type: 'organization'" in app.code[0].value
+
+
+def test_app_organization_kpi_shows_reports(app):
+    # One org series, so — like sankey/networkgraph — the KPI swaps "Series plotted" (a bare 1) for
+    # "Reports" = the rows with a real manager. The default dataset's manager column (its 2nd
+    # column) has no blanks, so every row is a reporting line. Also proves the empty-Y guard exempts
+    # organization: the KPI and chart render with no Y selected.
+    from sample_data import SAMPLES
+
+    app.selectbox[1].set_value("organization").run()  # Chart type -> organization
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    default_df = next(iter(SAMPLES.values()))()
+    assert metrics["Reports"] == f"{len(default_df):,}"
+
+
+def test_app_organization_source_equals_manager_shows_guard_warning(app):
+    # Organization shares the node-link source-vs-target guard: an employee can't be their own
+    # manager. The default Employee is the first column, so pointing Manager at it collides.
+    app.selectbox[1].set_value("organization").run()  # Chart type -> organization
+    manager = next(sb for sb in app.selectbox if sb.label == "Manager (to)")
+    manager.set_value("month").run()  # == the default Employee column
+    assert not app.exception
+    assert app.warning
+    assert "Source and Target must be different" in app.warning[0].value
+
+
+_ROSTER_CSV = b"employee,manager,title\nAda,,CEO\nBo,Ada,CTO\nCy,Ada,CFO\n"
+
+
+def test_app_organization_plots_a_csv_with_no_numeric_columns(app):
+    # THE GATE, organization's half of it — networkgraph's mirror. A plain roster is three TEXT
+    # columns and not one number, so the no-numeric-columns gate would refuse the type's most
+    # natural input. Organization is now exempt (it reads its columns as node/title labels), so the
+    # file plots; a root (Ada's blank manager) draws no line, so 3 people with 1 root give 2
+    # Reports. The Title control defaults to the third column ("title"), so the cards show at once.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("roster.csv", _ROSTER_CSV, "text/csv")).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("organization").run()
+    assert not app.exception
+    assert not app.error  # NOT "this dataset has no numeric columns to plot"
+    metrics = _metrics(app)
+    assert metrics["Numeric columns"] == "0"  # ...and yet
+    assert (
+        metrics["Reports"] == "2"
+    )  # Bo and Cy report to Ada; Ada (blank manager) is the root
+
+    # The gate stays honest in the other direction: the same file on a type that really does need a
+    # number must still be refused.
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("line").run()
+    assert app.error
+    assert "no numeric columns" in app.error[0].value
 
 
 def test_app_switch_to_boxplot_shows_single_select_y_and_regenerates_config(app):

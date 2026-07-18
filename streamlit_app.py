@@ -22,9 +22,10 @@ from highcharts_builder import (
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     MAGNITUDE_RANGE_TYPES,
-    NETWORKGRAPH_TYPES,
     NODE_LINK_TYPES,
+    ORGANIZATION_TYPES,
     SUPPORTED_TYPES,
+    UNWEIGHTED_NODE_LINK_TYPES,
     WEIGHTED_NODE_LINK_TYPES,
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
@@ -86,6 +87,12 @@ MARK_METRICS = {
     # for the same reason sankey does, and — unlike the gauge family, its mirror in having a
     # subtractive control — it is NOT a `marks == len(y_cols)` type: its y_cols is empty.
     "networkgraph": "Links",
+    # Organization is the fourth node-link type — also single-series (one org series), so its
+    # default "Series plotted" would misreport as a bare 1. Its marks are the REPORTING LINES
+    # (one per employee with a real manager; a root/CEO draws a box but no line), counted by the
+    # same both-ends-present predicate as networkgraph but reading "Reports". A blank manager is a
+    # root, not an edge, so the count uses `not _is_top_level` there rather than `_label_ok`.
+    "organization": "Reports",
     "boxplot": "Boxes",
     "waterfall": "Steps",  # counts the appended Total, as the chart draws it
     "sunburst": "Sectors",  # likewise counts the appended root — the other appending type
@@ -144,6 +151,7 @@ def cached_chart_html(
     parent_col,
     end_col,
     high_col,
+    title_col,
     agg,
     dial,
 ) -> str:
@@ -160,6 +168,7 @@ def cached_chart_html(
         parent_col=parent_col,
         end_col=end_col,
         high_col=high_col,
+        title_col=title_col,
         agg=agg,
         dial=dial,
     )
@@ -181,6 +190,7 @@ def cached_chart_png(
     parent_col,
     end_col,
     high_col,
+    title_col,
     agg,
     dial,
 ) -> bytes:
@@ -197,6 +207,7 @@ def cached_chart_png(
         parent_col=parent_col,
         end_col=end_col,
         high_col=high_col,
+        title_col=title_col,
         agg=agg,
         dial=dial,
     )
@@ -215,6 +226,7 @@ def cached_chart_js(
     parent_col,
     end_col,
     high_col,
+    title_col,
     agg,
     dial,
 ) -> str:
@@ -232,6 +244,7 @@ def cached_chart_js(
         parent_col=parent_col,
         end_col=end_col,
         high_col=high_col,
+        title_col=title_col,
         agg=agg,
         dial=dial,
     ).to_js_literal()
@@ -310,6 +323,10 @@ with st.sidebar:
             "- **networkgraph** — a Source and a Target column of node names (no value "
             "column); each row is one edge, laid out as a force-directed graph of who "
             "connects to whom\n"
+            "- **organization** — an org chart, one row per person: an **Employee** column, "
+            "a **Manager** column (blank = the top of the chart, e.g. the CEO), and a **Title** "
+            "column drawn inside each box (no value column). The boxes are laid out top-down as a "
+            "reporting hierarchy\n"
             "- **heatmap** — a category X axis and one or more numeric Y columns "
             "form a grid (each selected column becomes a row); each cell's color "
             "shows its value\n"
@@ -350,14 +367,15 @@ with st.sidebar:
     )
 
     # The no-plottable-columns gate. It runs HERE, below the chart-type picker, because the
-    # answer depends on the type. MOST types need a NUMBER, but two do not, and each is exempted:
+    # answer depends on the type. MOST types need a NUMBER, but three do not, and each is exempted:
     # xrange's start/end are coordinates and may be dates — and a date column is object dtype, so a
-    # real Gantt CSV (`task,start,end`, all dates) has no numeric columns whatsoever — while
-    # networkgraph reads two columns as node LABELS and needs no number at all, so the canonical
-    # edge-list CSV (`source,target`, both text) likewise has none. Gating on numeric_cols before
+    # real Gantt CSV (`task,start,end`, all dates) has no numeric columns whatsoever — while the two
+    # UNWEIGHTED node-link types read their columns as node/title LABELS and need no number at all,
+    # so the canonical edge-list CSV (`source,target`, both text) and a plain reporting roster
+    # (`employee,manager,title`, all text) likewise have none. Gating on numeric_cols before
     # the picker was drawn refused those files at the door, with a message about a requirement the
-    # type does not have. Networkgraph needs no gate of its own: with fewer than two columns the
-    # Source == Target guard in the main panel says so.
+    # type does not have. Neither unweighted type needs a gate of its own: with fewer than two
+    # columns the Source == Target guard in the main panel says so.
     if chart_type == "xrange" and not coord_cols:
         st.error(
             "This dataset has no date or number columns to place a bar on.",
@@ -366,7 +384,7 @@ with st.sidebar:
         st.stop()
     if (
         chart_type != "xrange"
-        and chart_type not in NETWORKGRAPH_TYPES
+        and chart_type not in UNWEIGHTED_NODE_LINK_TYPES
         and not numeric_cols
     ):
         st.error(
@@ -402,6 +420,14 @@ with st.sidebar:
         # dangling. This is the MIRROR of the gauge family: gauge has a value but no label (no X),
         # networkgraph a label but no value (no Y).
         x_label, y_label, multi = "Source (from)", "", False
+    elif chart_type in ORGANIZATION_TYPES:
+        # The fourth node-link type: one row per person — the employee (this X selectbox), their
+        # manager (the Target selectbox below, relabelled "Manager") and a job title (the Title
+        # selectbox below). UNWEIGHTED like networkgraph, so no Y control at all (skipped in the
+        # y_cols block below); `y_label`/`multi` are assigned for the shape but go unused. The X
+        # label names the PERSON, not a generic "source", since a reader picking a column should be
+        # told it is the employee that each box will name.
+        x_label, y_label, multi = "Employee (node)", "", False
     elif chart_type == "boxplot":
         # Long/tidy: the X column's values REPEAT (one row per observation) and one
         # numeric column carries the raw measurements the builder aggregates into a box
@@ -472,10 +498,12 @@ with st.sidebar:
 
     # The node-link types' second node column, sitting next to Source so the two ends of a link
     # read as a pair. Drawn from every column, not numeric_cols like bubble's
-    # Size (Z): a node name is a label. Shown for ALL THREE node-link types — sankey, its circular
-    # twin dependencywheel, and networkgraph — which reuse one Target control and one `target_col`
-    # (None otherwise, and
-    # ignored by the other builders). The index is a CONSTANT for the same reason
+    # Size (Z): a node name is a label. Shown for ALL FOUR node-link types — sankey, its circular
+    # twin dependencywheel, networkgraph, and organization — which reuse one Target control and one
+    # `target_col` (None otherwise, and
+    # ignored by the other builders). Organization relabels it "Manager (to)": it reads this column
+    # as each employee's manager (the far end of the reporting link), so the domain word beats the
+    # generic "Target". The index is a CONSTANT for the same reason
     # the Y default below is: these widgets are keyless, so Streamlit folds it into
     # their identity — the tempting "the column after Source" default would re-mint
     # this widget and silently reset the user's Target every time they changed
@@ -484,7 +512,9 @@ with st.sidebar:
     target_col = None
     if chart_type in NODE_LINK_TYPES:
         target_col = st.selectbox(
-            "Target (to)", df.columns, index=min(1, len(df.columns) - 1)
+            "Manager (to)" if chart_type in ORGANIZATION_TYPES else "Target (to)",
+            df.columns,
+            index=min(1, len(df.columns) - 1),
         )
 
     # Sunburst's second label column, sitting next to Node for the same reason sankey's Target
@@ -507,13 +537,27 @@ with st.sidebar:
             ),
         )
 
-    if chart_type in NETWORKGRAPH_TYPES:
-        # Networkgraph draws NO Y control and passes an empty list. It is the one type with no
-        # VALUE channel — its marks are the edges between two node columns, sized by nothing — so a
-        # Y picker would drive nothing, and rendering a control that does nothing lies in the UI
-        # exactly as an X control would for the gauge family. `build_options` accepts an empty
-        # `y_cols` for networkgraph precisely so this can be honest (the mirror of gauge's `None`
-        # x_col). The empty-Y guard in the main panel exempts it for the same reason.
+    # Organization's third label column: a per-node job title, drawn inside each box under the
+    # name. Sits after Manager (Target) for the same reason sankey's Target sits after Source — the
+    # columns of one relation read together. Drawn from every column (a title is a LABEL, like
+    # Manager/Parent, not a number), and the index is a CONSTANT, exactly as those are: keyless, so
+    # a default derived from Employee/Manager would re-mint the widget and reset the user's Title on
+    # every change. It defaults to the column after the two node ones (index 2), where a job title
+    # sits in a person-per-row CSV, so the sample shows its title cards without a click. (A
+    # name-only hierarchy — `title_col=None` — is reachable from the pure builder API and pinned by
+    # a test; the app always names a title column, as it always names a Target/Parent/End/High.)
+    title_col = None
+    if chart_type in ORGANIZATION_TYPES:
+        title_col = st.selectbox("Title", df.columns, index=min(2, len(df.columns) - 1))
+
+    if chart_type in UNWEIGHTED_NODE_LINK_TYPES:
+        # The two UNWEIGHTED node-link types (networkgraph and organization) draw NO Y control and
+        # pass an empty list. They have no VALUE channel — a networkgraph's marks are the edges and
+        # an organization's are reporting lines, sized by nothing — so a Y picker would drive
+        # nothing, and rendering a control that does nothing lies in the UI exactly as an X control
+        # would for the gauge family. `build_options` accepts an empty `y_cols` for both precisely
+        # so this can be honest (the mirror of gauge's `None` x_col). The empty-Y guard in the main
+        # panel exempts them for the same reason.
         y_cols = []
     elif multi:
         # Pills keep every series choice inline and compact, but past
@@ -738,10 +782,11 @@ with right.container(border=True, height="stretch"):
 with left.container(border=True, height="stretch"):
     st.subheader("Highcharts output")
 
-    if not y_cols and chart_type not in NETWORKGRAPH_TYPES:
-        # Networkgraph is exempt: it has no value channel, so an empty Y selection is its normal
-        # state, not an error (the mirror of the gauge family, which is exempt from the X guard).
-        # The KPI row above already shows its "Links" count over this same empty selection.
+    if not y_cols and chart_type not in UNWEIGHTED_NODE_LINK_TYPES:
+        # The two unweighted node-link types (networkgraph, organization) are exempt: they have no
+        # value channel, so an empty Y selection is their normal state, not an error (the mirror of
+        # the gauge family, which is exempt from the X guard). The KPI row above already shows their
+        # "Links"/"Reports" count over this same empty selection.
         st.warning(
             "Pick at least one numeric column to plot.", icon=":material/warning:"
         )
@@ -872,6 +917,7 @@ with left.container(border=True, height="stretch"):
                 parent_col,
                 end_col,
                 high_col,
+                title_col,
                 agg,
                 dial,
             )
@@ -911,6 +957,7 @@ with left.container(border=True, height="stretch"):
             parent_col,
             end_col,
             high_col,
+            title_col,
             agg,
             dial,
         )
@@ -943,6 +990,7 @@ with left.container(border=True, height="stretch"):
             parent_col,
             end_col,
             high_col,
+            title_col,
             agg,
             dial,
         )

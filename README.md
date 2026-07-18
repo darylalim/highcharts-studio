@@ -69,6 +69,7 @@ theme, which you can toggle from Streamlit's settings menu.
 | `sankey` | A flow diagram: each row links two node columns, weighted by a value | Target |
 | `dependencywheel` | A circular sankey: the same weighted links drawn as nodes on a ring | Target |
 | `networkgraph` | A force-directed graph of unweighted edges between two node columns | Target (no Y) |
+| `organization` | A top-down org chart: titled boxes linked employee→manager | Manager, Title (no Y) |
 | `boxplot` | Per-category Tukey distributions from repeated observations | — |
 | `waterfall` | A cumulative bridge of signed deltas, with a closing Total bar | — |
 | `sunburst` | A hierarchy as concentric rings from a parent column and leaf values | Parent |
