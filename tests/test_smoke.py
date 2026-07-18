@@ -6510,6 +6510,47 @@ def test_app_organization_plots_a_csv_with_no_numeric_columns(app):
     assert "no numeric columns" in app.error[0].value
 
 
+_ROSTER_2COL_CSV = b"employee,manager\nAda,\nBo,Ada\nCy,Ada\n"
+
+
+def test_app_organization_two_column_csv_draws_name_only(app):
+    # The 2-column-collision guard, primary half: a roster with only Employee and Manager (no title
+    # column) must draw a plain NAME-ONLY hierarchy, NOT clamp the Title control onto the Manager
+    # column and mislabel every box with its manager's name. The Title control defaults to
+    # "(no titles)" (title_col=None) when there is no third column, so no `nodes` array is emitted
+    # and no collision warning fires.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("roster2.csv", _ROSTER_2COL_CSV, "text/csv")).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("organization").run()
+    assert not app.exception
+    assert not app.error  # gate exempt (no numeric columns needed)
+    assert not app.warning  # no collision: Title defaulted to "(no titles)"
+    metrics = _metrics(app)
+    assert (
+        metrics["Reports"] == "2"
+    )  # Bo and Cy report to Ada; Ada (blank manager) is the root
+    _reveal_config(app)
+    assert not app.exception
+    js = app.code[0].value
+    assert "type: 'organization'" in js
+    assert "nodes" not in js  # name-only: no title cards, so no nodes array
+
+
+def test_app_organization_title_equals_manager_shows_guard_warning(app):
+    # The 2-column-collision guard, deliberate half: even with a title column available, manually
+    # pointing Title at the Employee or Manager column is a plausible-looking lie (every box titled
+    # with its own or its manager's name), so the app warns and stops. Unlike the source-vs-target
+    # guard it is app-only (the pure build tolerates it, being drawable). The default sample's
+    # Manager is its second column ("revenue"); setting Title to it collides.
+    app.selectbox[1].set_value("organization").run()  # Chart type -> organization
+    title = next(sb for sb in app.selectbox if sb.label == "Title")
+    title.set_value("revenue").run()  # == the default Manager column
+    assert not app.exception
+    assert app.warning
+    assert "Title must be a different column" in app.warning[0].value
+
+
 def test_app_switch_to_boxplot_shows_single_select_y_and_regenerates_config(app):
     # Boxplot reads its Y as one column of raw observations, so — like pie/treemap/sankey
     # — it swaps the multi-select Y pills for a single selectbox. It needs no EXTRA

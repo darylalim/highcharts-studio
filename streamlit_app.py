@@ -537,18 +537,27 @@ with st.sidebar:
             ),
         )
 
-    # Organization's third label column: a per-node job title, drawn inside each box under the
-    # name. Sits after Manager (Target) for the same reason sankey's Target sits after Source — the
-    # columns of one relation read together. Drawn from every column (a title is a LABEL, like
-    # Manager/Parent, not a number), and the index is a CONSTANT, exactly as those are: keyless, so
-    # a default derived from Employee/Manager would re-mint the widget and reset the user's Title on
-    # every change. It defaults to the column after the two node ones (index 2), where a job title
-    # sits in a person-per-row CSV, so the sample shows its title cards without a click. (A
-    # name-only hierarchy — `title_col=None` — is reachable from the pure builder API and pinned by
-    # a test; the app always names a title column, as it always names a Target/Parent/End/High.)
+    # Organization's third label column: an OPTIONAL per-node job title, drawn inside each box under
+    # the name. Sits after Manager (Target) for the same reason sankey's Target sits after Source —
+    # the columns of one relation read together. A leading "(no titles)" makes the control optional
+    # (a name-only hierarchy — `title_col=None`), and it is also the escape a 2-column roster
+    # (employee, manager) needs: with no third column to be a title, the default falls to
+    # "(no titles)" rather than CLAMPING onto — and mislabelling every box with — the Manager column
+    # (a bare `min(2, …)` index used to do exactly that). The default is still a CONSTANT (keyless,
+    # like Target/Parent/End/High): it depends on the column COUNT, never on the Employee/Manager
+    # *selections*, so changing those never re-mints this widget and resets the user's Title. It
+    # picks the column after the two node ones (df index 2 = choices index 3) when one exists — a
+    # job title's usual spot in a person-per-row CSV, so the sample shows its cards without a click —
+    # else "(no titles)". A DELIBERATE collision (Title == Employee or Manager) is caught by the
+    # guard in the main panel.
     title_col = None
     if chart_type in ORGANIZATION_TYPES:
-        title_col = st.selectbox("Title", df.columns, index=min(2, len(df.columns) - 1))
+        title_choices = ["(no titles)", *df.columns]
+        title_col = st.selectbox(
+            "Title", title_choices, index=3 if len(df.columns) >= 3 else 0
+        )
+        if title_col == "(no titles)":
+            title_col = None
 
     if chart_type in UNWEIGHTED_NODE_LINK_TYPES:
         # The two UNWEIGHTED node-link types (networkgraph and organization) draw NO Y control and
@@ -804,6 +813,22 @@ with left.container(border=True, height="stretch"):
         st.warning(
             "Source and Target must be different columns — every link would loop "
             "back to its own node.",
+            icon=":material/warning:",
+        )
+        st.stop()
+    # Organization's Title collision: a job title can't be the Employee or the Manager column — a
+    # box titled with its own name (or its manager's) is a plausible-looking lie, not a chart anyone
+    # means. Unlike the source-vs-target collision above, it is DRAWABLE (Highcharts renders it), so
+    # this is an app guardrail only, NOT a builder ValueError — the pure build tolerates it like
+    # scatter's x-in-y. It cannot fire by accident (the Title control defaults to "(no titles)" when
+    # there is no third column, so a 2-column roster draws name-only rather than clamping onto
+    # Manager); this catches a DELIBERATE pick. `title_col is None` ("(no titles)") never matches,
+    # since x_col/target_col are real column names.
+    if chart_type in ORGANIZATION_TYPES and title_col in (x_col, target_col):
+        st.warning(
+            "Title must be a different column from Employee and Manager — otherwise every "
+            "box's title just repeats its own name or its manager's. Pick another column, "
+            'or choose the "(no titles)" option.',
             icon=":material/warning:",
         )
         st.stop()

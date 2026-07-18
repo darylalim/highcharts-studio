@@ -53,8 +53,13 @@ Dates are the last commit at that version — the point it stopped being current
   organization keep that `sankey`/`networkgraph` silently drop: a modeled `nodes` array (`{id, name,
   title}`, deduped by node key, keyed with `_node_key` so an integral-float employee id matches
   itself across the two columns). It is the **one** node-link type to add a kwarg — `title_col`,
-  since a title is not a weight — so this one does touch the cache layer; the Title control is
-  optional (a name-only hierarchy — `title_col=None` — is reachable from the pure builder API).
+  since a title is not a weight — so this one does touch the cache layer. The Title control is
+  optional via a leading **"(no titles)"** option (a name-only hierarchy — `title_col=None`), which
+  is also the escape a 2-column roster (`employee, manager`) needs: with no third column to be a
+  title, the control defaults to "(no titles)" rather than clamping onto — and mislabelling every
+  box with — the Manager column. A **deliberate** Title == Employee/Manager collision is caught by
+  an app-level guard (a warning + stop) — app-only, not a builder `ValueError`, since the choice is
+  drawable (like scatter's x-in-y), just meaningless.
 - **`_order_script_tags` generalized** from a single hardcoded `sankey → dependency-wheel` pair to a
   `_MODULE_LOAD_ORDER` **list**, because `modules/organization.js` extends the sankey series and hits
   the identical reversed-emission bug (a blank iframe beside a working PNG, **error #17**) — the
