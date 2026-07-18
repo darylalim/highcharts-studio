@@ -690,6 +690,50 @@ def _forecast_range() -> pd.DataFrame:
     )
 
 
+def _sales_vs_quota() -> pd.DataFrame:
+    """A sales team's quarterly result against its quota — one row per REGION, each an actual and
+    a target (thousands of USD).
+
+    Tailored to bullet, and deliberately the mirror of ``_temperature_range``, which is the sample
+    it looks most like and means least like. Both lead with a category column and carry two
+    magnitude columns of one unit, and both draw one mark per category — but a record-temperature
+    range's two numbers are the two ENDS OF ONE BAR (neither means anything alone; the bar IS the
+    span between them), while these two are INDEPENDENT CLAIMS about the same region: what
+    happened, and what was meant to happen. So the temperature sample draws N floating bars and
+    this one draws N bars from zero, each crossed by a reference line — and reading the two side by
+    side is the fastest way to see that "two magnitude columns" is a data SHAPE, not a chart.
+
+    The regions deliberately BEAT, MISS and exactly MATCH their quotas, and the beats are the
+    load-bearing part rather than the flattering one: an unstyled bullet's crossbar takes the
+    series hue and is drawn WIDER than the bar, so on precisely the rows where the measure exceeds
+    the goal it collapses into the fill and survives as two meaningless stubs (the trap the
+    builder's ``targetOptions.color`` exists to close). Shipping a sample where every region missed
+    would hide the one failure a reader could not diagnose. ``North`` matching its quota exactly is
+    the honest-looking edge that a per-ROW equality is fine, unlike the per-COLUMN one the app
+    guards against.
+
+    Every value is present: the missing-goal, missing-measure and missing-both cases are the tests'
+    job, not a demo's — the ``_temperature_range``/``_forecast_range`` rule. ``region`` leads with
+    the category column rather than a value, like every sample here and for the same load-bearing
+    reason: the app opens on ``line`` with the first column as X, so a numeric first column would
+    trip the x-in-y guard the instant the dataset is selected. ``deals_closed`` is a throwaway
+    numeric column the chart never reads, carried for the reason ``_reporting_lines``'s
+    ``tenure_years`` and ``_service_dependencies``'s ``calls_per_min`` are — and here it earns a
+    second keep: the app's Goal picker defaults to the SECOND numeric column, so this one sits
+    below ``quota`` rather than competing with it.
+    """
+    return pd.DataFrame(
+        {
+            "region": ["North", "South", "East", "West", "Central", "Nordics"],
+            # thousands of USD. North matches its quota exactly; South, West and Nordics beat
+            # theirs (the crossbar-contrast case); East and Central fall short.
+            "actual": [420, 512, 331, 604, 278, 466],
+            "quota": [420, 450, 400, 550, 350, 430],
+            "deals_closed": [38, 51, 29, 62, 24, 44],
+        }
+    )
+
+
 def _weekly_bookings() -> pd.DataFrame:
     """Weekly bookings by sales region — four teams, eight weeks of observations.
 
@@ -875,6 +919,7 @@ SAMPLES = {
     "Product release plan (xrange)": _release_plan,
     "Monthly temperature range (columnrange)": _temperature_range,
     "Projected monthly active users (arearange)": _forecast_range,
+    "Quarterly sales vs quota (bullet)": _sales_vs_quota,
     "Weekly bookings by region (solidgauge)": _weekly_bookings,
     "Server utilization (gauge)": _server_utilization,
 }

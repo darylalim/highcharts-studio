@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from highcharts_builder import (
+    BULLET_TYPES,
     FUNNEL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
@@ -112,6 +113,14 @@ MARK_METRICS = {
     # ONE shape, so "Points" describes what is counted (its vertices) rather than implying N
     # discrete ranges.
     "arearange": "Points",
+    # Bullet is a single measure/goal series, so its default "Series plotted" would
+    # misreport as a bare 1 exactly as columnrange's and arearange's would. Its marks are the
+    # MEASURE BARS — one per surviving category — and unlike columnrange's, NEITHER value
+    # column can drop one: a bar with no goal and a lone goal crossbar are both drawn, so the
+    # count is exactly the surviving-label count. "Measures" rather than "Bars" (xrange's
+    # noun) because the bar is only half of what a bullet draws — the crossbar is the other
+    # half, and the number counts the pairing, not the rectangles.
+    "bullet": "Measures",
     # Gauge is deliberately ABSENT, and it is the first type whose absence is worth stating.
     # Its marks ARE its series — one ring per y column, and a column with no data keeps its ring
     # as a null rather than being dropped — so "Series plotted" is already literally the ring
@@ -152,6 +161,7 @@ def cached_chart_html(
     end_col,
     high_col,
     title_col,
+    goal_col,
     agg,
     dial,
 ) -> str:
@@ -169,6 +179,7 @@ def cached_chart_html(
         end_col=end_col,
         high_col=high_col,
         title_col=title_col,
+        goal_col=goal_col,
         agg=agg,
         dial=dial,
     )
@@ -191,6 +202,7 @@ def cached_chart_png(
     end_col,
     high_col,
     title_col,
+    goal_col,
     agg,
     dial,
 ) -> bytes:
@@ -208,6 +220,7 @@ def cached_chart_png(
         end_col=end_col,
         high_col=high_col,
         title_col=title_col,
+        goal_col=goal_col,
         agg=agg,
         dial=dial,
     )
@@ -227,6 +240,7 @@ def cached_chart_js(
     end_col,
     high_col,
     title_col,
+    goal_col,
     agg,
     dial,
 ) -> str:
@@ -245,6 +259,7 @@ def cached_chart_js(
         end_col=end_col,
         high_col=high_col,
         title_col=title_col,
+        goal_col=goal_col,
         agg=agg,
         dial=dial,
     ).to_js_literal()
@@ -356,6 +371,10 @@ with st.sidebar:
             "one continuous **filled band** between a low line and a high line (best when the X "
             "axis is an ordered progression, e.g. a forecast band over time). A row missing either "
             "end breaks the band there; an inverted range still draws\n"
+            "- **bullet** — a KPI strip: a category X axis + a **Measure** column drawn as a bar "
+            "and a **Goal** column drawn as a **crossbar** over it, one pair per category "
+            "('actual against target'). Either column may be blank on a row — the bar and the "
+            "crossbar draw independently — and a measure below its goal is an ordinary reading\n"
             "- **solidgauge / gauge** — one mark per **numeric column**, each collapsed to a "
             "single number by the aggregation you choose (sum / mean / …), all read against one "
             "shared dial. There is **no X column**: a gauge has no labels, only readings. "
@@ -466,6 +485,16 @@ with st.sidebar:
         # value should be told which END of the range it becomes (xrange's Start/End reasoning,
         # magnitudes).
         x_label, y_label, multi = "Category (X) axis", "Low (bottom)", False
+    elif chart_type in BULLET_TYPES:
+        # A category X axis (the bars stand on it, drawn vertically — column/bar's shape,
+        # exactly columnrange's) plus TWO magnitude columns: the Y control carries the MEASURE
+        # (the filled bar) and the Goal selectbox below carries the crossbar it is read
+        # against. Single-select Y like every other extra-column type — a second measure would
+        # be a second comparison, which is a second chart. Labelled "Measure (bar)" rather
+        # than a bare "Y" for xrange's Start/End reason: a reader picking a value should be
+        # told which SHAPE it becomes, and here the two columns become two DIFFERENT shapes
+        # rather than two ends of one.
+        x_label, y_label, multi = "Category (X) axis", "Measure (bar)", False
     elif chart_type in GAUGE_TYPES:
         # The two types with NO X control at all (see the selectbox below): their marks are the
         # SELECTED COLUMNS, each collapsed to one number, so there is no label column to pick.
@@ -649,6 +678,41 @@ with st.sidebar:
                 "column. A row missing either end draws nothing but keeps its category slot (an "
                 "arearange band breaks there); a range whose high is below its low still draws, "
                 "spanning both values."
+            ),
+        )
+
+    # Bullet's GOAL column, sitting right after Measure so the comparison reads as the pair it
+    # is (Category -> Measure -> Goal). Drawn from numeric_cols, like columnrange's High and for
+    # the same reason: a goal is a MAGNITUDE, not a coordinate (it can never be a date) and not
+    # a label (unlike Target/Manager/Parent/Title). But it is NOT High — it is its own
+    # `goal_col` kwarg, because a high is the far END of the mark it shares a point with while a
+    # goal is the REFERENCE that mark is read against; reusing high_col would be the "a link is
+    # a link, but a goal is not a high" lie, the title_col distinction one family over. Called
+    # "Goal", not "Target", deliberately: "Target (to)" already means a destination NODE in
+    # this sidebar for all four node-link types, and one word cannot name both a label and a
+    # magnitude — the very collision that made `goal_col` a new kwarg rather than a reuse.
+    #
+    # The index is a CONSTANT and the widget is KEYLESS, and the rule that decides that is:
+    # fold the default into the widget's identity IFF the SELECTION depends on the state the
+    # default DERIVES from. A goal default derives from the numeric-column LIST (the dataset),
+    # never from the Measure selection — and a user's chosen Goal stays perfectly VALID when
+    # they change Measure, so re-minting it would discard a real answer. That is Target's /
+    # Parent's / End's / High's case, not the gauge Dial's (which derives from the data UNDER a
+    # reduction and is meaningless the moment either changes, so it folds). min() lands on the
+    # SECOND numeric column so it starts distinct from Measure (which leads with the first) and
+    # clamps a single-column frame. Measure == Goal is caught by the guard in the main panel.
+    goal_col = None
+    if chart_type in BULLET_TYPES:
+        goal_col = st.selectbox(
+            "Goal (target)",
+            numeric_cols,
+            index=min(1, len(numeric_cols) - 1),
+            help=(
+                "Each bar's target — a numeric column, the **same kind** as Measure but a "
+                "distinct column, drawn as a **crossbar** over the bar (so a bar reaching past "
+                "its crossbar beat the goal). A row missing its goal still draws its bar, and "
+                "one missing its measure still draws its crossbar. A measure below its goal is "
+                "an ordinary reading, not an error."
             ),
         )
 
@@ -879,6 +943,27 @@ with left.container(border=True, height="stretch"):
             icon=":material/warning:",
         )
         st.stop()
+    # Bullet's own collision, the fifth of these: the two columns every bar compares. Like the
+    # others it is not the x-in-y rule (the Goal column is the `goal_col` selector, never among
+    # the Y series), and it fails SILENTLY in this type's own idiom — every bar would land
+    # exactly on its own crossbar, so the chart would report that every category hit its target
+    # precisely. That is why it is a builder ValueError with this warning in FRONT of it
+    # (columnrange's double), and NOT the app-only treatment organization's Title collision
+    # gets: a Title is an OPTIONAL decorative column with a "(no titles)" escape, so that pick
+    # is drawable-but-meaningless while the hierarchy stays true, whereas these are two REQUIRED
+    # columns of one relation and the collision fabricates the chart's central claim. Cosmetic
+    # collisions warn; claim-fabricating ones raise. And, like columnrange, there is no column
+    # contradiction to report below it: a measure BELOW its goal is the ordinary reading, drawn
+    # as-is, so the builder never raises for that and no explain_* call is needed. (It also
+    # fires by accident on a single-numeric-column frame, where the constant index clamps Goal
+    # onto Measure — the honest reading, since a bullet needs two numeric columns.)
+    if chart_type in BULLET_TYPES and y_cols[0] == goal_col:
+        st.warning(
+            "Measure and Goal must be different columns — every bar would sit exactly on "
+            "its own target.",
+            icon=":material/warning:",
+        )
+        st.stop()
     # And the columns' own contradiction, the one reachable from HERE: a date start beside a
     # numeric end. Both ends of a bar sit on one axis, so they must be the same kind. It is not
     # missing data — that is dropped, silently and correctly, a row at a time — and it has no
@@ -943,6 +1028,7 @@ with left.container(border=True, height="stretch"):
                 end_col,
                 high_col,
                 title_col,
+                goal_col,
                 agg,
                 dial,
             )
@@ -983,6 +1069,7 @@ with left.container(border=True, height="stretch"):
             end_col,
             high_col,
             title_col,
+            goal_col,
             agg,
             dial,
         )
@@ -1016,6 +1103,7 @@ with left.container(border=True, height="stretch"):
             end_col,
             high_col,
             title_col,
+            goal_col,
             agg,
             dial,
         )

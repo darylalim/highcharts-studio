@@ -114,6 +114,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from highcharts_builder import (  # noqa: E402
+    BULLET_TYPES,
     CARTESIAN_TYPES,
     CATEGORY_X_TYPES,
     DEFAULT_COLORS,
@@ -227,6 +228,21 @@ def _high_for(chart_type: str) -> str | None:
     return "end" if chart_type in MAGNITUDE_RANGE_TYPES else None
 
 
+def _goal_for(chart_type: str) -> str | None:
+    """The goal column those same sweeps pass for the bullet case: bullet requires one (each
+    bar's target crossbar); other types ignore it, so it's None. The SIXTH of the
+    ``_size_for``/``_target_for``/``_parent_for``/``_end_for``/``_high_for`` family — see
+    ``_target_for`` for why a type with a required companion column adapts its input rather
+    than dropping out of the sweeps.
+
+    It reuses the fixtures' ``"end"`` column, the one extra that is NUMERIC, exactly as
+    ``_high_for`` does — but reading it as a GOAL, not as a high. The pair is ("value", "end"),
+    and since the fixtures keep "end" strictly above "value", every sweep row is the ordinary
+    UNDER-target case (a bar below its crossbar). The beat-plan case, where the crossbar-contrast
+    trap actually strikes, is pinned by the dedicated tests and by the sample rather than here."""
+    return "end" if chart_type in BULLET_TYPES else None
+
+
 # Radar remains the ONE "meta" type: Highcharts has no radar series, so it renders as a polar
 # *line* chart and its chart.type serializes as "line". Every other supported type's chart.type
 # equals its own name — and the gauge FAMILY is why that stayed true. `solidgauge` was never
@@ -258,6 +274,7 @@ def test_supported_type_builds(labeled_frame, chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     )
     assert opts["chart"]["type"] == _hc_type(chart_type)
     assert opts["series"]  # at least one series/data set was produced
@@ -288,6 +305,7 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -347,6 +365,7 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     ).to_js_literal()
     assert js
     # `Infinity` is capitalized, so a lowercase "inf" can only be the broken token. None
@@ -416,6 +435,7 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             parent_col="parent" if chart_type == "sunburst" else None,
             end_col=_end_for(chart_type),
             high_col=_high_for(chart_type),
+            goal_col=_goal_for(chart_type),
         ).to_js_literal()
         assert js and token not in js.lower(), f"{chart_type} kept a '{token}' label"
 
@@ -464,6 +484,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     )
     # An empty chart, not a raise. Gauge is the one type whose empty chart is not zero marks:
     # its marks are the selected COLUMNS, not the rows, so a header-only CSV still selects one
@@ -484,6 +505,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -752,6 +774,7 @@ def test_default_title_per_type(labeled_frame, chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     )
     assert opts["title"]["text"] == f"{chart_type.title()} chart"
 
@@ -774,6 +797,7 @@ def test_default_palette_applied_per_type(labeled_frame, chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -805,6 +829,7 @@ def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     )
     assert opts["chart"]["backgroundColor"] == "#0f172a"
 
@@ -823,6 +848,7 @@ def test_light_mode_leaves_chart_background_unset(labeled_frame, chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     )
     assert "backgroundColor" not in opts["chart"]
 
@@ -840,6 +866,7 @@ def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -900,6 +927,7 @@ def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
         parent_col=_parent_for(chart_type),
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
     )
     assert opts["tooltip"]["backgroundColor"] == "#0f172a"
     assert opts["tooltip"]["borderColor"] == "#475569"
@@ -4778,6 +4806,881 @@ def test_forecast_range_sample_builds_an_arearange_chart():
 
 
 # --------------------------------------------------------------------------- #
+# Bullet — a measure bar read against a goal crossbar, per category
+# --------------------------------------------------------------------------- #
+# Columnrange's DATA SHAPE (a category axis + two magnitude columns, one mark per
+# category) read as a COMPARISON rather than as a range: the point is `[measure, goal]`
+# where columnrange's is `[low, high]`, and the NULL POLICY is the exact opposite —
+# `_range_point` nulls the whole slot all-or-nothing (a range with one end is not a
+# range), while `_bullet_point` nulls each end ALONE (half a comparison is still worth
+# drawing). Every JS-level pin here asserts the emitted ARRAY rather than a `target` key,
+# which inverts this file's dominant idiom; the reason is stated once, in
+# `test_bullet_never_emits_the_literal_target_key_for_a_point`.
+#
+# Bullet rides `SUPPORTED_TYPES` and is threaded through the sweeps by `_goal_for`, so
+# the palette, the dark background, the light no-op, the non-finite-literal ban, the
+# end-to-end serialization, the label-drop policy and the row-less frame are ALREADY
+# covered there and are not restated below. What is here is what only bullet can say.
+def _bullet_df() -> pd.DataFrame:
+    """Four regions, each an actual against a quota. South and West BEAT theirs, East MISSES and
+    North matches exactly — the beats are the load-bearing rows, since the crossbar trap strikes
+    precisely when the measure exceeds the goal and a frame of near-misses would hide it."""
+    return pd.DataFrame(
+        {
+            "region": ["North", "South", "East", "West"],
+            "actual": [420.0, 512.0, 331.0, 604.0],
+            "quota": [420.0, 450.0, 400.0, 550.0],
+        }
+    )
+
+
+def _bullet_opts(df: pd.DataFrame | None = None, **kwargs) -> dict:
+    return build_options(
+        df if df is not None else _bullet_df(),
+        "bullet",
+        "region",
+        ["actual"],
+        goal_col="quota",
+        **kwargs,
+    )
+
+
+def _bullet_points(opts: dict) -> list:
+    return opts["series"][0]["data"]
+
+
+def _bullet_chart(df: pd.DataFrame | None = None, **kwargs):
+    return make_chart(
+        df if df is not None else _bullet_df(),
+        "bullet",
+        "region",
+        ["actual"],
+        goal_col="quota",
+        **kwargs,
+    )
+
+
+def _bullet_js(df: pd.DataFrame | None = None, **kwargs) -> str:
+    """The emitted JS, whitespace-stripped where a test needs to match a serialized literal."""
+    js = _bullet_chart(df, **kwargs).to_js_literal()
+    assert js
+    return js
+
+
+# --- the data shape -------------------------------------------------------- #
+
+
+def test_bullet_builds_one_positional_measure_goal_pair_per_category():
+    opts = _bullet_opts()
+    assert opts["chart"]["type"] == "bullet"
+    # x_col is a genuine category X axis — the measure bars stand ON it, drawn vertically
+    # (column/bar's shape, and the sentence X_IN_Y_GUARD_TYPES admits bullet on). NOT xrange's
+    # lanes-on-the-Y, and NOT `chart.inverted`, whatever the textbook horizontal bullet does.
+    assert opts["xAxis"]["categories"] == ["North", "South", "East", "West"]
+    assert "inverted" not in opts["chart"]
+    # The category axis carries its column NAME too, and it is asserted here because nothing else
+    # would notice its loss: the categories above survive without it, so the axis would simply go
+    # unlabelled — a chart that still draws, still reads as correct, and no longer says what its
+    # bars are grouped BY. (The yAxis title has its own test, for a sharper reason: a `None` there
+    # drops the whole axis.)
+    assert opts["xAxis"]["title"]["text"] == "region"
+    # Each point is a `[measure, goal]` 2-ARRAY matched to those categories BY POSITION —
+    # columnrange's positional shape, the boxplot trick two types over. The goal is the SECOND
+    # slot and reaches Highcharts' `target` through that position alone.
+    assert _bullet_points(opts) == [
+        [420.0, 420.0],
+        [512.0, 450.0],
+        [331.0, 400.0],
+        [604.0, 550.0],
+    ]
+    # ONE series, named for the MEASURE alone — the goal is an annotation on the bar, not a
+    # co-equal end of one mark, so this is xrange's `start_col` precedent and NOT columnrange's
+    # paired `f"{low}–{high}"`, which is right THERE precisely because a columnrange's two
+    # numbers are the two ends of one bar and neither names the series alone. And the legend is
+    # off: a single-hue series legends as one useless grey bullet (Highcharts draws that marker
+    # in its own grey regardless) and the categories are already on the X axis — columnrange's,
+    # xrange's, treemap's reasoning. There is no second series for a legend to tell apart.
+    assert len(opts["series"]) == 1
+    assert opts["series"][0]["name"] == "actual"
+    assert "quota" not in opts["series"][0]["name"]
+    assert opts["legend"]["enabled"] is False
+    assert _bullet_opts(dark=True)["legend"]["enabled"] is False
+
+
+def test_bullet_never_emits_the_literal_target_key_for_a_point():
+    """The one fact that inverts this file's dominant idiom, so it gets a test of its own.
+
+    Everywhere else a surviving point key is pinned by grepping the emitted JS for it — sankey's
+    `nodeFormat`, waterfall's `isSum`, sunburst's `id`/`parent`, xrange's `x2`. Do that here and
+    the test FAILS on a perfectly correct chart: the goal survives by its INDEX in a positional
+    array, so the literal key `target` never reaches the JS at all.
+
+    The trap is that a naive grep for "target" DOES hit twice, and neither hit is a data point —
+    `targetOptions` carries it as a substring and the tooltip's `{point.target}` token carries it
+    verbatim — so a lazily written pin passes for the wrong reason and goes on passing if the data
+    shape silently became a dict. Hence both spellings: the two legitimate occurrences enumerated
+    and removed, and, independently, no `target:` OBJECT KEY anywhere, which is the only form a
+    dict point could take.
+    """
+    js = _bullet_js()
+    assert "targetOptions" in js
+    assert "{point.target}" in js
+    # With both taken out, the bare word is nowhere: the goal reaches Highcharts by POSITION.
+    assert "target" not in js.replace("targetOptions", "").replace("{point.target}", "")
+    # Said again the way a dict point would betray itself — as a serialized object key.
+    assert "target:" not in js
+    # And the positive half, without which the two absences above pass on an empty chart: what IS
+    # there is the second array element, in position, per category.
+    assert "[420.0,420.0]" in "".join(js.split())
+
+
+# --- the null policy: two channels, each nulling alone ---------------------- #
+
+
+def test_bullet_keeps_the_bar_when_the_goal_is_missing():
+    # The type's POLICY, and the whole reason `_bullet_point` exists beside `_range_point` rather
+    # than being a widened version of it. A columnrange with one end is not a range, so its slot
+    # nulls all-or-nothing; a bullet's two numbers are INDEPENDENT CHANNELS, so a bar with no goal
+    # is a perfectly good bar with nothing to compare it to (verified by rendering: the bar draws,
+    # with no crossbar over it). The measure survives untouched. Python `None`, NOT `EnforcedNull`
+    # — the module's ONE exception to that convention, forced by the library rather than chosen,
+    # and observable only one layer down (see the make_chart test below).
+    df = _bullet_df()
+    df.loc[1, "quota"] = float("nan")
+    assert _bullet_points(_bullet_opts(df))[1] == [512.0, None]
+
+
+def test_bullet_keeps_the_crossbar_when_the_measure_is_missing():
+    # The mirror, and the half a `_range_point`-style all-or-nothing rule would silently throw
+    # away: a goal whose bar is missing is a perfectly good reference line over an empty category
+    # slot (verified by rendering — a lone crossbar). The measure end takes `_num`, so it becomes
+    # `EnforcedNull`, this module's rule everywhere else; the goal end is untouched beside it.
+    df = _bullet_df()
+    df.loc[2, "actual"] = float("nan")
+    assert _bullet_points(_bullet_opts(df))[2] == [EnforcedNull, 400.0]
+
+
+def test_bullet_keeps_the_category_slot_when_both_ends_are_missing():
+    # The keep-the-slot family (column/bar/waterfall/columnrange) reached by a THIRD route: both
+    # channels null independently and neither drags the row out of the frame, so a row with
+    # nothing to draw still holds its axis tick.
+    df = _bullet_df()
+    df.loc[0, "actual"] = float("nan")
+    df.loc[0, "quota"] = float("nan")
+    opts = _bullet_opts(df)
+    assert _bullet_points(opts)[0] == [EnforcedNull, None]  # the mixed pair
+    assert opts["xAxis"]["categories"] == ["North", "South", "East", "West"]
+    assert count_marks(df, "bullet", "region", ["actual"]) == 4
+    # And the mixed array really does come out as two nulls, which is the only thing that makes
+    # the asymmetry above invisible to a reader of the chart.
+    assert "[null,null]" in "".join(_bullet_js(df).split())
+
+
+def test_bullet_missing_goal_builds_a_real_chart_not_just_an_options_dict():
+    """The `EnforcedNull`-vs-`None` trap, pinned at the only layer that can see it.
+
+    `options/series/data/bullet.py`'s `target` setter runs `validators.numeric(value,
+    allow_empty=True)`: it admits `None` and rejects `EnforcedNullType` with `CannotCoerceError`
+    — raised at `Chart.from_options`, ONE LAYER BELOW `build_options`. So an options-dict
+    assertion on a goal-less row passes green while the chart cannot be built at all, and the
+    app's interactive path (which does not catch builder errors) shows a bare traceback naming
+    neither `target` nor `bullet`. That is the `_NEEDLE_DIAL` trap in a different validator, and
+    the reason this test drives `make_chart`.
+
+    It also asserts the converse, so the module's ONE `None`-not-`EnforcedNull` slot is PINNED
+    rather than merely commented: this project's own options tree, with nothing changed but the
+    goal's spelling, must fail to build. Only `TypeError` is asserted — a stdlib base the
+    library's class happens to derive from — because the point is that building fails, not which
+    validator says so.
+    """
+    from highcharts_core.chart import Chart
+
+    df = _bullet_df()
+    df.loc[1, "quota"] = float("nan")
+    assert "type: 'bullet'" in _bullet_js(df)
+
+    hostile = _bullet_opts(df)
+    assert hostile["series"][0]["data"][1] == [512.0, None]
+    hostile["series"][0]["data"][1] = [512.0, EnforcedNull]
+    with pytest.raises(TypeError):
+        Chart.from_options(hostile)
+
+
+def test_bullet_routes_a_non_finite_through_each_channel_own_null():
+    # `test_no_supported_type_emits_a_non_finite_js_literal` already proves no `inf` token
+    # escapes into the JS for any type, so that is NOT restated here. What is bullet's alone is
+    # WHICH null each channel produces: the measure to `EnforcedNull` via `_num`, the goal to
+    # `None` via `_plottable` — two spellings of "missing" in one array, which no sweep can see.
+    # Reachable from a plain CSV (`inf`, `-inf`, `1e400`, which silently overflows).
+    df = pd.DataFrame(
+        {
+            "region": ["North", "South", "East"],
+            "actual": [420.0, float("inf"), 331.0],
+            "quota": [400.0, 450.0, float("-inf")],
+        }
+    )
+    assert _bullet_points(_bullet_opts(df)) == [
+        [420.0, 400.0],
+        [EnforcedNull, 450.0],
+        [331.0, None],
+    ]
+
+
+def test_bullet_count_marks_matches_the_built_data_across_every_null_combination():
+    # The can't-drift check, over a frame carrying all four combinations at once: both present,
+    # goal missing, measure missing, both missing. Bullet reaches columnrange's NUMBER by a
+    # DIFFERENT ARGUMENT — columnrange never reads its value columns because a missing END nulls
+    # the whole slot, bullet never reads EITHER because NEITHER channel can drop a row — so the
+    # rule is pinned against the built length rather than against the sibling's constant.
+    # (Bullet is in neither `test_count_marks_matches_the_built_series`' list nor
+    # `test_count_marks_casts_every_mask_not_just_the_label_one`'s, so this is its only home.)
+    df = pd.DataFrame(
+        {
+            "region": ["North", "South", "East", "West"],
+            "actual": [420.0, 512.0, float("nan"), float("nan")],
+            "quota": [400.0, float("nan"), 380.0, float("nan")],
+        }
+    )
+    built = _bullet_points(_bullet_opts(df))
+    assert built == [
+        [420.0, 400.0],
+        [512.0, None],
+        [EnforcedNull, 380.0],
+        [EnforcedNull, None],
+    ]
+    assert count_marks(df, "bullet", "region", ["actual"]) == 4 == len(built)
+    # And every one of those four spellings must survive the layer below build_options.
+    assert _bullet_js(df)
+
+
+def test_bullet_count_marks_casts_its_mask_on_a_row_less_frame():
+    """Bullet's `count_marks` branch is covered by NO sweep, and this is the rule it must obey.
+
+    `test_row_less_frame_draws_an_empty_chart_in_every_type` sweeps `build_options` over
+    `SUPPORTED_TYPES`, so bullet's BUILD is covered the day it was added — but
+    `test_count_marks_casts_every_mask_not_just_the_label_one` is an explicit LIST and
+    `test_count_marks_matches_the_built_series` is another, and bullet is in neither. So the
+    `.astype(bool)` rule — a `.map()` over a row-less column returns an empty NON-boolean Series,
+    which pandas reads as a list of COLUMN NAMES rather than as a mask — is unpinned on the one
+    function of bullet's that reads a mask at all.
+
+    Warnings are promoted to errors because that is the only way the failure is observable before
+    pandas 4: today an object-dtype mask merely warns where it will later raise.
+    """
+    empty = _bullet_df().iloc[:0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert count_marks(empty, "bullet", "region", ["actual"]) == 0
+        assert _bullet_points(_bullet_opts(empty)) == []
+    # The KPI and the chart must agree here too — the app's metric row runs above its guards, so
+    # a count that disagreed with an empty chart would report marks nobody drew.
+    assert count_marks(empty, "bullet", "region", ["actual"]) == len(
+        _bullet_points(_bullet_opts(empty))
+    )
+
+
+# --- the inputs nothing else reaches --------------------------------------- #
+
+
+def test_bullet_keeps_an_inverted_pair_where_the_measure_falls_far_under_its_goal():
+    # Not an edge case — the ORDINARY reading of this type, and the register it exists to answer.
+    # xrange DROPS a backwards bar because Highcharts draws it spanning the whole axis (a
+    # confident lie) and columnrange KEEPS its inverted range because a range bar is bounded by
+    # its two values; a bullet's two numbers are not two ends at all, so "measure far under goal"
+    # is simply a short bar under a high crossbar. Nothing is dropped, nothing raises, nothing is
+    # normalized — which is also why bullet has no `explain_*` counterpart.
+    df = pd.DataFrame(
+        {
+            "region": ["North", "South"],
+            "actual": [12.0, 88.0],  # both far under their goals
+            "quota": [900.0, 550.0],
+        }
+    )
+    opts = _bullet_opts(df)
+    assert _bullet_points(opts) == [[12.0, 900.0], [88.0, 550.0]]
+    assert count_marks(df, "bullet", "region", ["actual"]) == 2
+
+
+def test_bullet_draws_negative_measures_and_negative_goals():
+    """The one sign the family treats differently everywhere else, and never probed here.
+
+    Sunburst's `_sizable` DROPS a negative leaf (an arc has no negative length); waterfall reads a
+    negative as its semantic DOWN colour; gauge's `threshold: 0` exists precisely because an
+    all-negative dial reads backwards without it. A bullet does none of that — it is a bar from
+    zero, so a negative measure draws downward and a negative goal is a crossbar below the axis.
+
+    The half that would fail SILENTLY is the predicate: `_sizable` is `_plottable` plus a `> 0`,
+    one type over, and a reader consolidating the two would drop or null every row below — with
+    every other bullet test staying green, because every other frame in this block is positive.
+    """
+    df = pd.DataFrame(
+        {
+            "region": ["Loss", "Mixed", "Zero"],
+            "actual": [-40.0, 10.0, 0.0],
+            "quota": [-20.0, -5.0, 0.0],
+        }
+    )
+    opts = _bullet_opts(df)
+    assert _bullet_points(opts) == [[-40.0, -20.0], [10.0, -5.0], [0.0, 0.0]]
+    # Nothing dropped and nothing nulled: zero is a real reading (sunburst's rule for its
+    # zero-width sector) and a negative is an ordinary one.
+    assert opts["xAxis"]["categories"] == ["Loss", "Mixed", "Zero"]
+    assert count_marks(df, "bullet", "region", ["actual"]) == 3
+    assert "[-40.0,-20.0]" in "".join(_bullet_js(df).split())
+
+
+def test_bullet_raises_a_value_error_on_a_text_column_but_still_nulls_a_blank_cell():
+    """The last unpinned input class for the new kwarg, and the one asymmetry inside it.
+
+    Every other way a goal column can be wrong is covered — missing, non-finite, equal to the
+    measure, absent — but not "it is a column of words", the only one that RAISES out of `float()`
+    rather than nulling. It is the module's documented convention (boxplot pins the same
+    `ValueError` for a text observation column) and it is unreachable from the app, both bullet
+    pickers being sourced from `numeric_cols` — but `goal_col` is a public kwarg, so an unpinned
+    raise is free to become a silent `None` goal on some future edit to `_bullet_point`: every bar
+    would then draw with no crossbar and no error, in the one register the type answers.
+
+    The asymmetry is the reachable half: a text column with a BLANK cell must still null that cell
+    rather than raise, because `pd.isna` is tested before `float()`. A `_bullet_point` rewritten to
+    coerce the column first would turn a partly-filled goal column into a hard failure.
+    """
+    with pytest.raises(ValueError):
+        _bullet_opts(
+            pd.DataFrame(
+                {"region": ["N", "S"], "actual": [1.0, 2.0], "quota": ["high", "low"]}
+            )
+        )
+    # The mirror, so the convention is pinned on BOTH channels rather than only the new one.
+    with pytest.raises(ValueError):
+        _bullet_opts(
+            pd.DataFrame(
+                {"region": ["N", "S"], "actual": ["a", "b"], "quota": [1.0, 2.0]}
+            )
+        )
+    # But a MISSING cell in that same object-dtype column nulls, as everywhere else.
+    blanks = pd.DataFrame(
+        {"region": ["N", "S"], "actual": [1.0, 2.0], "quota": [None, None]}
+    )
+    assert _bullet_points(_bullet_opts(blanks)) == [[1.0, None], [2.0, None]]
+
+
+def test_bullet_keeps_duplicate_category_labels_as_separate_marks():
+    """A real CSV shape no other bullet test contains, and sunburst's error #31 in mirror.
+
+    Sunburst SYNTHESIZES its node ids precisely because two rows may legitimately share a label
+    and handing Highcharts two points with one id is a red error band across the chart. Bullet
+    reaches the opposite answer by a different route — its points are positional and its
+    categories are a plain list — so two "North" rows must stay two bars against two crossbars.
+    Nothing asserts it, and "one mark per category" appears in the branch comment, the
+    `count_marks` comment AND the KPI's own noun, so a future edit that grouped by label to make
+    that phrase literally true would be an easy one to make: it would silently halve the chart,
+    and — because `count_marks` counts LABELS and would halve with it — the KPI would agree with
+    the corrupted chart rather than expose it.
+    """
+    df = pd.DataFrame(
+        {
+            "region": ["North", "North", "South"],
+            "actual": [420.0, 380.0, 512.0],
+            "quota": [400.0, 400.0, 550.0],
+        }
+    )
+    opts = _bullet_opts(df)
+    assert opts["xAxis"]["categories"] == ["North", "North", "South"]
+    assert _bullet_points(opts) == [[420.0, 400.0], [380.0, 400.0], [512.0, 550.0]]
+    assert (
+        count_marks(df, "bullet", "region", ["actual"])
+        == 3
+        == len(_bullet_points(opts))
+    )
+    assert _bullet_js(df)  # two identical categories are not an id collision here
+
+
+def test_bullet_drops_a_row_whose_label_is_undrawable_and_the_count_follows():
+    # `test_missing_or_non_finite_label_drops_the_row_in_every_type` already proves no "nan"
+    # label reaches the JS, so the drop itself is not restated. What is bullet's alone is that
+    # the category list, the data array and `count_marks` shorten TOGETHER — the whole of its
+    # count rule, since an undrawable label is the ONE way a bullet row can leave the frame
+    # (neither VALUE channel can drop one).
+    df = pd.DataFrame(
+        {
+            "region": ["North", None, "East"],
+            "actual": [
+                420.0,
+                512.0,
+                float("nan"),
+            ],  # East's measure nulls, keeps its slot
+            "quota": [400.0, 450.0, 380.0],
+        }
+    )
+    opts = _bullet_opts(df)
+    assert opts["xAxis"]["categories"] == ["North", "East"]
+    assert _bullet_points(opts) == [[420.0, 400.0], [EnforcedNull, 380.0]]
+    assert count_marks(df, "bullet", "region", ["actual"]) == 2
+
+
+def test_bullet_builds_a_real_chart_from_an_integer_dtype_frame():
+    """`_bullet_point`'s `float()` cast, at the only layer it is observable — and the SHIPPED
+    SAMPLE is the frame that reaches it.
+
+    The cast does one job beyond `_range_point`'s: numpy scalars are rejected outright by the
+    numeric keys this type reaches in highcharts-core (a `numpy.int64` raises where a
+    `numpy.float64` does not, which is what would make that bug look random). Every hand-written
+    frame in this block uses float literals, so every one produces `numpy.float64` and takes the
+    branch that survives the cast's removal. `_sales_vs_quota` does not: its two magnitude columns
+    are bare Python ints, so pandas gives them `int64` and the goal channel hands a `numpy.int64`
+    straight at the `target` setter — at `Chart.from_options`, where the sample tests below stop
+    short. So the cast could be deleted and the DEMO DATASET would be the thing that broke, in the
+    app's interactive path, which does not catch builder errors.
+    """
+    from sample_data import _sales_vs_quota
+
+    df = _sales_vs_quota()
+    assert df["actual"].dtype == "int64" and df["quota"].dtype == "int64", (
+        "this test is only meaningful while the sample's two magnitude columns are integers — "
+        "written as float literals it would exercise the branch that survives without the cast"
+    )
+    assert "type: 'bullet'" in _bullet_js(df)
+    # The cast really happened: floats in the emitted array, not a repr of a numpy scalar.
+    assert all(
+        isinstance(m, float) and isinstance(g, float)
+        for m, g in _bullet_points(_bullet_opts(df))
+    )
+    # And a mixed int/float frame with a missing goal — the combination the app can reach on any
+    # upload, where the surviving cells stay integral while the column widens to float64.
+    mixed = df.copy()
+    mixed["quota"] = mixed["quota"].astype(float)
+    mixed.loc[0, "quota"] = float("nan")
+    assert _bullet_js(mixed)
+
+
+# --- the guards ------------------------------------------------------------ #
+
+
+def test_bullet_requires_a_goal_column():
+    # A bullet without a goal is a column chart wearing a different name — the crossbar IS the
+    # comparison the type exists to draw, so it is required rather than optional (unlike
+    # organization's `title_col`, which is cosmetic and has a "(no titles)" escape).
+    with pytest.raises(ValueError, match="requires a goal column"):
+        build_options(_bullet_df(), "bullet", "region", ["actual"])
+
+
+def test_bullet_rejects_the_measure_column_as_the_goal_column():
+    # sankey's source-is-target, sunburst's node-is-parent, xrange's start-is-end and
+    # columnrange's low-is-high, a fifth time — and the worst of the five. The other four produce
+    # a VISIBLY broken chart (a row of hairlines, a collapsed band); this one produces a PERFECT
+    # chart making a FALSE CLAIM: every bar landing exactly on its own crossbar, so the chart
+    # reports that every category hit its target precisely, with no tooltip at all in the Static
+    # PNG to contradict it.
+    with pytest.raises(ValueError, match="cannot also be the goal column"):
+        build_options(_bullet_df(), "bullet", "region", ["actual"], goal_col="actual")
+
+
+def test_bullet_rejects_x_as_a_y_series():
+    # Bullet IS in X_IN_Y_GUARD_TYPES (unlike xrange, whose x_col names a lane on the Y axis):
+    # its x_col is a real category X axis, so x_col == measure is the classic collision the rule
+    # was written for. The OTHER collision, measure == goal, is not expressible there (goal_col
+    # isn't in y_cols) and gets the dedicated guard above — exactly columnrange's split.
+    with pytest.raises(ValueError, match="cannot also be a y series"):
+        build_options(_bullet_df(), "bullet", "actual", ["actual"], goal_col="quota")
+
+
+def test_bullet_uses_only_first_y_col():
+    # The goal comes from `goal_col`, NEVER from `y_cols[1]` — which is what keeps both guards
+    # above independent of how many columns the selection happens to carry.
+    #
+    # The THIRD column is what makes that testable rather than merely stated. Passing
+    # `y_cols=["actual", "quota"]` beside `goal_col="quota"` — the obvious spelling — makes
+    # `y_cols[1]` and the goal the SAME column, so a branch that wrongly read `y_cols[1]` would
+    # produce byte-identical output and the assertion would pin nothing while the comment above
+    # it claimed otherwise. `stretch` exists only to be the decoy: it sits in `y_cols[1]`, its
+    # values appear NOWHERE below, and the goals that do appear are `quota`'s.
+    df = _bullet_df()
+    df["stretch"] = [900.0, 900.0, 900.0, 900.0]
+    opts = build_options(
+        df, "bullet", "region", ["actual", "stretch"], goal_col="quota"
+    )
+    assert len(opts["series"]) == 1
+    assert opts["series"][0]["name"] == "actual"
+    assert _bullet_points(opts) == [
+        [420.0, 420.0],
+        [512.0, 450.0],
+        [331.0, 400.0],
+        [604.0, 550.0],
+    ]
+    assert not any(900.0 in point for point in _bullet_points(opts))
+
+
+# --- colour, and the two absences that had to be earned -------------------- #
+
+
+def test_bullet_paints_every_bar_from_the_palette_and_never_by_point():
+    # A bullet is ONE measurement read against ONE goal across the axis, so every bar takes the
+    # single series hue — `colors[0]` — rather than a per-bar identity (columnrange's call, the
+    # opposite of pie/treemap/xrange, whose slices/lanes ARE separate identities). The palette
+    # itself is swept by `test_default_palette_applied_per_type`, so what is asserted here is what
+    # is bullet's: no explicit series `color` (a hardcoded one would serialize perfectly and
+    # silently ignore every custom palette), so a caller's `colors` is what repaints the bars.
+    opts = _bullet_opts()
+    assert "color" not in opts["series"][0]
+    assert _bullet_opts(colors=["#abcabc", "#defdef"])["colors"] == [
+        "#abcabc",
+        "#defdef",
+    ]
+    # `colorByPoint` appears NOWHERE, and here that pin guards a real DECISION rather than
+    # restating a library drop the way networkgraph's and sunburst's do — a claim that is only
+    # true because `test_bullet_color_by_point_really_survives_the_round_trip` proves the key
+    # survives. Without that companion this assertion would be indistinguishable from theirs.
+    assert "colorByPoint" not in str(opts)
+    assert "colorByPoint" not in _bullet_js()
+    # And the shape the decision protects: array points, never dicts. See
+    # `test_bullet_dict_point_form_really_breaks_the_missing_goal_policy` for why.
+    assert all(isinstance(pt, list) for pt in _bullet_points(opts))
+
+
+def test_bullet_color_by_point_really_survives_the_round_trip():
+    """Without this, every `colorByPoint` pin in the bullet block is a vacuous pass.
+
+    The block asserts `"colorByPoint" not in js` and justifies it in prose as guarding a DECISION
+    rather than restating a library limitation — the distinction drawn against networkgraph's and
+    sunburst's pins, where highcharts-core silently drops the key so its absence could not have
+    been otherwise. But an absence assertion passes identically whether the branch chose to omit
+    the key or the library would have thrown it away, so the whole justification rests on an
+    untested claim in a comment. If highcharts-core ever starts dropping it, the pin stays green
+    while its stated reason silently becomes false, and the next reader "consolidates" bullet's
+    with networkgraph's as one more restatement of a limitation.
+    """
+    from highcharts_core.chart import Chart
+
+    opts = _bullet_opts()
+    opts["plotOptions"]["bullet"]["colorByPoint"] = True
+    opts["series"][0]["colorByPoint"] = True
+    js = Chart.from_options(opts).to_js_literal()
+    assert js
+    assert js.count("colorByPoint") == 2, (
+        "bullet's colorByPoint is supposed to SURVIVE at both the series and the plotOptions "
+        "level — that survival is the entire reason its absence is a decision worth pinning"
+    )
+
+
+def test_bullet_dict_point_form_really_breaks_the_missing_goal_policy():
+    """Without this, "the array form is load-bearing" is prose, not a pinned fact.
+
+    The branch comment and the single-hue decision both rest on it: a per-point key forces the
+    OBJECT point form, in which a `None` goal VANISHES rather than nulling while an `EnforcedNull`
+    raises — so a per-bar hue would leave a goal-less row with no working spelling. The block's own
+    assertions (`not isinstance(pt, dict)`, `"colorByPoint" not in js`) pin the CONSEQUENCE and not
+    the premise, so a library change that made the dict form safe would leave the argument standing
+    on nothing while every test stayed green — and someone would then be told, by a comment, that
+    they must not add a per-point colour.
+
+    Both halves of the trap run on the module's own tree with nothing changed but the point's
+    SPELLING, which is the only comparison that can show the array form is doing work.
+    """
+    from highcharts_core.chart import Chart
+
+    df = _bullet_df()
+    df.loc[1, "quota"] = float("nan")
+    assert _bullet_points(_bullet_opts(df))[1] == [512.0, None]  # the shipped spelling
+
+    # Half one: in dict form a `None` target does not null — it disappears entirely, so a
+    # goal-less bar would claim to have no goal channel at all rather than an empty one.
+    dict_form = _bullet_opts(df)
+    dict_form["series"][0]["data"] = [
+        {"y": 420.0, "target": 400.0, "color": DEFAULT_COLORS[0]},
+        {"y": 512.0, "target": None, "color": DEFAULT_COLORS[0]},
+    ]
+    js = Chart.from_options(dict_form).to_js_literal()
+    assert js
+    flat = "".join(js.split())
+    assert "target:400.0" in flat  # the present goal survives
+    assert "target:null" not in flat, (
+        "the whole premise of the array form is that a None target VANISHES in dict form rather "
+        "than nulling — if it nulls cleanly now, the single-hue decision has lost its second and "
+        "stronger reason and the comments saying otherwise are wrong"
+    )
+
+    # Half two: the module's usual EnforcedNull is not the escape hatch either — in dict form it
+    # raises, so there is genuinely NO working spelling for a missing goal once a point is a dict.
+    hostile = _bullet_opts(df)
+    hostile["series"][0]["data"] = [
+        {"y": 420.0, "target": 400.0, "color": DEFAULT_COLORS[0]},
+        {"y": 512.0, "target": EnforcedNull, "color": DEFAULT_COLORS[0]},
+    ]
+    with pytest.raises(TypeError):
+        Chart.from_options(hostile)
+
+
+def test_bullet_draws_no_qualitative_plot_bands():
+    # The poor/average/good background bands every bullet demo on the internet draws are a
+    # BUSINESS JUDGEMENT, and a three-column CSV of a category, a measure and a goal states none
+    # of it. Drawing them would be this module's standing offence — emitting a mark the data never
+    # made — the one sunburst refuses when it declines to draw a CSV's own subtotal as a parent
+    # value, and the one waterfall sidesteps by making its Total an `isSum` Highcharts computes.
+    # There is no library excuse behind this absence: `yAxis.plotBands` is a modelled, surviving
+    # option. So it is refused, not forgotten.
+    #
+    # The yAxis assertions are the PRESENCE ANCHOR, without which every line below passes on a
+    # chart that dropped the whole axis — which is not hypothetical here but the exact
+    # `{"text": None}` failure `test_bullet_y_axis_title_names_both_columns_and_is_never_none`
+    # exists for, and which would take the bands' own home with it.
+    opts = _bullet_opts()
+    assert opts["yAxis"]["title"]["text"]  # the axis is there to have carried bands
+    assert "plotBands" not in str(opts)
+    js = _bullet_js()
+    assert "yAxis" in js  # the anchor again, at the layer the drop happens
+    assert "plotBands" not in js
+    # Nor invented for dark mode, where a band would be the easiest thing to slip in as "chrome"
+    # — every band on a bullet is data, whatever colour it is drawn in.
+    dark = _bullet_opts(dark=True)
+    assert dark["yAxis"]["title"]["text"]
+    assert "plotBands" not in str(dark)
+
+
+def test_bullet_sets_a_light_mode_crossbar_colour_off_the_categorical_palette():
+    # THE CROSSBAR TRAP, stated once, here — the other tests that touch this hook refer back
+    # rather than restating it. Left unset, the goal marker takes the SERIES hue (the same blue as
+    # the bar it crosses) and Highcharts draws it at 140% of the bar width. So it does not vanish,
+    # which would at least be obvious: the segment crossing the bar disappears into the fill while
+    # the two overhangs survive as small stubs either side, reading as a deliberate tick rather
+    # than as a goal line. It strikes exactly when the measure EXCEEDS the goal — the "we beat
+    # plan" case, the row a reader most wants to find — so the failure is invisible on the rows
+    # that look fine and silent on the rows that matter.
+    #
+    # The hue is asserted as a LITERAL, not against the constant the branch writes: importing
+    # `_BULLET_TARGET_COLOR` and asserting the branch equals it would stay green if its value were
+    # renamed to `#ff00ff`. The independent facts are the three below it — off the categorical
+    # palette (`_WATERFALL_SUM_COLOR`/`_SUNBURST_ROOT_COLOR`'s argument: a goal is not one of the
+    # categories, it is the line they are read AGAINST), unrepaintable by a custom palette, and
+    # different in dark mode (pinned next door).
+    opts = _bullet_opts()
+    target = opts["plotOptions"]["bullet"]["targetOptions"]
+    assert target["color"] == "#0f172a"
+    assert target["color"] not in list(DEFAULT_COLORS)
+    custom = ["#111111", "#222222"]
+    assert (
+        _bullet_opts(colors=custom)["plotOptions"]["bullet"]["targetOptions"]["color"]
+        == "#0f172a"
+    )
+    assert "#0f172a" not in custom
+    # No geometry beside it. `targetOptions.width = 0` raises EmptyValueError out of a validator
+    # naming neither the key nor the series, and every numeric key under `targetOptions` rejects a
+    # numpy.int64 outright — so Highcharts' 140% x 3px default is left entirely alone (the
+    # pane-`size` "stop steering" rule). The problem was contrast; the fix is the colour. Setting
+    # no numeric key here makes both traps unreachable rather than remembered.
+    assert set(target) == {"color"}
+
+
+def test_bullet_dark_mode_flips_both_hooks_and_leaks_into_no_later_light_chart():
+    """Bullet's two `_themed` hooks, of DIFFERENT KINDS, pinned together because a fix to either
+    that broke the other would otherwise pass half the suite.
+
+    `borderColor` is the ordinary dissolve, shared with column/bar/xrange/columnrange and NOT
+    waterfall — joined on a MEASUREMENT rather than an inference, since waterfall is the standing
+    proof the shared bar base class settles nothing (its border is a fixed #333333, while bullet's
+    bars come back crisply ringed white). `targetOptions.color` is the only hook in this module
+    that flips a MARK rather than chrome: the crossbar is drawn at 140% of the bar width, so it
+    necessarily spans TWO backgrounds at once — the bar (a constant palette blue in both themes)
+    and the chart background (white -> slate) — and a fixed colour therefore cannot work in
+    PRINCIPLE, not merely in practice.
+
+    The dark hue is asserted at its PATH in the option tree and in the serialized JS at the level
+    it was written to, never as a bare `"#e2e8f0" in js`: that string is `_DARK_CHROME["text"]`,
+    which `_themed` writes to the title, both axis label styles and the tooltip on EVERY dark
+    chart, so the substring test would pass with this hook deleted outright — the one thing it
+    exists to catch.
+
+    The crossbar-vs-border inequality is the assertion a "somewhere in the JS" test can never
+    make, and it is not decoration: `_BULLET_TARGET_COLOR` IS the dark background read the other
+    way round, so shipping it unflipped would paint the crossbar in the background colour — the
+    exact invisibility the hook exists to prevent (see
+    `test_bullet_sets_a_light_mode_crossbar_colour_off_the_categorical_palette` for the trap).
+
+    The light -> dark -> light ORDER is the third thing here, and the third build is the one that
+    earns it: `_themed` INDEXES this key rather than `setdefault`ing it, so were the branch to emit
+    `targetOptions` as a shared module constant instead of a fresh literal, the first dark chart in
+    a process would mutate that constant and every later LIGHT chart would ship a dark crossbar.
+    """
+    light = _bullet_opts()
+    dark = _bullet_opts(dark=True)
+    light_again = _bullet_opts()
+
+    crossbar = dark["plotOptions"]["bullet"]["targetOptions"]["color"]
+    border = dark["plotOptions"]["bullet"]["borderColor"]
+    background = dark["chart"]["backgroundColor"]
+
+    # Hook one: the border dissolves INTO the background; light mode is untouched.
+    assert border == background
+    assert "borderColor" not in light["plotOptions"]["bullet"]
+    # Hook two: the crossbar CHANGED, and it changed to something readable against both of the
+    # surfaces it crosses rather than into either of them.
+    assert crossbar != light["plotOptions"]["bullet"]["targetOptions"]["color"]
+    assert crossbar != border
+    assert crossbar != background
+    # The aliasing that makes the flip mandatory rather than cosmetic: the light value IS the dark
+    # background, so an unflipped crossbar is an invisible one.
+    assert light["plotOptions"]["bullet"]["targetOptions"]["color"] == background
+    # And the hue reaches the JS at the level it was written to — not merely somewhere in the
+    # chrome, which is what `"#e2e8f0" in js` would have settled for.
+    flat = "".join(_bullet_js(dark=True).split())
+    assert f"targetOptions:{{color:'{crossbar}'}}" in flat
+
+    # The leak check proper: a light chart built AFTER a dark one is still light.
+    assert light_again["plotOptions"]["bullet"]["targetOptions"]["color"] == "#0f172a"
+    assert "borderColor" not in light_again["plotOptions"]["bullet"]
+    # The bar hue itself is unchanged across the flip: like the shared palette, it reads on both
+    # backgrounds, so only the border and the crossbar move.
+    assert dark["colors"] == light["colors"] == list(DEFAULT_COLORS)
+
+
+# --- modules, tooltip, axis, and the mark that prints nothing -------------- #
+
+
+def test_bullet_resolves_its_own_module_and_needs_no_load_reordering():
+    # This test MUST drive the BUILT chart: highcharts-core resolves modules from a chart's
+    # contents, and a bare `chart.type` in an options dict resolves NOTHING for ANY type — so a
+    # module assertion written against `build_options` output is not weak, it is vacuous.
+    # `highcharts-more` is the plausible guess (it is where columnrange's and boxplot's
+    # floating-bar machinery lives) and the round-trip corrects it, as it does for columnrange and
+    # funnel: bullet has its OWN module.
+    #
+    # The reordering claim lives HERE rather than in a test of its own, because standalone it is
+    # `_order_script_tags`' identity — true verbatim for `line`, `pie`, `column` and twenty others,
+    # and still true if bullet's tags stopped being emitted at all. Asserted one line below the
+    # proof that `modules/bullet` IS among these tags, it says something only about bullet:
+    # bullet.js declares `@requires highcharts` only, extending nothing, unlike dependency-wheel
+    # and organization, whose reversed emission blanks the iframe with Highcharts error #17.
+    from highcharts_builder import _order_script_tags
+
+    chart = _bullet_chart()
+    assert "type: 'bullet'" in _bullet_js()
+    tags = chart.get_script_tags(as_str=True)
+    assert "modules/bullet" in tags
+    assert "highcharts-more" not in tags
+    assert _order_script_tags(tags) == tags
+
+
+def test_bullet_tooltip_reads_the_right_axis_and_labels_both_columns():
+    # `{point.category}`, NOT xrange's `{point.name}`: a bullet's categories are on the X axis (its
+    # bars stand ON it), so this reads the right one — waterfall's fix, columnrange's reason — and
+    # `{point.name}` is blank here anyway, the points being positional arrays. `{point.target}`
+    # RESOLVES despite the literal key never appearing in the emitted JS (the same positional
+    # survival the data array shows), and the tooltip is the ONLY place the goal's NUMBER can be
+    # read at all. Both names are LABELLED rather than run together, because `{point.target}` on a
+    # null goal renders as NOTHING — not `null`, not `undefined` — so the labelled form degrades to
+    # a clean "quota:" where "420 of {point.target}" would trail off mid-sentence.
+    tooltip = _bullet_opts()["tooltip"]
+    assert tooltip["headerFormat"] == ""
+    fmt = tooltip["pointFormat"]
+    assert "{point.category}" in fmt
+    assert "{point.y}" in fmt and "{point.target}" in fmt
+    assert "{point.name}" not in fmt
+    assert "actual:" in fmt and "quota:" in fmt
+
+
+def test_bullet_tooltip_sanitizes_both_user_column_names():
+    # Bubble's and sankey's rule, and bullet is the type with the MOST exposure to it: it
+    # interpolates TWO user-supplied column names into one format string, beside two genuine
+    # Highcharts tokens. Both names are brace-stripped (Highcharts would parse `{...}` as a value
+    # token and swallow it) and HTML-escaped (a tooltip renders as HTML). Reachable from any
+    # uploaded CSV, since a header cell is arbitrary text.
+    #
+    # It is asserted for bullet rather than left to the bubble/sankey tests because `_tooltip_label`
+    # is applied per CALL SITE — nothing forces this branch to use it, so deleting either call here
+    # would leave both of those tests green while this chart injected live markup.
+    df = pd.DataFrame({"region": ["A"], "act {x}": [1.0], "<b>quota</b>": [2.0]})
+    fmt = build_options(df, "bullet", "region", ["act {x}"], goal_col="<b>quota</b>")[
+        "tooltip"
+    ]["pointFormat"]
+    # Braces stripped, so Highcharts won't tokenize `{x}` away.
+    assert "{x}" not in fmt
+    assert "act x" in fmt
+    # HTML in the goal column name is escaped, not emitted as live markup.
+    assert "<b>quota</b>" not in fmt
+    assert "&lt;b&gt;quota&lt;/b&gt;" in fmt
+    # The genuine Highcharts tokens are untouched — including the goal's, which survives
+    # positionally even though the literal key `target` never reaches the data array.
+    assert "{point.y}" in fmt and "{point.target}" in fmt
+
+
+def test_bullet_prints_nothing_in_the_mark_and_the_omitted_key_is_the_gate():
+    # xrange's rule reached from xrange's premise, exactly as columnrange reached it: a bullet's
+    # bar stands on a real, ticked, gridlined y axis that renders in the Static PNG too
+    # (column/bar's case, not waterfall's bar floating above an invisible running total); its goal
+    # is DRAWN on that same axis rather than printed; and the only other identity, the category
+    # name, is already on the X axis. So there is nothing to print and no gate constant to tune.
+    #
+    # The omitted key IS the gate, and that is a fact about bullet rather than a convenience. A
+    # bullet's dataLabels default OFF — column/bar's behaviour — so saying nothing says "off". A
+    # GAUGE's default ON, which is why that family disables them EXPLICITLY and why merely
+    # omitting the key there would be a gate that did nothing. Same silence, opposite meaning.
+    assert "dataLabels" not in str(_bullet_opts())
+    assert "dataLabels" not in str(_bullet_opts(dark=True))
+
+
+def test_bullet_y_axis_title_names_both_columns_and_is_never_none():
+    # Both channels are read against this ONE axis, so it names both — "vs", not columnrange's en
+    # dash, because these are two quantities COMPARED and not the two ends of one span.
+    #
+    # The `is not None` half is the load-bearing half, and it is not defensive typing: a
+    # `{"text": None}` title silently drops the ENTIRE yAxis out of the emitted options (verified
+    # on the round-trip), taking its dark-mode chrome with it — so the axis a reader needs to
+    # decode both channels would simply cease to exist, with nothing raised anywhere. If it ever
+    # needs blanking, blank it with `""`.
+    title = _bullet_opts()["yAxis"]["title"]["text"]
+    assert title is not None
+    assert title == "actual vs quota"
+    js = _bullet_js()
+    assert "yAxis" in js and "actual vs quota" in js
+
+
+# --------------------------------------------------------------------------- #
+# The bullet sample
+# --------------------------------------------------------------------------- #
+
+
+def test_sales_vs_quota_sample_builds_a_bullet_chart():
+    # The three-way beat/miss/match assertion is the argumentative half. A quota sample where every
+    # region MISSED would look tidier and would hide the one failure a reader could not diagnose —
+    # the crossbar trap, which is only reachable from the page on a BEATING row (see
+    # `test_bullet_sets_a_light_mode_crossbar_colour_off_the_categorical_palette`). So the beats
+    # are load-bearing, not flattering. The exact MATCH (North) is the honest-looking edge that a
+    # per-ROW equality is fine, unlike the per-COLUMN one the app guards against.
+    from sample_data import _sales_vs_quota
+
+    df = _sales_vs_quota()
+    # The category column LEADS, like every sample here and for the same load-bearing reason: the
+    # app opens on `line` with the first column as X, so a numeric first column would trip the
+    # x-in-y guard the instant the dataset was selected.
+    assert list(df.columns) == ["region", "actual", "quota", "deals_closed"]
+    assert not pd.api.types.is_numeric_dtype(df["region"])
+
+    pairs = list(zip(df["actual"], df["quota"], strict=True))
+    assert any(a > q for a, q in pairs)  # BEAT — the crossbar-contrast case
+    assert any(a < q for a, q in pairs)  # MISS
+    assert any(a == q for a, q in pairs)  # exact MATCH
+
+    # Every value is present. The missing-goal, missing-measure and missing-both cases are the
+    # tests' job, not a demo's — the _temperature_range/_forecast_range rule: a sample shows the
+    # clean reading, and the null slots are pinned where they can be read.
+    assert not df.isna().to_numpy().any()
+
+    # The throwaway numeric column, carried for _reporting_lines' `tenure_years` reason and one of
+    # its own: it sits BELOW `quota` so the Goal picker's constant second-numeric index defaults to
+    # the quota rather than competing with it.
+    assert list(df.select_dtypes("number").columns) == [
+        "actual",
+        "quota",
+        "deals_closed",
+    ]
+
+    opts = build_options(df, "bullet", "region", ["actual"], goal_col="quota")
+    assert opts["chart"]["type"] == "bullet"
+    (series,) = opts["series"]
+    assert series["data"] == [[a, q] for a, q in pairs]  # positional [measure, goal]
+    assert count_marks(df, "bullet", "region", ["actual"]) == len(df) == 6
+
+
+# --------------------------------------------------------------------------- #
 # Gauge — concentric rings, each one COLUMN reduced to one number
 # --------------------------------------------------------------------------- #
 @pytest.fixture
@@ -7482,3 +8385,211 @@ def test_app_needle_gauge_y_control_names_the_mark_it_draws(app):
     assert "Rings" in app.pills[0].label
     _gauge_app(app, "gauge")
     assert "Needles" in app.pills[0].label
+
+
+# --------------------------------------------------------------------------- #
+# Bullet — the app layer
+# --------------------------------------------------------------------------- #
+# These are the columnrange/arearange AppTests one type over, and the resemblance is the
+# point: bullet reuses their control SHAPE (a category X, a single-select magnitude Y, a
+# second magnitude selectbox drawn from numeric_cols, a dedicated equality guard the
+# x-in-y rule cannot express) while meaning something else entirely — so every test here
+# pins the ONE thing that differs: the label, the kwarg, the noun, the warning text. A
+# control shape copied wholesale is exactly what silently ends up wired to the wrong
+# kwarg, and only the emitted config can tell.
+def _pick_bullet_sample(app):
+    """Select the bullet sample dataset and switch the chart type to bullet.
+
+    The quota sample is the one whose two leading numeric columns ARE a measure and a goal, so the
+    picker, KPI and guard tests read the numbers the type is meant to draw rather than borrowing
+    the landing dataset's revenue/cost pair and hoping it means the same thing."""
+    from sample_data import SAMPLES
+
+    label = next(key for key in SAMPLES if "(bullet)" in key)
+    app.selectbox[0].set_value(label).run()  # Dataset
+    app.selectbox[1].set_value("bullet").run()  # Chart type
+    return SAMPLES[label]()
+
+
+def test_app_switch_to_bullet_shows_goal_control_and_regenerates_config(app):
+    # Bullet is the sixth type with a required extra column (after bubble's Size, sankey's Target,
+    # sunburst's Parent, xrange's End and the magnitude-range family's High): it reveals a "Goal
+    # (target)" selectbox no other type shows and drives the config through the goal_col plumbing.
+    # The LABEL matters as much as the presence — "Goal", never "Target", because "Target (to)"
+    # already names a destination NODE in this same sidebar for all four node-link types, and one
+    # word cannot mean both a label and a magnitude. That collision is the whole reason goal_col is
+    # its own kwarg rather than a reuse, so a test asserting only "some second selectbox appeared"
+    # would pin nothing about it.
+    #
+    # The Y control is a SINGLE-select labelled "Measure (bar)" — not the multi-select pills, and
+    # not columnrange's "Low (bottom)": bullet's two numbers are not the two ends of one bar but
+    # two independent channels, and the label is the only place in the UI that says so.
+    assert not any(sb.label == "Goal (target)" for sb in app.selectbox)  # absent
+    df = _pick_bullet_sample(app)
+    assert not app.exception
+    assert not app.error  # the no-numeric-columns gate has nothing to say here
+    assert len([sb for sb in app.selectbox if sb.label == "Goal (target)"]) == 1
+    assert any(sb.label == "Measure (bar)" for sb in app.selectbox)
+    assert not app.pills
+    assert not app.multiselect
+    # The defaults land on DISTINCT columns, so no warning fires on a freshly picked sample —
+    # `deals_closed` is carried third precisely so the Goal picker's constant second-numeric index
+    # lands on `quota` rather than on the throwaway column.
+    measure = next(sb for sb in app.selectbox if sb.label == "Measure (bar)")
+    goal = next(sb for sb in app.selectbox if sb.label == "Goal (target)")
+    assert (measure.value, goal.value) == ("actual", "quota")
+    assert not app.warning
+    _reveal_config(app)
+    assert not app.exception
+    js = app.code[0].value
+    assert "type: 'bullet'" in js
+    # The sample's own numbers reached the chart, which is what proves the config was regenerated
+    # through the bullet branch rather than left over from the previous type.
+    for actual in df["actual"]:
+        assert str(actual) in js
+
+
+def test_app_bullet_measure_and_goal_pickers_offer_only_numeric_columns(app):
+    # A goal is a MAGNITUDE, so both pickers are sourced from numeric_cols — NOT from df.columns
+    # (sankey's Target / sunburst's Parent / organization's Title are drawn from every column
+    # because THOSE are labels) and NOT from coordinate_columns (xrange's End, because a start and
+    # an end may be dates and a goal never can). Offering `region` here would hand the builder a
+    # column it can only turn around and reject, which is the invariant these picker-source tests
+    # keep: the app never offers a column the builder would refuse.
+    df = _pick_bullet_sample(app)
+    measure = next(sb for sb in app.selectbox if sb.label == "Measure (bar)")
+    goal = next(sb for sb in app.selectbox if sb.label == "Goal (target)")
+    numeric = set(df.select_dtypes("number").columns)
+    for picker in (measure, goal):
+        assert "region" not in picker.options
+        assert set(picker.options) == numeric == {"actual", "quota", "deals_closed"}
+
+
+def test_app_bullet_goal_survives_a_measure_change(app):
+    # THE KEYLESS-WIDGET RULE, stated: fold the default into the widget's identity IFF the
+    # SELECTION depends on the state the default DERIVES from. The Goal selectbox carries no
+    # `key=`, so Streamlit folds its `index` into the widget's identity — which is why that index
+    # is a CONSTANT (`min(1, …)`, the second numeric column) rather than the tempting "the column
+    # after Measure". A default derived from the current Measure would re-mint the widget the
+    # instant Measure changed, silently discarding a Goal the user had deliberately picked.
+    #
+    # And a `key=` here would be the BUG, not the fix — the inverse of the gauge Dial's case. A
+    # goal derives from the numeric-column LIST (the dataset), never from the Measure selection,
+    # and a chosen Goal stays perfectly VALID when Measure changes, so there is nothing to
+    # re-derive. Add a key and `index=` is honoured only on the FIRST render, so the widget would
+    # freeze on whatever the dataset happened to offer then and survive a dataset swap that made it
+    # meaningless. Target's / Parent's / End's / High's case exactly.
+    #
+    # A three-numeric CSV gives room to move Measure without colliding with Goal — which matters,
+    # since a collision would fire the equality guard and st.stop() the page before this could be
+    # observed at all, and the test would pass vacuously on a two-column frame.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        ("kpi.csv", b"team,a,b,c\nX,1,5,9\nY,2,6,10\n", "text/csv")
+    ).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("bullet").run()
+    goal = next(sb for sb in app.selectbox if sb.label == "Goal (target)")
+    assert goal.value == "b"  # the constant index: the SECOND numeric column
+    goal.set_value("c").run()  # a deliberate pick, away from the default
+    assert not app.exception
+    measure = next(sb for sb in app.selectbox if sb.label == "Measure (bar)")
+    measure.set_value("b").run()  # change Measure a -> b
+    assert not app.exception
+    goal = next(sb for sb in app.selectbox if sb.label == "Goal (target)")
+    assert goal.value == "c"  # NOT reset to the default
+
+
+def test_app_bullet_single_numeric_column_clamps_goal_onto_measure_and_warns(app):
+    """The `min(1, len - 1)` clamp — a guard that fires BY ACCIDENT rather than by design.
+
+    Every other bullet app test runs on a three-numeric-column frame, where the constant index
+    lands on a genuinely distinct second column. On a ONE-numeric-column CSV — a perfectly ordinary
+    upload — the clamp has nowhere else to go and pins Goal onto Measure, so the equality guard
+    fires on a selection the USER never made. That is the intended reading (a bullet needs two
+    numbers), but it is intended by a comment, not by a test: an index written `1` without the
+    clamp would `IndexError` the page instead, and one written as "the next column after Measure"
+    would wrap around to it silently.
+
+    What must hold is what the guard promises everywhere else: a WARNING, not an exception. The
+    builder raises `ValueError` on this same pair and the interactive path does not catch builder
+    errors, so if the app-side mirror did not fire first the user would get a bare traceback for
+    uploading a two-column file.
+    """
+    app.segmented_control[0].set_value("Upload CSV").run()
+    app.file_uploader[0].set_value(
+        ("one.csv", b"region,actual\nNorth,420\nSouth,512\n", "text/csv")
+    ).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("bullet").run()
+
+    measure = next(sb for sb in app.selectbox if sb.label == "Measure (bar)")
+    goal = next(sb for sb in app.selectbox if sb.label == "Goal (target)")
+    assert (
+        measure.value == goal.value == "actual"
+    )  # the clamp, with nowhere else to land
+    assert not app.exception  # a warning, NOT the builder's traceback
+    assert app.warning
+    assert "Measure and Goal must be different" in app.warning[0].value
+
+
+def test_app_bullet_measure_equals_goal_shows_guard_warning(app):
+    # Bullet's own collision, the fifth of these and NOT the x-in-y rule (the Goal column is the
+    # goal_col selector, never among the Y series). It fails in this type's own idiom and it fails
+    # SILENTLY: every bar would land exactly on its own crossbar, so the chart would report that
+    # every category hit its target precisely — a confident, plausible, entirely fabricated claim,
+    # drawn with no error anywhere.
+    #
+    # `not app.exception` is the whole point of this test rather than boilerplate. The builder ALSO
+    # raises ValueError on this pair and the interactive path does NOT catch builder errors — so
+    # without the app-side mirror firing FIRST, a user who pointed Goal at Measure would get a bare
+    # traceback across the page instead of a sentence telling them what they did. The warning must
+    # arrive in FRONT of the raise, not instead of it (columnrange's double).
+    _pick_bullet_sample(app)  # Measure defaults `actual`, Goal defaults `quota`
+    goal = next(sb for sb in app.selectbox if sb.label == "Goal (target)")
+    goal.set_value("actual").run()  # == the Measure column
+    assert not app.exception  # the guard fires; it does NOT blow up the page
+    assert app.warning
+    assert "Measure and Goal must be different" in app.warning[0].value
+
+
+def test_app_bullet_kpi_shows_measures(app):
+    # Bullet is a single measure/goal series, so its default "Series plotted" would read a bare 1,
+    # exactly as columnrange's and arearange's would. It swaps in "Measures".
+    #
+    # The noun is the assertion. "Measures", not xrange's "Bars", because the bar is only HALF of
+    # what a bullet draws — every mark is a bar AND its crossbar, and the number counts the
+    # pairing. The value is asserted against the sample's LITERAL row count rather than against a
+    # `count_marks` call: the app computes the KPI by calling `count_marks`, so asserting one call
+    # against another is circular and would agree happily on a number wrong for both.
+    df = _pick_bullet_sample(app)
+    assert not app.exception
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    assert metrics["Measures"] == "6"
+    assert (
+        len(df) == 6
+    )  # and neither value column can drop a mark, so it IS the row count
+
+
+def test_app_leaving_bullet_retires_the_goal_control_and_the_measures_kpi(app):
+    """The subtractive half, which every other app test here asserts only in the additive
+    direction.
+
+    A control that lingers is how a stale `goal_col` gets threaded into a type that must ignore it
+    — and bullet's kwarg DOES touch the cache layer, so a stale value is a stale cache KEY, not
+    merely a stale widget. The KPI is the same claim one row down: "Measures" is a `MARK_METRICS`
+    entry keyed on the type, so leaving bullet must restore "Series plotted" rather than go on
+    counting something the chart no longer draws.
+    """
+    _pick_bullet_sample(app)
+    assert any(sb.label == "Goal (target)" for sb in app.selectbox)
+    assert "Measures" in {m.label for m in app.metric}
+
+    app.selectbox[1].set_value("column").run()
+    assert not app.exception
+    assert not any(sb.label == "Goal (target)" for sb in app.selectbox)
+    assert not any(sb.label == "Measure (bar)" for sb in app.selectbox)
+    labels = {m.label for m in app.metric}
+    assert "Measures" not in labels
+    assert "Series plotted" in labels

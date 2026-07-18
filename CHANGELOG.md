@@ -33,6 +33,55 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.15.0] - 2026-07-18
+
+### Added
+
+- **`bullet` chart type** — a KPI strip: one row per category, a **Measure** column drawn as a bar
+  from zero and a **Goal** column drawn as a crossbar floating over it ("actual against target").
+  It is columnrange's data shape read as a **comparison** rather than as a range, and that
+  distinction settles the type: a columnrange's two numbers are the two ends of **one** bar, while
+  a bullet's are two **independent channels** drawn as two shapes. So it does not join
+  `MAGNITUDE_RANGE_TYPES` and does not reuse `high_col` — a high is the far *end* of the mark it
+  shares a point with, a goal is a *reference* the mark is read against, the `title_col`
+  "a title is not a weight" precedent one family over. The new **`goal_col`** kwarg therefore does
+  touch the cache layer. Joins `X_IN_Y_GUARD_TYPES` (its `x_col` is a genuine category axis, bars
+  standing on it), adds a dedicated `measure == goal` guard for the collision that rule cannot
+  express, and reads the **"Measures"** KPI.
+- **Each channel nulls alone** (`_bullet_point`, sitting directly below `_range_point` and stating
+  the opposite verdict on the same input shape): a row with a measure and no goal draws its bar
+  with no crossbar, one with a goal and no measure draws a lone reference line, and one with
+  neither keeps its category tick. Nothing is dropped and nothing raises — a measure *below* its
+  goal is the ordinary reading, not xrange's whole-axis lie, so there is no `explain_bullet_error`.
+  All four combinations verified by rendering.
+- **One documented exception to the `EnforcedNull`-not-`None` convention, exactly one slot wide.**
+  A bullet point's **goal** must be Python `None`: `options/series/data/bullet.py` validates it with
+  `validators.numeric(value, allow_empty=True)`, which admits `None` and rejects `EnforcedNullType`
+  with `CannotCoerceError` — raised at `Chart.from_options`, one layer *below* `build_options`, so
+  an options-dict test passes green while the chart cannot be built at all. The same point's
+  **measure** slot takes `EnforcedNull` like every other keep-the-slot type. Pinned by a test that
+  drives `make_chart`, the only layer at which it is observable.
+- **The crossbar is coloured explicitly, and theme-flipped** — two `_themed` hooks, both measured
+  rather than inferred. Left unset the goal marker takes the *series* hue at 140% of the bar width,
+  so it collapses into the fill and survives as two meaningless stubs exactly when the measure
+  *exceeds* the goal — the "we beat plan" row a reader most wants to find. And because it spans
+  both the bar (a constant blue) and the background (white → slate), no fixed colour can work in
+  principle, which makes this the one `_themed` hook in the module that flips a **mark** rather
+  than chrome. Bullet also joins the bar-border dissolve tuple as its fifth member (rendered: its
+  bars ring white in dark mode), while `arearange` stays deliberately out of it.
+- **Single brand hue, `colorByPoint` pinned nowhere** — and here that pin guards a real decision
+  rather than restating a library limitation, since bullet's `colorByPoint` survives the round trip
+  at both levels. It is also load-bearing: any per-point key forces the point *dict* form, in which
+  a `None` goal vanishes entirely, so a per-bar hue would leave a goal-less row with no working
+  spelling at all.
+- **No qualitative plot bands**, deliberately. The poor/average/good bands every bullet demo draws
+  are a business judgement and a three-column CSV states none — sunburst refusing to emit a CSV's
+  own subtotal as a parent value, and waterfall's `isSum` Total, applied once more.
+- Adds the **"Quarterly sales vs quota (bullet)"** sample, whose regions deliberately beat, miss and
+  exactly match their quotas — the beats being the load-bearing part, since that is where the
+  crossbar-contrast trap strikes. Pulls in `modules/bullet` and *not* `highcharts-more` (the
+  plausible guess the round trip corrects), and needs no `_MODULE_LOAD_ORDER` entry.
+
 ## [0.14.0] - 2026-07-17
 
 ### Added

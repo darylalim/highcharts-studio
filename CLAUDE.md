@@ -22,7 +22,17 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   range, both magnitudes, drawn from `numeric_cols`, *not* xrange's `coordinate_columns`, since a
   high can never be a date; columnrange is the type that first introduced `high_col` as a new kwarg
   rather than a reuse — because a magnitude is not xrange's coordinate — and arearange then reuses
-  it, so the cache layer is untouched, networkgraph's/dependencywheel's win) — and
+  it, so the cache layer is untouched, networkgraph's/dependencywheel's win), **Goal (target)** for
+  **bullet** (which looks like a second High and is deliberately *not* one: it is drawn from the
+  same `numeric_cols` for the same reason — a goal is a magnitude, never a date, never a label —
+  but it feeds its own `goal_col`, because a high is the far END of the mark it shares a point with
+  while a goal is the REFERENCE that mark is read against. "A link is a link, but a goal is not a
+  high" — the `title_col` distinction one family over. It is called **Goal**, not Target, because
+  **Target (to)** already names a destination *node* in this sidebar for all four node-link types,
+  and one word cannot name both a label and a magnitude — the very collision that made it a new
+  kwarg. It sits directly after the Y control so the sidebar reads as the pair it is
+  (Category → Measure → Goal), and its `index` is a constant `min(1, …)`, landing on the *second*
+  numeric column so it starts distinct from Measure and still clamps a one-column frame) — and
   the **gauge family's** two, which are the only ones that name a **policy** and
   a **scale** rather than a column: an aggregation picker sourced from the builder's
   `GAUGE_AGGREGATIONS`, and a Dial min/max pair *seeded* from its `gauge_dial`. The gauge family is
@@ -46,7 +56,8 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   pyramid, flows for a sankey or dependencywheel,
   links for a networkgraph, reports for an organization,
   boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
-  xrange, ranges for a columnrange, points for an **arearange** (its band's vertices) — sourced
+  xrange, ranges for a columnrange, points for an **arearange** (its band's vertices), measures for
+  a **bullet** — sourced
   there
   rather than recomputed
   here so it can't drift from what the chart draws; waterfall's and sunburst's are the
@@ -57,7 +68,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   exactly their surviving rows (columnrange and arearange share **one** count rule, keyed on
   `MAGNITUDE_RANGE_TYPES`, counting by label like waterfall — a missing/inverted
   range kept as a null slot and still counted; their nouns differ, "Ranges" vs "Points", since a
-  band is one shape whose vertices are counted, not N discrete ranges);
+  band is one shape whose vertices are counted, not N discrete ranges). Bullet reaches that same
+  surviving-label number by its **own** branch and its own argument — columnrange never reads its
+  value columns because a missing end nulls the *whole* slot, while bullet never reads *either*
+  because **neither** channel can drop a row — and its noun is **"Measures"** rather than xrange's
+  "Bars", because the bar is only half of what a bullet draws: the count is of the pairing, not of
+  the rectangles;
   membership of the `MARK_METRICS` dict is what makes a type count-adaptive, so the
   KPI stays one branch however many such types there are — and gauge is the first type
   whose *absence* from that dict is a decision worth stating: its marks ARE its series
@@ -96,7 +112,15 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   Then `explain_gauge_error()`, the third of that family and the first that reads **no frame
   at all** — a dial whose maximum does not sit above its minimum is a contradiction about two
   numbers the user typed, not about a column or a tree, and it is reachable from the app because
-  the two number inputs accept any two numbers.
+  the two number inputs accept any two numbers. `bullet` adds **no fourth**, and its absence is
+  worth stating rather than noticing: the family exists for contradictions that have *no right
+  drawing*, and a bullet has none. A row missing its goal, one missing its measure, one missing
+  both, and one whose measure falls far under its goal all have a correct picture (a bare bar, a
+  lone crossbar, an empty category tick, a short bar under a high crossbar) — an inverted pair is
+  the **ordinary reading** of a type that exists to answer "did we hit it", not xrange's
+  whole-axis lie. So nothing is dropped, nothing raises, and there is no `explain_bullet_error` to
+  write. Its one guard (`measure == goal`) is a *column*-level collision, not a contradiction the
+  data states.
   Then `coordinate_columns()`, the
   builder's own answer to "which columns can place a bar on an axis" — exported so the
   app's Start/End pickers cannot offer a column the builder would refuse, which is the
@@ -117,11 +141,20 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   organization's reporting lines, a boxplot's
   boxes, a waterfall's steps, a
   sunburst's sectors, an
-  xrange's bars, a columnrange's ranges — funnel/pyramid counting `label_ok & value_ok` exactly
+  xrange's bars, a columnrange's ranges, a bullet's measures — funnel/pyramid counting
+  `label_ok & value_ok` exactly
   like treemap, columnrange counting by label like waterfall minus the
-  appended total, and organization counting `label_ok & not _is_top_level(mgr)` — its own second
+  appended total, organization counting `label_ok & not _is_top_level(mgr)` — its own second
   mask, since a blank manager is a root that draws a box but no reporting line, so a bare
-  `_label_ok` would overcount)
+  `_label_ok` would overcount — and bullet counting by label too, in a **branch of its own**
+  even though it returns the identical expression columnrange's does: it reaches that number by a
+  *different argument* (columnrange never reads its value columns because a missing end nulls the
+  whole slot; bullet never reads either because neither channel can drop a row), and the premise
+  is what the next edit will reason from. Folding the two into a
+  `MAGNITUDE_RANGE_TYPES + BULLET_TYPES` is precisely the "consistency" edit this file keeps
+  warning about — that constant binds five sites and bullet belongs to exactly one of them, so a
+  shared constant would be a claim about the TYPES where only the COUNTS agree, the
+  funnel-beside-treemap pattern read backwards)
   for the app's KPI
   row — reusing the same `_label_ok`/`_plottable` drop predicates so the count can't
   drift from the chart (sunburst and xrange go further and reuse their *whole* build, for
@@ -158,6 +191,22 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   cannot draw. It leads with a category (`month`) column and keeps every low below its high, like
   the temperature sample and for the same reason (the demo shows the clean band; the band-break and
   inverted edge cases are the tests' job).
+  `Quarterly sales vs quota (bullet)` is that temperature sample's **other** mirror, and the one it
+  looks most like while meaning least like: both lead with a category and carry two magnitude
+  columns of one unit, but a record range's two numbers are the two **ends of one bar** (neither
+  means anything alone — the bar *is* the span between them) while `actual` and `quota` are two
+  **independent claims** about the same region: what happened, and what was meant to happen. So one
+  draws N floating bars and the other N bars from zero, each crossed by a reference line — reading
+  them side by side is the fastest way to see that "two magnitude columns" is a data **shape**, not
+  a chart. Its regions deliberately **beat**, **miss** and exactly **match** their quotas, and the
+  beats are the load-bearing part rather than the flattering one: the crossbar-contrast trap
+  strikes *only* where the measure exceeds the goal, so a sample where every region missed would
+  hide the one failure a reader could not diagnose (`North` matching exactly is the honest edge
+  that a per-*row* equality is fine, unlike the per-*column* one the app guards). Every value is
+  present — the missing-goal, missing-measure and missing-both cases are the tests' job, the
+  `_temperature_range`/`_forecast_range` rule — and `deals_closed` is a throwaway numeric column
+  (the `tenure_years`/`calls_per_min` rule) that earns a second keep here: the Goal picker defaults
+  to the *second* numeric column, so it must sit below `quota` rather than compete with it.
   `Marketing conversion funnel (funnel)` and `Customer loyalty pyramid (pyramid)` are the same
   single-value **stage** shape drawn two ways: both lead with their **largest** stage and decrease,
   but the funnel puts it at the top and narrows downward (a shrinking purchase journey) while the
@@ -197,6 +246,19 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   chart_type`, a byte-diff proving the branch stays shared, and `test_arearange_has_no_dark_mode_
   theme_hook`, which pins the *absence* of the border-dissolve hook — the mirror of columnrange's
   presence, and the render-verified divergence — plus the "Points" KPI distinct from "Ranges"),
+  bullet's measure-against-goal pairs (the `[measure, goal]` 2-array — where the literal key
+  `target` must appear **nowhere** in the emitted JS, since the value survives *positionally*, so
+  the module's dominant `assert "…" in js` idiom is **inverted** here and every JS-level pin
+  asserts the array; the four independent-channel combinations, each end nulling ALONE; the goal's
+  Python `None` — the module's one `EnforcedNull` carve-out — pinned by a test that drives
+  `make_chart` rather than `build_options`, the only layer at which a `CannotCoerceError` one
+  layer below `build_options` is observable at all; the `targetOptions.color` that closes the
+  crossbar trap, and its dark-mode **flip**, the one `_themed` hook that moves a MARK; the fifth
+  seat in the border-dissolve tuple; the single hue with `colorByPoint` asserted NOWHERE — the one
+  such pin guarding a real decision, since bullet's *survives* the round-trip at both levels; the
+  absent `yAxis.plotBands`; the measure-required and measure≠goal guards and the shared x-in-y one;
+  `count_marks` agreeing with the built length; and `modules/bullet` resolved from `chart.type`
+  alone, with no `highcharts-more`),
   the **gauge family's** reduced marks
   (`solidgauge`'s rings: the empty-column
   trap, swept over all six reductions because only `sum` lies; the dial derived from the
@@ -376,8 +438,9 @@ contradiction — an inverted `high < low` is drawable (a bar spanning `[min, hi
 honest crossover), so it is kept, not raised — so there is no `explain_columnrange_error` (nor an
 arearange one). Their `x_col` **is** a real
 category axis, so `x_col == low` is caught by the shared `X_IN_Y_GUARD_TYPES` rule (both join it via
-`MAGNITUDE_RANGE_TYPES`), the only one
-of the extra-column types whose x-collision that rule can express.
+`MAGNITUDE_RANGE_TYPES`), for a while the only
+extra-column types whose x-collision that rule could express — `bullet` has since joined them on
+the identical sentence, and for the identical reason.
 
 And `organization` — the fourth node-link type — charts a `title_col=` naming an optional per-node
 job-title column, drawn inside each box under the name (read only by organization; a name-only
@@ -387,6 +450,31 @@ cache layer — and the manager it reads through `target_col` is the far end of 
 so the `{from, to}` link is built `{from: manager, to: employee}` (a blank manager is a ROOT, via
 sunburst's reused `_is_top_level`, since a manager is a parent — not `_label_ok`, because
 `_label_ok("")` is True and would draw a phantom link from a nameless node).
+
+And `bullet` charts a `goal_col=` naming the column each measure bar is read **against**, drawn as
+a crossbar floating over it (required for `bullet`, raising `ValueError` if omitted or equal to the
+*measure* column — `y_cols[0]`, xrange's and columnrange's start-is-end collision a third time).
+It is the **seventh** column kwarg and the second that is **not** a reuse, and the argument is
+`title_col`'s one family over rather than `high_col`'s: a goal is drawn from the same
+`numeric_cols` a high is, it is a magnitude that must be `_plottable` exactly as a high is, and it
+is the second number on a two-magnitude row exactly as a high is — and it is still not a high,
+because a **high is the far END of the mark it shares a point with** while a **goal is the
+REFERENCE that mark is read against**. "A link is a link, but a goal is not a high." So it is a
+new kwarg and it **does** touch the cache layer (arearange's and networkgraph's untouched-cache
+win is not available here, and buying it would have meant the lie). Bullet raises no *column*-level
+contradiction at all — every combination its two columns can present has a right drawing, including
+a measure far under its goal, which is the type's **ordinary reading** — so there is no
+`explain_bullet_error`. Its `x_col` **is** a real category axis (the bars stand ON it, drawn
+vertically), so it joins `X_IN_Y_GUARD_TYPES` for `x_col == measure`; the other collision,
+`measure == goal`, that rule cannot express (`goal_col` is not in `y_cols`) and it gets the
+dedicated guard above, with an app-side warning in **front** of it, since the interactive path does
+not catch builder errors. That pair is worth stating as a rule, because it is the second time this
+project has had to choose: **a cosmetic collision warns, a claim-fabricating one raises.**
+Organization's optional Title colliding with Manager mislabels the boxes while the hierarchy stays
+true — drawable-but-meaningless, and it has a "(no titles)" escape — so it is app-only. Bullet's
+two are **required** columns of one relation, and the collision fabricates the chart's central
+claim: every bar would land exactly on its own crossbar, so the chart would report that every
+category hit target precisely, in the one register the type exists to answer.
 
 The **gauge family** (`solidgauge` and `gauge`) takes the fifth and sixth, and they are the only
 two that are **not column names**: `agg=` names the reduction each mark applies to its column (one
@@ -858,7 +946,129 @@ keyed on `chart.type` independently — which is what lets the branch stay share
 band's `(low, high)` **points**, so like columnrange it needs a `count_marks` rule and a `MARK_METRICS`
 entry — **"Points"**, a noun *distinct* from columnrange's "Ranges" on purpose: a band is one shape, so
 the count names its vertices rather than implying N discrete ranges. Pulls in `highcharts-more` from
-`chart.type` alone, *not* a phantom `modules/arearange`), and `solidgauge` (concentric
+`chart.type` alone, *not* a phantom `modules/arearange`), and `bullet` (a KPI strip — columnrange's
+**data shape read as a COMPARISON rather than as a range**, which is the whole of the type. Both
+take a category X axis and two magnitude columns and draw one mark per category; but a
+columnrange's two numbers are the two ends of **one** bar, while a bullet's are two **independent
+channels** drawn as two shapes: a filled bar from zero to the **measure** (`y_cols[0]`) and a
+crossbar floating over it at the **goal** (a new `goal_col`). That is why it does **not** join
+`MAGNITUDE_RANGE_TYPES` and does **not** reuse `high_col` — a high is the far END of the mark it
+shares a point with, a goal is the REFERENCE that mark is read against; the `title_col` "a title is
+not a weight" precedent, here "a goal is not a high" — so it is the one recent type that **does**
+touch the cache layer.
+
+The independence is the type's **policy**, not a nicety, and `_bullet_point` is `_range_point`'s
+shape with the opposite verdict on the same input, which is why it is a second helper rather than a
+widened one. A columnrange nulls the whole slot all-or-nothing (a range with one end is not a
+range); a bullet nulls **each end alone**, because half a comparison is still worth drawing. All
+four combinations were **verified by rendering**: measure-with-no-goal draws a bare bar with
+nothing to compare it to, goal-with-no-measure draws a lone reference line over an empty slot,
+neither keeps the category tick (the keep-the-slot family — column/bar/waterfall/columnrange), and
+an inverted pair (a measure far under its goal) is the **ordinary reading** of a type that exists to
+answer "did we hit it", not xrange's whole-axis lie. Nothing is dropped, nothing raises, hence no
+`explain_bullet_error`.
+
+The **goal slot is the module's one exception to the `EnforcedNull`-not-`None` convention**, and it
+is exactly **one slot wide** — which is what keeps it small enough to be believed rather than
+tidied away. The measure takes `_num` (`EnforcedNull`, this module's rule everywhere else); the
+goal must be Python `None`, because `options/series/data/bullet.py`'s `target` setter runs
+`validators.numeric(value, allow_empty=True)`, which admits `None` and rejects `EnforcedNullType`
+with `CannotCoerceError` — raised at `Chart.from_options`, **one layer below `build_options`**. So
+an options-dict assertion passes green while the chart cannot be built at all, and the app's
+interactive path (which does not catch builder errors) shows a bare traceback naming neither
+`target` nor `bullet`: the `_NEEDLE_DIAL` trap in a different validator. It is pinned by a test
+that drives `make_chart`, the only layer at which it is observable, and written into `Conventions`
+below so it is not "fixed" back.
+
+The point is a `[measure, goal]` **2-array**, never a dict, and that is structural in two
+directions a reader would not guess. First, the literal key `target` **never appears in the emitted
+JS** — the value survives *positionally* — so `assert "target" in js` is **false on a correct
+bullet chart**, inverting this module's dominant test idiom. Second, any key outside
+`{x, y, target, name}` forces the point **dict** form, in which a `None` target *vanishes* entirely
+rather than nulling while `EnforcedNull` there still raises: in dict form a goal-less row has **no
+working spelling at all**. That is the second and stronger reason bullet takes a **single brand
+hue** with `colorByPoint` pinned to appear **nowhere** — and unlike networkgraph's and sunburst's
+pins, this one guards a real decision rather than restating a library limitation, since a bullet's
+`colorByPoint` *survives* the round-trip at both the series and the `plotOptions` level (verified).
+The decision itself is columnrange's: a bullet is one measurement read against one goal across the
+axis, so a per-bar hue would assert a categorical identity the categories don't have — the opposite
+call from pie/treemap/xrange.
+
+The **crossbar trap** is the sharpest bug this type could ship, and it was found by **rendering**.
+Left unset, the goal marker takes the *series* hue — the same blue as the bar it crosses — and
+Highcharts draws it at **140% of the bar width**. So it does not vanish, which would at least be
+obvious: the segment crossing the bar disappears into the fill while the two overhangs survive as
+small stubs either side, reading as a deliberate tick rather than as a goal line. It strikes
+**exactly when the measure exceeds the goal** — the "we beat plan" row, the one a reader most wants
+to find — so the failure is invisible on the rows that look fine and silent on the rows that
+matter. The tempting fix is the geometry, and it is both the wrong lever and a trap:
+`targetOptions.width = 0` raises `EmptyValueError` out of a validator naming neither the key nor
+the series, and every numeric key under `targetOptions` rejects a `numpy.int64` outright. The
+problem is **contrast**, so the fix is the colour and Highcharts' 140% × 3px default is left
+entirely alone (the pane-`size` "stop steering" rule, the funnel/pyramid "the defaults are right"
+call). Setting no numeric key there, and deriving none from the frame, makes both traps unreachable
+rather than remembered.
+
+So it needs **two** `_themed` hooks. The first is the `borderColor` dissolve, where bullet is the
+**fifth** member of the literal tuple (`column`, `bar`, `xrange`, `columnrange`, `bullet`) — joined
+on a **measurement**, not on an inference: its bars are a column subclass, but so are waterfall's,
+and waterfall is the standing proof the base class settles nothing (its border is a fixed
+`#333333`). Rendered in dark mode a bullet's bars come back crisply ringed white, the background
+var, column/bar's case exactly. The tuple stays a **literal**, because arearange is deliberately
+absent from it despite sharing columnrange's branch — extend it, do not swap it for a family
+constant. The second is the crossbar's own hue, and it is the **only `_themed` hook in this module
+that flips a MARK rather than chrome**. That is a principle, not a preference: at 140% width the
+marker necessarily crosses **both** the bar (a constant palette blue in both themes) *and* the
+background (white → slate), so a fixed colour cannot work **in principle** — a near-black reads on
+the light shell and disappears on the dark one, a near-white does the exact reverse, and both were
+rendered to confirm it. Where every border dissolve above matches a mark **to** the background,
+this one matches it **against** the background; `_BULLET_TARGET_COLOR` is `_DARK_CHROME["bg"]` read
+the other way round, so the pair the crossbar swings between is exactly the pair the app shell does
+and neither can drift (`_NEEDLE_PIVOT_COLOR = _SUNBURST_ROOT_COLOR`'s aliasing rule). Highcharts'
+`contrast` is no help: it computes against the fill a *label* sits on, and this is a shape.
+
+It carries **no qualitative plot bands**, and that is a decision rather than an omission: the
+poor/average/good bands every bullet demo draws are a **business judgement**, and a three-column CSV
+states none — drawing them would be this module's standing offence, emitting a mark the data never
+made. Same family as sunburst refusing to emit a CSV's own subtotal as a parent value, and
+waterfall's Total being an `isSum` Highcharts computes rather than a number the builder asserts.
+
+It is drawn **vertically**, and — unusually for this module — that was **not** decided by
+rendering: both orientations render correctly in both modes and both themes, and the comment says
+so rather than borrowing the authority of a render it did not need. It is a **consistency** call,
+decided by the two sentences it would otherwise falsify: `X_IN_Y_GUARD_TYPES` admits bullet on "its
+`x_col` is a genuine category X axis, the bars stand ON it, drawn vertically", and `_themed`'s
+tuple admits it as the fifth bar-shaped type measured to ring white. Inverting would leave both
+true in the options tree and false on the page — the exact divergence class this module catches by
+rendering. (Inverting buys room for long category labels, which is a property of the *dataset*, not
+of the type, and which the app already answers with the user's own column-vs-bar lever; a second,
+type-baked answer to the same question is the steering the pane-`size` lesson says to stop doing.
+The one inverted type here, organization, is inverted because its domain forces it — a hierarchy
+flows down. A bullet's sideways convention is a convention.)
+
+Its marks are the measure bars, so like columnrange its single series would misreport the KPI as a
+bare `1`: it needs a `count_marks` rule and a `MARK_METRICS` entry (**Measures** — the bar being
+only half of what a bullet draws, so the noun counts the pairing, not the rectangles). The rule is
+one bar per drawable **label**, waterfall's without the appended total — the same number columnrange
+returns, by a **different argument**, which is what earns it its own branch. It prints **nothing in
+the mark** and needs no gate constant — *xrange's rule reached from xrange's premise*, exactly as
+columnrange reached it: both numbers land on a real, ticked, gridlined y axis that renders in the
+Static PNG too, the goal is *drawn* on that axis rather than printed, and the only other identity is
+already on the X axis. A bullet's dataLabels default **off** (column/bar's behaviour, not a gauge's,
+which default on and must be disabled explicitly), so the omitted key **is** the gate. Its tooltip
+is `{point.category}` / `{point.y}` / `{point.target}`: the categories are on the X axis, so
+`{point.category}` reads the right one (waterfall's fix, columnrange's reason) and `{point.name}` is
+**blank** here anyway (positional arrays). `{point.target}` *resolves* despite the literal key never
+reaching the JS — the same positional survival — and it is the only place the goal's **number** can
+be read at all, the crossbar saying "here is the line" and the tooltip saying what it is. The two
+column names are **labelled** rather than run together, and that is what makes a goal-less row
+legible: on a null goal `{point.target}` renders as **nothing at all** (not the token `null`, not
+`undefined` — verified by rendering), so the labelled form degrades to a clean "quota:" with no
+value where a run-together "120 of {point.target}" would trail off mid-sentence. Pulls in
+`modules/bullet` from `chart.type` alone and **not** `highcharts-more` — the plausible guess the
+round-trip corrects, as for columnrange and funnel — and needs **no** `_MODULE_LOAD_ORDER` entry:
+`bullet.js` declares `@requires highcharts` only, unlike dependency-wheel and organization (which
+require `modules/sankey`) and solid-gauge (which requires `highcharts-more`)), and `solidgauge` (concentric
 rings on one shared dial — an "activity gauge", and the only type with **no label channel
 at all**. Every other type names its marks from a column: a slice, an axis category, a
 node, a box, a lane. A gauge's marks are the **selected columns themselves**, each
@@ -1235,6 +1445,26 @@ shared once `chart.type` and the type-derived default title are set aside, and
 `test_arearange_has_no_dark_mode_theme_hook`, which pins the *absence* of the border-dissolve hook —
 the render-verified divergence, the mirror of columnrange's presence — and the "Points" KPI distinct
 from "Ranges"),
+bullet's measure-against-goal pairs (the `[measure, goal]` **2-array**, pinned on the emitted JS by
+asserting the ARRAY and by asserting the literal key `target` is **absent** — the value survives
+POSITIONALLY, so `assert "target" in js` is false on a correct chart and this module's dominant
+test idiom is inverted here, which is stated in the test as the reason; the **four independent-
+channel combinations**, each end nulling ALONE — measure-no-goal, goal-no-measure, neither (the
+category tick kept), and the inverted pair KEPT as the ordinary reading, which is columnrange's
+all-or-nothing slot in mirror; the goal's Python **`None`**, the module's one `EnforcedNull`
+carve-out, pinned by a test that drives **`make_chart`** rather than `build_options` — the only
+layer at which `CannotCoerceError` out of `target`'s `validators.numeric` is observable at all, the
+`_NEEDLE_DIAL` lesson in a different validator — plus the mixed `[EnforcedNull, None]` array
+serializing to `[null, null]`; `targetOptions.color`, the crossbar-contrast fix, and its dark-mode
+**flip**, the one `_themed` hook that moves a MARK rather than chrome, asserted on both themes;
+the border dissolve that makes bullet the fifth member of that literal tuple; the single hue with
+`colorByPoint` asserted NOWHERE — the one such pin guarding a real *decision*, since bullet's
+survives the round-trip at BOTH levels, so nothing but the choice keeps it off — and the *absent*
+`yAxis.plotBands`, a pin on a mark the data never made; no numeric key under `targetOptions` at
+all, so neither the `width = 0` `EmptyValueError` nor the `numpy.int64` rejection is reachable; the
+measure-required and measure≠goal guards and the shared x-in-y one; `count_marks` counting by label
+and agreeing with the built length; the `{point.category}`/`{point.y}`/`{point.target}` tooltip;
+and `modules/bullet` resolved from `chart.type` alone with NO `highcharts-more`),
 gauge's reduced rings (the **empty-column trap**, swept over all six reductions because only
 `sum` lies — `pd.Series([nan, ...]).sum()` is `0.0`, an additive identity drawn as a real ring
 at the dial's floor — with the assertion that pandas really does say `0.0` standing IN the test
@@ -1261,7 +1491,8 @@ colorAxis — vs. the shared palette), and the validation guards (including the
 category-x x-in-y rule, widened to heatmap, boxplot and waterfall, bubble's required
 size column, sankey's required, distinct target column, sunburst's required,
 distinct parent column, xrange's required end column, distinct from the *start*
-column rather than from `x_col`, gauge's known `agg` and its dial-with-a-span, and — the
+column rather than from `x_col`, bullet's required goal column, distinct from the *measure* column
+for the same reason, gauge's known `agg` and its dial-with-a-span, and — the
 mirror of gauge's own exemption — the `x_col` that every OTHER type now requires) —
 plus an end-to-end pass driving every supported type through the real
 `Chart.from_options` → `to_js_literal` pipeline (so a newly added type is proven
@@ -1273,8 +1504,11 @@ heatmap the `modules/heatmap` module, treemap the `modules/treemap` module,
 funnel and pyramid the `modules/funnel` module (shared, from `chart.type` alone — and *not*
 `highcharts-more`, the plausible guess the round-trip corrects, as it does for columnrange),
 sankey the `modules/sankey` module, sunburst the `modules/sunburst` module, xrange the
-`modules/xrange` module (those two alone among the extra-module types needing *not*
-`highcharts-more`), and gauge `modules/solid-gauge` **plus** `highcharts-more` — which is the
+`modules/xrange` module, bullet the `modules/bullet` module (those three alone among the
+extra-module types needing *not* `highcharts-more` — and bullet alone among *them* needing no
+`_MODULE_LOAD_ORDER` entry either, since `bullet.js` requires only `highcharts`, unlike
+dependency-wheel's and organization's `modules/sankey` and solid-gauge's `highcharts-more`),
+and gauge `modules/solid-gauge` **plus** `highcharts-more` — which is the
 one module resolution that is not merely proven but *load-bearing*, since it is pulled in by the
 `pane` alone and without it the chart draws an empty SVG in the browser with no error anywhere,
 while the export server renders it perfectly — rather than just
@@ -1285,7 +1519,10 @@ is and as sunburst's `levels[].colorByPoint` is, and waterfall's `isSum` is pinn
 there for the same reason — it is a point key
 that *does* survive, which only the emitted JS can show, as sunburst's `id`/`parent`
 and `allowTraversingTree` are, and as xrange's `x2` and `minPointLength` are, and as gauge's
-series-level `radius` is — the *surviving* half of a pair whose point-level half is dropped) and
+series-level `radius` is — the *surviving* half of a pair whose point-level half is dropped; bullet's
+`target` is a **third** case again, and only the emitted JS can show it either: the key never
+appears at all while its VALUE survives positionally, so the pin asserts the array and the *absence*
+of the name) and
 the sample
 datasets, then drives the full app headless via Streamlit's `AppTest` (switching
 controls — including the bubble Size (Z) control, radar, heatmap, treemap,
@@ -1296,6 +1533,11 @@ control, columnrange's **High (top)** control (over a renamed **Low (bottom)** s
 its High picker offering only numeric columns and surviving a Low change via its constant index,
 its KPI reading **Ranges**) — and arearange **reusing that very control and `high_col`**, its KPI
 reading **Points** instead (the shared-control mirror of dependencywheel reusing sankey's Target),
+bullet's **Goal (target)** control — which looks like that same shared High and is a *separate*
+widget feeding a separate `goal_col`, so the AppTest pins it as its own: numeric columns only, its
+constant `min(1, …)` index landing on the second so it starts distinct from Measure, surviving a
+Measure change (a Goal is still valid when the Measure moves, Target's/Parent's/End's/High's case,
+not the Dial's), and its KPI reading **Measures**,
 gauge's
 aggregation picker and Dial min/max inputs — and gauge's *absent* X control and networkgraph's
 *absent* Y control, the two mirror-image subtractive changes — and boxplot's
@@ -1307,7 +1549,12 @@ the KPI metric row, the wide-CSV
 the guard messages — including a *cyclic uploaded CSV*, the one builder error a user
 can reach just by uploading a file, which must warn and stop rather than render a
 traceback, its xrange counterpart, a date start beside a numeric end, and its gauge
-counterpart, a dial with no span; plus the
+counterpart, a dial with no span; and bullet's **Measure == Goal**, which is a different
+animal from those three — not a contradiction the *data* states but a collision of two required
+columns, warned in front of the builder's own `ValueError` (columnrange's double) because the
+interactive path does not catch, and worth a test because it fabricates the chart's central
+claim rather than merely failing: every bar would sit exactly on its own crossbar and the chart
+would report that every category hit target precisely; plus the
 **type-aware column gate**, driven by an uploaded Gantt CSV with *no numeric columns
 whatsoever*, which must plot as an xrange and must still be refused by `line`).
 
@@ -1433,7 +1680,22 @@ before it runs.
   native Streamlit charts.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
   in dict configs fed to highcharts-core (`Chart.from_options`), not Python
-  `None`.
+  `None`. **There is exactly ONE exception, and it is exactly one slot wide: a bullet point's
+  GOAL — the second element of its `[measure, goal]` array — must be Python `None`.** Do not
+  "fix" it back. `options/series/data/bullet.py`'s `target` setter runs
+  `validators.numeric(value, allow_empty=True)`, which admits `None` and rejects `EnforcedNullType`
+  with `CannotCoerceError` — and it raises at `Chart.from_options`, **one layer below
+  `build_options`**. So the whole options-dict test suite stays **green** while the chart cannot be
+  built at all, and the app's interactive path (which does not catch builder errors) shows a bare
+  traceback naming neither `target` nor `bullet`: the `_NEEDLE_DIAL` trap in a different validator.
+  The same point's **measure** slot takes `EnforcedNull` normally, so the array is deliberately
+  mixed (`[EnforcedNull, None]` serializes to `[null, null]`, verified). Pinned by a test that
+  drives `make_chart` rather than `build_options` — the only layer at which the failure is
+  observable — and stated here because that is the only thing standing between the carve-out and a
+  tidy-up that silently breaks the type. (The related trap: any per-point key outside
+  `{x, y, target, name}` forces the point DICT form, where a `None` target *vanishes* from the
+  emitted JS instead of nulling while `EnforcedNull` still raises — no working spelling at all,
+  which is why the branch emits a bare array and takes a single hue.)
 - A **row-less** frame (columns, no rows — a CSV with a header and no data) is a legitimate
   input and must draw an **empty chart, not raise**. Every `Series.map(...)` used as a mask
   must therefore be `.astype(bool)`-cast: `.map()` infers its result dtype from the values it
@@ -1482,7 +1744,16 @@ before it runs.
   the row via
   `_spannable`, whose `_plottable`-on-both-ends half exists precisely for this: `end >= start`
   alone accepts `(-inf, 10)`, so the comparison is *not* enough on its own and the finiteness
-  check is what keeps a bare `inf` out of the emitted JS. Gauge adds one twist the others have
+  check is what keeps a bare `inf` out of the emitted JS. **Bullet is the one type whose two value
+  columns apply the policy INDEPENDENTLY**, and that is a policy rather than an oversight: a
+  columnrange's pair are two ends of one mark, so `_range_point` nulls the whole slot
+  all-or-nothing (a range with one end is not a range), while a bullet's are two **independent
+  channels**, so `_bullet_point` nulls each end **alone** — a missing or non-finite measure leaves
+  the goal's crossbar drawn over an empty slot, a missing or non-finite goal leaves the bar drawn
+  with nothing to compare it to, and a row missing both still keeps its category tick
+  (keep-the-slot, never a drop, never a raise). The two ends null with *different tokens* for the
+  library reason in the `EnforcedNull` bullet above: `_num` for the measure, `None` for the goal.
+  Gauge adds one twist the others have
   no analogue for, and it is pandas', not Highcharts': an **empty** column is not merely a
   no-op for `sum`, it is a `0.0` — the additive **identity**, a confident claim of "the total is
   zero" where the truth is "there is no data" — so `_gauge_value` tests for empty **above** the
@@ -1530,4 +1801,13 @@ before it runs.
   by a sequential `colorAxis` (`_HEATMAP_GRADIENT`, anchored on
   `DEFAULT_COLORS[0]`; a dark ramp `_HEATMAP_GRADIENT_DARK` flipped in by
   `_themed`) rather than the categorical palette — it still carries `colors` for
-  cross-type consistency (the palette tests).
+  cross-type consistency (the palette tests). The second, and the only place a **mark** flips
+  rather than chrome, is `bullet`'s goal crossbar: Highcharts draws it at 140% of the bar width,
+  so it necessarily crosses **both** the bar (a constant palette blue in both themes) *and* the
+  chart background (white → slate), and a fixed colour therefore cannot work **in principle** —
+  a near-black reads on the light shell and disappears on the dark one, a near-white does the
+  exact reverse (both rendered). Where every `borderColor` dissolve matches a mark **to** the
+  background, this hook matches one **against** it, and its light-mode value
+  (`_BULLET_TARGET_COLOR`) is `_DARK_CHROME["bg"]` read the other way round, so the pair the
+  crossbar swings between cannot drift from the pair the app shell uses
+  (`_NEEDLE_PIVOT_COLOR = _SUNBURST_ROOT_COLOR`'s aliasing rule — no new colors invented).
