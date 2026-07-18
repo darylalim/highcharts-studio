@@ -482,7 +482,7 @@ _SUNBURST_ROOT_COLOR = "#94a3b8"  # slate: the app's "not a category" grey
 # argument: a goal is not one of the categories, it is the line they are read AGAINST, so no
 # palette entry can say it — and a caller's custom `colors` must not repaint it into looking like
 # a series.
-_BULLET_TARGET_COLOR = "#0f172a"  # slate-900: the goal line, read against every bar
+_BULLET_TARGET_COLOR = _DARK_CHROME["bg"]  # slate-900: read against every bar
 # The root would otherwise take an equal share of the radius as every data ring — on a
 # two-ring tree, half of it: a giant grey disc. Shrink it to a hub. A scalar rather than the
 # {"unit", "value"} dict Highcharts wants: a mutable module constant would need a defensive
@@ -3991,7 +3991,7 @@ def build_options(
                 # The series IS the measure — the goal is an annotation on it, not a co-equal end
                 # of one mark — so the name is the measure column alone, xrange's `start_col`
                 # precedent, and NOT columnrange's paired `f"{low}–{high}"`.
-                "series": [{"name": str(measure_col), "data": points}],
+                "series": [{"name": measure_col, "data": points}],
             },
             dark=dark,
         )

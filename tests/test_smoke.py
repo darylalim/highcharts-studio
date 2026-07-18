@@ -5050,7 +5050,7 @@ def test_bullet_count_marks_matches_the_built_data_across_every_null_combination
     ]
     assert count_marks(df, "bullet", "region", ["actual"]) == 4 == len(built)
     # And every one of those four spellings must survive the layer below build_options.
-    assert _bullet_js(df)
+    _bullet_js(df)  # builds: the helper asserts the JS is non-empty
 
 
 def test_bullet_count_marks_casts_its_mask_on_a_row_less_frame():
@@ -5192,7 +5192,7 @@ def test_bullet_keeps_duplicate_category_labels_as_separate_marks():
         == 3
         == len(_bullet_points(opts))
     )
-    assert _bullet_js(df)  # two identical categories are not an id collision here
+    _bullet_js(df)  # builds: two identical categories are not an id collision here
 
 
 def test_bullet_drops_a_row_whose_label_is_undrawable_and_the_count_follows():
@@ -5250,7 +5250,7 @@ def test_bullet_builds_a_real_chart_from_an_integer_dtype_frame():
     mixed = df.copy()
     mixed["quota"] = mixed["quota"].astype(float)
     mixed.loc[0, "quota"] = float("nan")
-    assert _bullet_js(mixed)
+    _bullet_js(mixed)  # builds: the helper asserts the JS is non-empty
 
 
 # --- the guards ------------------------------------------------------------ #
