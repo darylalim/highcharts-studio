@@ -1053,6 +1053,15 @@ A *blank* chart is usually a network issue instead: interactive mode loads
 Highcharts from the CDN (`code.highcharts.com`), static mode from the export
 server (`export.highcharts.com`).
 
+**Verify by rendering** (the methodology this file cites everywhere — a new type's
+`_themed` hook, null/edge-case geometry, and light↔dark / interactive↔PNG parity are
+*decided by looking*, never inferred from a base class): render one chart to a file with
+`build_chart_html(df, type, …, dark=…)`, serve it over `http://localhost`
+(`python3 -m http.server PORT --directory <dir>` in the background — `file://` is blocked
+by the Claude-in-Chrome extension), then screenshot it in a browser in **both** themes.
+Run scratchpad scripts with `PYTHONPATH=<repo> uv run python …` — the script's own dir,
+not the cwd, is on `sys.path`, so a bare `import highcharts_builder` fails otherwise.
+
 ## Test
 
 ```bash
@@ -1301,6 +1310,10 @@ version above the latest release, so two bumps in one push both ship — and mar
 only the highest `--latest`. It is idempotent (a push that doesn't bump the
 version cuts nothing), so do not tag or `gh release create` by hand.
 
+Bumping `version` also makes the next `uv run` rewrite `uv.lock`'s own
+`highcharts-studio` version line; commit that with the bump (the `guard_paths.py` hook
+blocks *manual* `uv.lock` edits, but uv's own re-sync is expected, not a stray change).
+
 ## Hooks
 
 `.claude/settings.json` wires three project hooks (committed; the per-developer
@@ -1316,7 +1329,10 @@ excluded), so the tooling that enforces the app enforces the hooks too.
 - `post_edit_py.py` (PostToolUse on `Edit`/`Write`/`MultiEdit`) — on a `.py`
   edit, runs `ruff check --fix` + `ruff format` in place, then `ty check`; exits
   2 on type errors so the diagnostics feed back to fix. Mirrors the Ruff and ty
-  gates.
+  gates. Gotcha: since this runs `ruff check --fix` after **every** `.py` edit, add a
+  new import and its first use in the **same** edit (or the use first) — split across
+  two edits, the fix prunes the not-yet-used import and the next `ty` pass fails on the
+  now-undefined name.
 - `pytest_stop.py` (Stop) — runs `uv run pytest` when the working tree has
   uncommitted `.py` changes (app, test, or the hook scripts under
   `.claude/hooks/`); exits 2 on a real failure (pytest exit 1/2) to feed the
