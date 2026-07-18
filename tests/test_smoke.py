@@ -100,6 +100,7 @@ Layers:
   the generated config (incl. the brand palette) and the guard messages.
 """
 
+import ast
 import math
 import sys
 import warnings
@@ -7529,6 +7530,29 @@ def test_app_waterfall_kpi_shows_steps_including_the_appended_total(app):
     assert expected == len(default_df) + 1  # every row a step, plus the total
 
 
+def _pick_sample(app, chart_type: str):
+    """Select the sample dataset built FOR ``chart_type``, and that type, in the sidebar.
+
+    The shared body of the five ``_pick_*_sample`` helpers below, each of which keeps its own
+    name and its own argument for why that type needs a dedicated sample rather than the
+    landing dataset. Only the mechanics live here.
+
+    Widgets are found by LABEL, not by position. ``app.selectbox[0]``/``[1]`` were five copies
+    of the same two indices, so one new selectbox added above Dataset would have broken all
+    five identically and each would have needed the same edit — and a positional index says
+    nothing about WHICH widget it means, so a wrong one silently drives the wrong control.
+    Label lookup is already this file's majority idiom.
+    """
+    from sample_data import SAMPLES
+
+    label = next(key for key in SAMPLES if f"({chart_type})" in key)
+    next(sb for sb in app.selectbox if sb.label == "Dataset").set_value(label).run()
+    next(sb for sb in app.selectbox if sb.label == "Chart type").set_value(
+        chart_type
+    ).run()
+    return SAMPLES[label]()
+
+
 def _pick_sunburst_sample(app):
     """Select the sunburst sample dataset and switch the chart type to sunburst.
 
@@ -7536,12 +7560,7 @@ def _pick_sunburst_sample(app):
     would default to `revenue`, whose numbers name no node — so every row dangles and the
     chart is legitimately empty. The KPI test needs a real tree to count.
     """
-    from sample_data import SAMPLES
-
-    label = next(key for key in SAMPLES if "(sunburst)" in key)
-    app.selectbox[0].set_value(label).run()  # Dataset
-    app.selectbox[1].set_value("sunburst").run()  # Chart type
-    return SAMPLES[label]()
+    return _pick_sample(app, "sunburst")
 
 
 def test_app_switch_to_sunburst_shows_parent_control_and_regenerates_config(app):
@@ -7675,12 +7694,7 @@ def _pick_xrange_sample(app):
     `month` column is the very one that must NOT sniff as a date (see `_coordinates`) — so
     the KPI test needs the release plan to have bars to count.
     """
-    from sample_data import SAMPLES
-
-    label = next(key for key in SAMPLES if "(xrange)" in key)
-    app.selectbox[0].set_value(label).run()  # Dataset
-    app.selectbox[1].set_value("xrange").run()  # Chart type
-    return SAMPLES[label]()
+    return _pick_sample(app, "xrange")
 
 
 def test_app_switch_to_xrange_shows_end_control_and_regenerates_config(app):
@@ -7822,12 +7836,7 @@ def _pick_columnrange_sample(app):
     The DEFAULT dataset (monthly revenue vs cost) would build a columnrange too, but the
     temperature sample is the one whose two numeric columns ARE a low and a high, so the KPI
     and picker tests read the numbers the type is meant to draw."""
-    from sample_data import SAMPLES
-
-    label = next(key for key in SAMPLES if "(columnrange)" in key)
-    app.selectbox[0].set_value(label).run()  # Dataset
-    app.selectbox[1].set_value("columnrange").run()  # Chart type
-    return SAMPLES[label]()
+    return _pick_sample(app, "columnrange")
 
 
 def test_app_switch_to_columnrange_shows_high_control_and_regenerates_config(app):
@@ -7912,12 +7921,7 @@ def _pick_arearange_sample(app):
 
     The forecast sample is the one whose two numeric columns ARE a low and a high (a projected
     band), so the KPI and picker tests read the numbers the type is meant to draw."""
-    from sample_data import SAMPLES
-
-    label = next(key for key in SAMPLES if "(arearange)" in key)
-    app.selectbox[0].set_value(label).run()  # Dataset
-    app.selectbox[1].set_value("arearange").run()  # Chart type
-    return SAMPLES[label]()
+    return _pick_sample(app, "arearange")
 
 
 def test_app_switch_to_arearange_shows_high_control_and_regenerates_config(app):
@@ -8403,12 +8407,7 @@ def _pick_bullet_sample(app):
     The quota sample is the one whose two leading numeric columns ARE a measure and a goal, so the
     picker, KPI and guard tests read the numbers the type is meant to draw rather than borrowing
     the landing dataset's revenue/cost pair and hoping it means the same thing."""
-    from sample_data import SAMPLES
-
-    label = next(key for key in SAMPLES if "(bullet)" in key)
-    app.selectbox[0].set_value(label).run()  # Dataset
-    app.selectbox[1].set_value("bullet").run()  # Chart type
-    return SAMPLES[label]()
+    return _pick_sample(app, "bullet")
 
 
 def test_app_switch_to_bullet_shows_goal_control_and_regenerates_config(app):
@@ -8593,3 +8592,114 @@ def test_app_leaving_bullet_retires_the_goal_control_and_the_measures_kpi(app):
     labels = {m.label for m in app.metric}
     assert "Measures" not in labels
     assert "Series plotted" in labels
+
+
+# --------------------------------------------------------------------------- #
+# The app's CACHE LAYER — the wiring, checked without the network
+# --------------------------------------------------------------------------- #
+# The three `@st.cache_data` renderers are the one part of the app no other test
+# reaches. `cached_chart_html` and `cached_chart_js` are covered INDIRECTLY — every
+# AppTest runs the app, which calls them, so a bad forward there surfaces as a wrong
+# chart — but `cached_chart_png` is executed by NOTHING: the AppTests deliberately stay
+# on the network-free interactive path, and `test_app_render_mode_selector_offers_the_
+# two_modes` pins that Static PNG is OFFERED without ever selecting it. So a slip in that
+# wrapper ships silently and surfaces only as a wrong Static PNG in production.
+#
+# The gap is not really "the export server is untested" — that is a deliberate and correct
+# choice. It is that avoiding the network also un-tested the WIRING, and the two are
+# separable. These read the SOURCE rather than importing the module (importing
+# `streamlit_app` executes the whole Streamlit script), which is `test_packaging.py`'s
+# and `test_theme_colors_stay_in_sync_with_config`'s mechanical-sync idea applied to
+# argument passing.
+#
+# What they catch is precisely what the keyword form does NOT prevent: `goal_col=high_col`
+# type-checks, caches and renders, and just draws the wrong column. Nine of these
+# parameters are `str | None`, so nothing else in the toolchain can tell them apart.
+_CACHE_LAYER = {  # cached wrapper -> the builder it must forward to
+    "cached_chart_html": "build_chart_html",
+    "cached_chart_png": "build_chart_png",
+    "cached_chart_js": "make_chart",
+}
+# The column/policy arguments: same-typed, positionally interchangeable, and the whole
+# reason this test exists. The leading ones (df/chart_type/x_col/y_cols/height/title/dark)
+# are transformed in flight (`list(y_cols)`) or differ per wrapper, so they are not pinned
+# by name here.
+_FORWARDED = (
+    "size_col",
+    "target_col",
+    "parent_col",
+    "end_col",
+    "high_col",
+    "title_col",
+    "goal_col",
+    "agg",
+    "dial",
+)
+
+
+def _app_functions() -> dict[str, ast.FunctionDef]:
+    tree = ast.parse((ROOT / "streamlit_app.py").read_text())
+    return {
+        node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+
+
+@pytest.mark.parametrize(("wrapper", "builder"), sorted(_CACHE_LAYER.items()))
+def test_app_cached_renderer_forwards_every_column_kwarg_under_its_own_name(
+    wrapper, builder
+):
+    """Each cached wrapper must pass `foo=foo`, never `foo=bar`.
+
+    A transposition here is invisible to every other gate: it type-checks (nine of the
+    parameters are `str | None`), it caches (the key is the bound arguments, which are
+    still distinct), and it renders — it just draws the wrong column. For
+    `cached_chart_png` nothing else in the suite would notice at all.
+    """
+    fn = _app_functions()[wrapper]
+    call = next(
+        node
+        for node in ast.walk(fn)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == builder
+    )
+    passed = {kw.arg: kw.value for kw in call.keywords}
+    for name in _FORWARDED:
+        assert name in passed, f"{wrapper} does not forward {name} to {builder}"
+        value = passed[name]
+        assert isinstance(value, ast.Name) and value.id == name, (
+            f"{wrapper} forwards {name}={ast.unparse(value)} to {builder} — a column "
+            f"argument must be forwarded under its OWN name, or the chart silently "
+            f"reads the wrong column"
+        )
+
+
+def test_app_calls_its_cached_renderers_with_named_column_arguments():
+    """The call SITES pass the same nine by keyword, so ordering is not a failure mode.
+
+    The wrapper test above pins the inside of each wrapper; this pins the outside. Passing
+    these positionally is what made a `high_col`/`title_col`/`goal_col` transposition a
+    silent wrong-column bug rather than a `TypeError` — and the project has paid that risk
+    six times now, once per extra column kwarg.
+    """
+    tree = ast.parse((ROOT / "streamlit_app.py").read_text())
+    # The renderer's name is captured HERE rather than read back off `call.func` in the
+    # loop: the `isinstance(node.func, ast.Name)` narrowing does not survive out of the
+    # comprehension, so `call.func.id` below would be an unresolved attribute on `expr`.
+    calls = [
+        (node.func.id, node)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in _CACHE_LAYER
+    ]
+    assert len(calls) == len(_CACHE_LAYER), (
+        "expected exactly one call site per renderer"
+    )
+    for name, call in calls:
+        named = {kw.arg for kw in call.keywords}
+        missing = [arg for arg in _FORWARDED if arg not in named]
+        assert not missing, (
+            f"{name} is called with {missing} passed POSITIONALLY — same-typed "
+            f"arguments in a list this long transpose silently"
+        )
