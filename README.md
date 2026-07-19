@@ -85,15 +85,17 @@ theme, which you can toggle from Streamlit's settings menu.
 The gauge family (`solidgauge`, `gauge`) is the only pair with no label column —
 each *selected* column becomes one mark, reduced to a single reading by the
 aggregation you pick (sum / mean / median / min / max / last). `networkgraph` is
-its mirror: edges with no value column. See [`CLAUDE.md`](CLAUDE.md) for the
-per-chart design notes.
+its mirror: edges with no value column. See
+[`docs/chart-types.md`](docs/chart-types.md) for the per-chart design notes.
 
 ## Development
 
 The core chart logic lives in `highcharts_builder.py` — pure, Streamlit-free
 functions (DataFrame → Highcharts options → `Chart` → HTML/PNG) that are
 independently unit-testable. `streamlit_app.py` is the UI and `sample_data.py`
-the built-in datasets. See [`CLAUDE.md`](CLAUDE.md) for the full architecture.
+the built-in datasets. See [`CLAUDE.md`](CLAUDE.md) for the architecture and the
+project conventions, and [`docs/chart-types.md`](docs/chart-types.md) for the
+per-type design record.
 
 ```bash
 uv run pytest                                       # tests
