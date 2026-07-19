@@ -33,6 +33,54 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.16.0] - 2026-07-18
+
+### Added
+
+- **`variwide` chart type** — columns whose **width** is a second magnitude, so each bar's *area*
+  is height x width ("margin, weighted by the revenue it earns"). It is columnrange's data shape
+  read a **third** way, and the reading settles every decision: a columnrange's two numbers are the
+  two **ends of one mark**, a bullet's are two **independent claims** on one channel, and a
+  variwide's are **one claim spread over two geometric channels**. So it neither joins
+  `MAGNITUDE_RANGE_TYPES` nor reuses `high_col`/`goal_col` — a high is the far *end* of its mark, a
+  goal is a *reference* the mark is read against, a width is the mark's *other dimension*. The new
+  **`width_col`** kwarg therefore does touch the cache layer. Joins `X_IN_Y_GUARD_TYPES`, adds a
+  dedicated `value == width` guard for the collision that rule cannot express, and reads the
+  **"Bars"** KPI.
+- **A bad width nulls the whole slot** (`_variwide_point`, the third pair helper), and the reason is
+  a fact about the *other rows* rather than about the mark: Highcharts sizes each column as its
+  width's share of the width **total**, so a missing width drops out of the denominator and silently
+  makes every other bar wider. Measured — nulling one row's width in a five-row frame redrew a
+  sibling from 87px to **134px**, pixel-identical to a control render with the offending row deleted.
+  The slot is kept, never dropped, so the category tick survives and a reader can see it exists.
+- **The width channel takes `_sizable`, the height `_plottable`** — the first type here whose two
+  value columns take different predicates. A negative width does not merely fail to draw itself: it
+  shrinks the denominator, and rendered, a `-30` beside a `21` and a `44` inflated those two to 410px
+  and 860px inside a **760px** chart, overflowing the canvas with no error anywhere. Zero is kept.
+- **Sixth member of the dark-mode border-dissolve tuple**, joined on a measurement and on an argument
+  the other five do not share: their bars have gaps, so the white outline is a spurious ring, while a
+  variwide's bars *touch* by construction — the border is the only thing dividing two neighbours. So
+  the dissolve was rendered as its own question, with adjacent bars of **equal height**, and it
+  survives: the seam remains, drawn in the page colour, exactly as the white border is on the light
+  shell.
+- Sample dataset **"Product line margin by revenue (variwide)"**, whose two magnitude columns
+  deliberately *anti*-correlate (the best margin belongs to the smallest line), so the chart shows
+  that area — not height — is the reading. Read beside the columnrange and bullet samples, the three
+  demonstrate that "a category plus two magnitude columns" is a data **shape**, not a chart.
+
+### Changed
+
+- Stale counts corrected where `width_col` and `_pick_variwide_sample` pushed a tally past its
+  prose: `_FORWARDED` grew from nine forwarded parameters to ten (named in three comments and one
+  docstring), the `_pick_*_sample` family from five helpers to six (named in both the helper's own
+  docstring and `CLAUDE.md`), and the extra-column-kwarg tally from six to eight. None was reachable
+  by any gate — they are prose about counts, which nothing but a reader can check.
+- `CLAUDE.md`'s uniqueness-claim sweep gained an **ordinal** grep, after three claims went stale on
+  this change and the prescribed regex caught none of them: two that `variwide` falsified (bullet's
+  "the one recent type that does touch the cache layer" and "the fifth member of the literal tuple")
+  and one **pre-existing** — boxplot's "the only type whose builder aggregates", which the gauge
+  family had falsified while gauge's own passage already called itself the second.
+
 ## [0.15.0] - 2026-07-18
 
 ### Added

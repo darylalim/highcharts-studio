@@ -734,6 +734,64 @@ def _sales_vs_quota() -> pd.DataFrame:
     )
 
 
+def _product_line_margin() -> pd.DataFrame:
+    """Gross margin per product line, each weighted by the revenue it earns it.
+
+    Tailored to variwide, and the THIRD sample in this file built on "a category plus two
+    magnitude columns" — which is the point of it. Read all three side by side and the shape stops
+    looking like a chart type:
+
+    * ``_temperature_range`` (columnrange): the two numbers are the two ENDS OF ONE BAR. Neither
+      means anything alone; the bar IS the span between them.
+    * ``_sales_vs_quota`` (bullet): two INDEPENDENT CLAIMS about one region, on the same channel —
+      what happened and what was meant to.
+    * this one (variwide): ONE claim spread over TWO GEOMETRIC CHANNELS. The margin is the bar's
+      HEIGHT, the revenue is its WIDTH, and the reading is neither number but their PRODUCT — the
+      AREA, which is the gross profit the line actually contributes.
+
+    That last reading is what the data is arranged to force, and it is why the two columns
+    deliberately ANTI-correlate. ``Analytics`` has the best margin in the table and the smallest
+    revenue; ``Services`` has the worst margin and nearly four times the revenue. A tall thin bar
+    beside a short wide one is the whole lesson: the highest-margin line is not the biggest
+    contributor, and no ordinary column chart of either column alone can say so. Had margin simply
+    risen with revenue the chart would draw as a staircase, every bar's area ranked the same way
+    its height was, and a reader would never learn that the width was carrying information.
+
+    The revenues span roughly 3x (21 to 76) so the width channel is unmistakable at a glance — a
+    range too narrow reads as a rendering artefact rather than as data. Every value is present and
+    every width is positive: the missing-width, zero-width and NEGATIVE-width cases are the tests'
+    job, not a demo's (the ``_temperature_range``/``_forecast_range``/``_sales_vs_quota`` rule),
+    and the negative one especially, since it does not merely fail to draw itself — it shrinks the
+    total every OTHER bar's width is a share of.
+
+    ``product_line`` leads with the category column, like every sample here and for the same
+    load-bearing reason: the app opens on ``line`` with the first column as X, so a numeric first
+    column would trip the x-in-y guard the instant the dataset is selected. ``sku_count`` is a
+    throwaway numeric column the chart never reads, carried for ``_reporting_lines``'s
+    ``tenure_years`` reason — and, like ``_sales_vs_quota``'s ``deals_closed``, it earns a second
+    keep by its POSITION: the app's Width picker defaults to the SECOND numeric column, so
+    ``revenue_musd`` must sit directly below ``margin_pct`` and this one below both, or the control
+    lands on the wrong column and the sample no longer demonstrates the type on landing.
+    """
+    return pd.DataFrame(
+        {
+            "product_line": [
+                "Analytics",
+                "Platform",
+                "Services",
+                "Hardware",
+                "Support",
+            ],
+            # Percent. Deliberately ANTI-correlated with revenue: the best margin belongs to the
+            # smallest line, so the tallest bar is the narrowest and area != height.
+            "margin_pct": [62, 41, 22, 34, 48],
+            # Millions of USD — the WIDTH channel. ~3x spread so the varying width is obvious.
+            "revenue_musd": [21, 58, 76, 30, 24],
+            "sku_count": [12, 34, 8, 51, 19],
+        }
+    )
+
+
 def _weekly_bookings() -> pd.DataFrame:
     """Weekly bookings by sales region — four teams, eight weeks of observations.
 
@@ -920,6 +978,7 @@ SAMPLES = {
     "Monthly temperature range (columnrange)": _temperature_range,
     "Projected monthly active users (arearange)": _forecast_range,
     "Quarterly sales vs quota (bullet)": _sales_vs_quota,
+    "Product line margin by revenue (variwide)": _product_line_margin,
     "Weekly bookings by region (solidgauge)": _weekly_bookings,
     "Server utilization (gauge)": _server_utilization,
 }

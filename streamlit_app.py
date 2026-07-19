@@ -27,6 +27,7 @@ from highcharts_builder import (
     ORGANIZATION_TYPES,
     SUPPORTED_TYPES,
     UNWEIGHTED_NODE_LINK_TYPES,
+    VARIWIDE_TYPES,
     WEIGHTED_NODE_LINK_TYPES,
     X_IN_Y_GUARD_TYPES,
     build_chart_html,
@@ -121,6 +122,12 @@ MARK_METRICS = {
     # noun) because the bar is only half of what a bullet draws — the crossbar is the other
     # half, and the number counts the pairing, not the rectangles.
     "bullet": "Measures",
+    # One bar per surviving category, and — unlike bullet, which reaches the same number because
+    # NEITHER channel can drop a row — variwide reaches it because a bad value or a bad width nulls
+    # the whole slot while KEEPING its tick. "Bars" (xrange's noun, not bullet's "Measures")
+    # because a variwide draws exactly one rectangle per category: there is no second shape for the
+    # noun to have to cover, the width being a property OF the bar rather than a mark beside it.
+    "variwide": "Bars",
     # Gauge is deliberately ABSENT, and it is the first type whose absence is worth stating.
     # Its marks ARE its series — one ring per y column, and a column with no data keeps its ring
     # as a null rather than being dropped — so "Series plotted" is already literally the ring
@@ -162,6 +169,7 @@ def cached_chart_html(
     high_col,
     title_col,
     goal_col,
+    width_col,
     agg,
     dial,
 ) -> str:
@@ -180,6 +188,7 @@ def cached_chart_html(
         high_col=high_col,
         title_col=title_col,
         goal_col=goal_col,
+        width_col=width_col,
         agg=agg,
         dial=dial,
     )
@@ -203,6 +212,7 @@ def cached_chart_png(
     high_col,
     title_col,
     goal_col,
+    width_col,
     agg,
     dial,
 ) -> bytes:
@@ -221,6 +231,7 @@ def cached_chart_png(
         high_col=high_col,
         title_col=title_col,
         goal_col=goal_col,
+        width_col=width_col,
         agg=agg,
         dial=dial,
     )
@@ -241,6 +252,7 @@ def cached_chart_js(
     high_col,
     title_col,
     goal_col,
+    width_col,
     agg,
     dial,
 ) -> str:
@@ -260,6 +272,7 @@ def cached_chart_js(
         high_col=high_col,
         title_col=title_col,
         goal_col=goal_col,
+        width_col=width_col,
         agg=agg,
         dial=dial,
     ).to_js_literal()
@@ -375,6 +388,10 @@ with st.sidebar:
             "and a **Goal** column drawn as a **crossbar** over it, one pair per category "
             "('actual against target'). Either column may be blank on a row — the bar and the "
             "crossbar draw independently — and a measure below its goal is an ordinary reading\n"
+            "- **variwide** — a category X axis + a **Height** column and a **Width** column, so "
+            "each bar's **area** is the two multiplied ('margin, weighted by the revenue it "
+            "earns'). Widths are shares of the width total, so the bars **touch**: it reads as a "
+            "band of the axis divided up, not as separate columns\n"
             "- **solidgauge / gauge** — one mark per **numeric column**, each collapsed to a "
             "single number by the aggregation you choose (sum / mean / …), all read against one "
             "shared dial. There is **no X column**: a gauge has no labels, only readings. "
@@ -495,6 +512,16 @@ with st.sidebar:
         # told which SHAPE it becomes, and here the two columns become two DIFFERENT shapes
         # rather than two ends of one.
         x_label, y_label, multi = "Category (X) axis", "Measure (bar)", False
+    elif chart_type in VARIWIDE_TYPES:
+        # A category X axis (the bars stand on it, drawn vertically — columnrange's and bullet's
+        # shape) plus TWO magnitude columns, but read a third way: the Y control carries the bar's
+        # HEIGHT and the Width selectbox below carries its X extent, so the mark's AREA is their
+        # product. Single-select Y for the family's reason — a second height would be a second
+        # chart. Labelled "Height (bar)" rather than a bare "Y" for xrange's Start/End reason (a
+        # reader picking a value should be told which SHAPE it becomes) and, more pointedly, so it
+        # names a GEOMETRIC CHANNEL that pairs with "Width": the two controls have to read as the
+        # two dimensions of one rectangle, which "Value" beside "Width" would not.
+        x_label, y_label, multi = "Category (X) axis", "Height (bar)", False
     elif chart_type in GAUGE_TYPES:
         # The two types with NO X control at all (see the selectbox below): their marks are the
         # SELECTED COLUMNS, each collapsed to one number, so there is no label column to pick.
@@ -713,6 +740,43 @@ with st.sidebar:
                 "its crossbar beat the goal). A row missing its goal still draws its bar, and "
                 "one missing its measure still draws its crossbar. A measure below its goal is "
                 "an ordinary reading, not an error."
+            ),
+        )
+
+    # Variwide's WIDTH column, sitting right after Height so the pair reads as the two
+    # dimensions of one rectangle (Category -> Height -> Width). Drawn from numeric_cols, like
+    # columnrange's High and bullet's Goal and for the same reason: a width is a MAGNITUDE, never
+    # a coordinate (it can't be a date) and never a label. But it is neither of them — it is its
+    # own `width_col` kwarg, because a high is the far END of the mark it shares a point with and
+    # a goal is the REFERENCE that mark is read against, while a width is the mark's OTHER
+    # DIMENSION. "A goal is not a high" one type further along: a width is neither.
+    #
+    # Called plain "Width" and NOT "Width (weight)", which is the more natural reading of what the
+    # column means. "Flow value (weight)" already names a link's magnitude in this sidebar for the
+    # weighted node-link types, and one word cannot name both a link's size and a bar's extent —
+    # the same collision that made bullet's control "Goal" rather than "Target".
+    #
+    # The index is a CONSTANT and the widget is KEYLESS, by the rule Goal states in full: fold the
+    # default into the widget's identity IFF the SELECTION depends on the state the default DERIVES
+    # from. A width default derives from the numeric-column LIST (the dataset), never from the
+    # Height selection — and a chosen Width stays perfectly VALID when Height moves, so re-minting
+    # it would discard a real answer. Target's / Parent's / End's / High's / Goal's case, not the
+    # gauge Dial's. min() lands on the SECOND numeric column so it starts distinct from Height
+    # (which leads with the first) and clamps a single-column frame. Height == Width is caught by
+    # the guard in the main panel.
+    width_col = None
+    if chart_type in VARIWIDE_TYPES:
+        width_col = st.selectbox(
+            "Width",
+            numeric_cols,
+            index=min(1, len(numeric_cols) - 1),
+            help=(
+                "How **wide** each bar is drawn — a numeric column, the **same kind** as Height "
+                "but a distinct column. Each bar's width is its share of the width TOTAL, so the "
+                "bar's **area** is height x width. A row missing its width draws no bar (its "
+                "category keeps its tick), and — because a width is a share — a missing or "
+                "negative one would otherwise resize every *other* bar, so it is dropped from the "
+                "total rather than counted."
             ),
         )
 
@@ -964,6 +1028,24 @@ with left.container(border=True, height="stretch"):
             icon=":material/warning:",
         )
         st.stop()
+    # Variwide's collision, the sixth, and claim-fabricating exactly as bullet's is rather than
+    # cosmetic as organization's Title is — so it gets the same treatment: a builder ValueError
+    # with this warning in FRONT of it, since the interactive path does not catch. Every bar's
+    # width would be proportional to its own height, so each bar's AREA would be its value SQUARED
+    # — a chart that draws perfectly while stating something nobody asked and nothing on the page
+    # contradicts. Like columnrange's and bullet's there is no column CONTRADICTION to report
+    # below it: every combination of a value and a width has a right drawing (a null slot, a
+    # zero-width sliver), so the builder never raises for the data itself and there is no
+    # explain_variwide_error to call. (It also fires by accident on a single-numeric-column frame,
+    # where the constant index clamps Width onto Height — the honest reading, since a variwide
+    # needs two numeric columns.)
+    if chart_type in VARIWIDE_TYPES and y_cols[0] == width_col:
+        st.warning(
+            "Height and Width must be different columns — every bar's area would be its "
+            "height squared.",
+            icon=":material/warning:",
+        )
+        st.stop()
     # And the columns' own contradiction, the one reachable from HERE: a date start beside a
     # numeric end. Both ends of a bar sit on one axis, so they must be the same kind. It is not
     # missing data — that is dropped, silently and correctly, a row at a time — and it has no
@@ -1029,6 +1111,7 @@ with left.container(border=True, height="stretch"):
                 high_col=high_col,
                 title_col=title_col,
                 goal_col=goal_col,
+                width_col=width_col,
                 agg=agg,
                 dial=dial,
             )
@@ -1070,6 +1153,7 @@ with left.container(border=True, height="stretch"):
             high_col=high_col,
             title_col=title_col,
             goal_col=goal_col,
+            width_col=width_col,
             agg=agg,
             dial=dial,
         )
@@ -1104,6 +1188,7 @@ with left.container(border=True, height="stretch"):
             high_col=high_col,
             title_col=title_col,
             goal_col=goal_col,
+            width_col=width_col,
             agg=agg,
             dial=dial,
         )

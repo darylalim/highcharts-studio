@@ -125,6 +125,7 @@ from highcharts_builder import (  # noqa: E402
     NODE_LINK_TYPES,
     SUPPORTED_TYPES,
     UNWEIGHTED_NODE_LINK_TYPES,
+    VARIWIDE_TYPES,
     _gauge_reading_label,
     _needle_radii,
     _pct,
@@ -244,6 +245,23 @@ def _goal_for(chart_type: str) -> str | None:
     return "end" if chart_type in BULLET_TYPES else None
 
 
+def _width_for(chart_type: str) -> str | None:
+    """The width column those same sweeps pass for the variwide case: variwide requires one (each
+    bar's X extent); other types ignore it, so it's None. The SEVENTH of the
+    ``_size_for``/``_target_for``/``_parent_for``/``_end_for``/``_high_for``/``_goal_for`` family —
+    see ``_target_for`` for why a type with a required companion column adapts its input rather
+    than dropping out of the sweeps.
+
+    It reuses the fixtures' ``"end"`` column, the one extra that is NUMERIC, exactly as
+    ``_high_for`` and ``_goal_for`` do — but reading it as a WIDTH, which is neither of those
+    things (not the far end of the mark, not a reference the mark is read against, but the mark's
+    other dimension). The fixtures keep "end" strictly above "value" and, more to the point here,
+    POSITIVE: a width is a share of a total, so ``_variwide_point`` requires it to be non-negative
+    (``_sizable``, not merely ``_plottable``), and a negative one in a shared fixture would null
+    every sweep's slot and quietly make several of them vacuous."""
+    return "end" if chart_type in VARIWIDE_TYPES else None
+
+
 # Radar remains the ONE "meta" type: Highcharts has no radar series, so it renders as a polar
 # *line* chart and its chart.type serializes as "line". Every other supported type's chart.type
 # equals its own name — and the gauge FAMILY is why that stayed true. `solidgauge` was never
@@ -276,6 +294,7 @@ def test_supported_type_builds(labeled_frame, chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     )
     assert opts["chart"]["type"] == _hc_type(chart_type)
     assert opts["series"]  # at least one series/data set was produced
@@ -307,6 +326,7 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -367,6 +387,7 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     ).to_js_literal()
     assert js
     # `Infinity` is capitalized, so a lowercase "inf" can only be the broken token. None
@@ -437,6 +458,7 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             end_col=_end_for(chart_type),
             high_col=_high_for(chart_type),
             goal_col=_goal_for(chart_type),
+            width_col=_width_for(chart_type),
         ).to_js_literal()
         assert js and token not in js.lower(), f"{chart_type} kept a '{token}' label"
 
@@ -486,6 +508,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     )
     # An empty chart, not a raise. Gauge is the one type whose empty chart is not zero marks:
     # its marks are the selected COLUMNS, not the rows, so a header-only CSV still selects one
@@ -507,6 +530,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -776,6 +800,7 @@ def test_default_title_per_type(labeled_frame, chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     )
     assert opts["title"]["text"] == f"{chart_type.title()} chart"
 
@@ -799,6 +824,7 @@ def test_default_palette_applied_per_type(labeled_frame, chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -831,6 +857,7 @@ def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     )
     assert opts["chart"]["backgroundColor"] == "#0f172a"
 
@@ -850,6 +877,7 @@ def test_light_mode_leaves_chart_background_unset(labeled_frame, chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     )
     assert "backgroundColor" not in opts["chart"]
 
@@ -868,6 +896,7 @@ def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -929,6 +958,7 @@ def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
         end_col=_end_for(chart_type),
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
     )
     assert opts["tooltip"]["backgroundColor"] == "#0f172a"
     assert opts["tooltip"]["borderColor"] == "#475569"
@@ -5681,6 +5711,433 @@ def test_sales_vs_quota_sample_builds_a_bullet_chart():
     assert count_marks(df, "bullet", "region", ["actual"]) == len(df) == 6
 
 
+# ---------------------------------------------------------------------------
+# Variwide: columns whose WIDTH is a second magnitude
+#
+# Variwide rides SUPPORTED_TYPES and is threaded through the sweeps by `_width_for`, so the
+# palette, the dark background, the light no-op, the non-finite-literal ban, the end-to-end
+# serialization, the label-drop policy and the row-less frame are ALREADY covered there and are
+# not restated below. What is here is what only variwide can say.
+#
+# Two facts shape almost every test in this block, and both were established by RENDERING:
+#
+#   1. The width survives POSITIONALLY. The literal key `z` never reaches the emitted JS, so this
+#      module's dominant `assert "..." in js` idiom is INVERTED here, exactly as it is for bullet.
+#   2. A width is a SHARE OF A TOTAL. So a bad width does not merely fail to draw its own bar —
+#      it drops out of the denominator and silently makes every OTHER bar wider. That is why the
+#      null policy is all-or-nothing and why the width takes `_sizable` rather than `_plottable`.
+# ---------------------------------------------------------------------------
+
+
+def _variwide_df() -> pd.DataFrame:
+    """Four product lines, each a margin (the bar's HEIGHT) and a revenue (its WIDTH).
+
+    Margin deliberately ANTI-correlates with revenue — the best margin belongs to the smallest
+    line — so a test that confused the two channels reads differently rather than plausibly.
+    """
+    return pd.DataFrame(
+        {
+            "line": ["Analytics", "Platform", "Services", "Hardware"],
+            "margin_pct": [62.0, 41.0, 22.0, 34.0],
+            "revenue": [21.0, 58.0, 76.0, 30.0],
+        }
+    )
+
+
+def _variwide_opts(df: pd.DataFrame | None = None, **kwargs) -> dict:
+    return build_options(
+        df if df is not None else _variwide_df(),
+        "variwide",
+        "line",
+        ["margin_pct"],
+        width_col="revenue",
+        **kwargs,
+    )
+
+
+def _variwide_points(opts: dict) -> list:
+    return opts["series"][0]["data"]
+
+
+def _variwide_chart(df: pd.DataFrame | None = None, **kwargs):
+    return make_chart(
+        df if df is not None else _variwide_df(),
+        "variwide",
+        "line",
+        ["margin_pct"],
+        width_col="revenue",
+        **kwargs,
+    )
+
+
+def _variwide_js(df: pd.DataFrame | None = None, **kwargs) -> str:
+    js = _variwide_chart(df, **kwargs).to_js_literal()
+    assert js
+    return js
+
+
+def test_variwide_builds_value_width_pairs_per_category():
+    """Each point is a positional `[value, width]` 2-array, matched to xAxis.categories by
+    POSITION — columnrange's and bullet's data shape, and NOT a `{name, y, z}` dict (see the
+    dict-form test below for what that would cost)."""
+    opts = _variwide_opts()
+    assert opts["chart"]["type"] == "variwide"
+    assert opts["xAxis"]["categories"] == [
+        "Analytics",
+        "Platform",
+        "Services",
+        "Hardware",
+    ]
+    assert _variwide_points(opts) == [
+        [62.0, 21.0],
+        [41.0, 58.0],
+        [22.0, 76.0],
+        [34.0, 30.0],
+    ]
+    # The series is named for the HEIGHT column alone: the width is the bar's other dimension,
+    # not a co-equal end of it, so there is no columnrange-style paired name.
+    assert opts["series"][0]["name"] == "margin_pct"
+    assert opts["yAxis"]["title"]["text"] == "margin_pct"
+    assert opts["legend"]["enabled"] is False
+
+
+def test_variwide_never_emits_the_literal_z_key_for_a_point():
+    """The fact that inverts this file's dominant idiom, so it gets a test of its own.
+
+    A variwide's width reaches Highcharts as the SECOND element of a positional array, never as a
+    `z: ...` object key — so `assert "z" in js` is meaningless here and `assert "z:" in js` is
+    FALSE on a perfectly correct chart. Bullet's `target` has the identical property; this is that
+    test one type over, and it is written the same three ways for the same reason.
+    """
+    js = _variwide_js()
+    # The bare key, in the spelling a serialized object point would betray itself by.
+    assert "z:" not in js
+    # The ONE legitimate occurrence of the letter, asserted PRESENT first — without this the
+    # subtraction below would quietly go vacuous if the tooltip token were ever removed.
+    assert "{point.z}" in js
+    # And now the whole word, with that one occurrence stripped: nothing else in the emitted JS
+    # spells it, because the width reaches Highcharts by POSITION.
+    assert "z" not in js.replace("{point.z}", "")
+    # The positive half, without which the two absences above pass vacuously on an empty chart:
+    # what IS there is the second array element, in position, per category.
+    assert "[62.0,21.0]" in "".join(js.split())
+
+
+def test_variwide_dict_point_form_really_eats_a_null_width():
+    """The companion that turns the array-form decision from a comment into a measurement.
+
+    An absence-only assertion cannot distinguish "the branch chose the array form" from "the
+    library would have thrown the dict form away anyway". So drive the dict form deliberately and
+    show what it costs: a `None` width VANISHES from the emitted JS entirely rather than nulling,
+    leaving Highcharts to read the width as undefined. That is why a per-point key — a `color`,
+    say — is not a style choice here but would silently break the missing-width policy.
+    """
+    from highcharts_core.chart import Chart
+
+    chart = Chart.from_options(
+        {
+            "chart": {"type": "variwide"},
+            "series": [
+                {
+                    "type": "variwide",
+                    "data": [{"name": "A", "y": 62.0, "z": None, "color": "#ff0000"}],
+                }
+            ],
+        }
+    )
+    js = chart.to_js_literal()
+    assert js
+    # The per-point color forced the dict form, and the null width is simply GONE — not `null`.
+    # (No format token here to strip: this chart carries no tooltip.)
+    assert "color" in js
+    assert "z" not in js
+
+
+def test_variwide_missing_or_non_finite_end_nulls_the_whole_slot():
+    """All-or-nothing, and KEEPING the slot — `_range_point`'s answer reached from variwide's own
+    premise (a half-row repaints its SIBLINGS' widths), not columnrange's (a range with one end is
+    not a range). Contrast bullet, whose two channels null INDEPENDENTLY.
+
+    The tick survives in every case: the points are positional against xAxis.categories, so a
+    dropped row would desynchronize the two, and a reader would never learn the category existed.
+    """
+    df = _variwide_df()
+    df.loc[1, "revenue"] = None  # width missing -> whole slot nulls, height discarded
+    df.loc[2, "margin_pct"] = float("inf")  # non-finite height -> likewise
+    opts = _variwide_opts(df)
+    points = _variwide_points(opts)
+    assert points[0] == [62.0, 21.0]
+    assert points[1] is EnforcedNull
+    assert points[2] is EnforcedNull
+    assert points[3] == [34.0, 30.0]
+    # All four categories keep their tick — the keep-the-slot family.
+    assert len(opts["xAxis"]["categories"]) == 4
+    assert "inf" not in _variwide_js(df).lower()
+
+
+def test_variwide_negative_width_nulls_its_slot_because_a_width_is_a_share():
+    """The one place variwide's two columns take DIFFERENT predicates, and the reason is measured.
+
+    A negative HEIGHT is fine — it is a length on a real axis and draws honestly downward. A
+    negative WIDTH is not, because a width is a share of a total: rendered, a `-30` beside a `21`
+    and a `44` drew its own bar 1px wide and inflated the other two to 410px and 860px inside a
+    760px chart, overflowing the canvas with every width overstated and no error anywhere. So the
+    width takes `_sizable` (sunburst's non-negative predicate) while the height takes `_plottable`.
+
+    ZERO is KEPT, for `_sizable`'s own reason and verified the same way: it draws a 1px sliver,
+    keeps its tick, and contributes nothing to the total, which is exactly true.
+    """
+    df = _variwide_df()
+    df.loc[1, "revenue"] = -30.0
+    df.loc[2, "revenue"] = 0.0
+    df.loc[3, "margin_pct"] = -12.0  # a negative HEIGHT is ordinary and must survive
+    points = _variwide_points(_variwide_opts(df))
+    assert points[1] is EnforcedNull, "a negative width must not reach the denominator"
+    assert points[2] == [22.0, 0.0], "a zero width is a real measurement"
+    assert points[3] == [-12.0, 30.0], "a negative HEIGHT is not the same question"
+
+
+def test_variwide_takes_a_single_hue_and_never_color_by_point():
+    """`colorByPoint` must appear NOWHERE, and — like bullet's, unlike networkgraph's and
+    sunburst's — this pin guards a real DECISION rather than restating a library limitation: a
+    variwide's `colorByPoint` survives the round trip at both levels (the companion test below),
+    so nothing but the choice keeps it off. A variwide is one measurement read across the axis,
+    and the varying WIDTH already distinguishes the categories."""
+    assert "colorByPoint" not in _variwide_js()
+    # No per-point key anywhere — the fact the policy actually rests on, so it is asserted against
+    # a frame that HAS a null slot rather than against clean data (where it would reduce to "the
+    # points are lists", already pinned two tests up).
+    df = _variwide_df()
+    df.loc[1, "revenue"] = None
+    assert all(
+        p is EnforcedNull or isinstance(p, list)
+        for p in _variwide_points(_variwide_opts(df))
+    )
+
+
+def test_variwide_color_by_point_really_survives_the_round_trip():
+    """The companion to the pin above. Force `colorByPoint` on and show the library keeps it, at
+    BOTH levels — so its absence in our output is ours, not highcharts-core's."""
+    from highcharts_core.chart import Chart
+
+    variants: dict[str, dict] = {
+        "series": {
+            "chart": {"type": "variwide"},
+            "series": [
+                {
+                    "type": "variwide",
+                    "data": [["A", 1.0, 2.0]],
+                    "colorByPoint": True,
+                }
+            ],
+        },
+        "plotOptions": {
+            "chart": {"type": "variwide"},
+            "plotOptions": {"variwide": {"colorByPoint": True}},
+            "series": [{"type": "variwide", "data": [["A", 1.0, 2.0]]}],
+        },
+    }
+    for where, opts in variants.items():
+        js = Chart.from_options(opts).to_js_literal()
+        assert js and "colorByPoint" in js, f"{where}-level colorByPoint was dropped"
+
+
+def test_variwide_tooltip_reads_the_category_and_both_channels():
+    """`{point.category}`, not xrange's `{point.name}`: a variwide's categories are on the X axis,
+    so this reads the right one (waterfall's fix, columnrange's and bullet's reason), and
+    `{point.name}` is blank here anyway (positional arrays).
+
+    `{point.z}` is the one number in this module a tooltip is the ONLY home for. Everywhere else
+    "prints nothing in the mark" rests on xrange's premise — the value lands on a ticked axis —
+    and that premise is FALSE for a width: the x axis carries variable-width category slots, not a
+    scale. It resolves despite the literal key never appearing in the JS (the same positional
+    survival `{point.target}` relies on).
+    """
+    fmt = _variwide_opts()["tooltip"]["pointFormat"]
+    assert "{point.category}" in fmt
+    assert "{point.name}" not in fmt
+    assert "{point.y}" in fmt and "{point.z}" in fmt
+    assert "margin_pct" in fmt and "revenue" in fmt
+
+
+def test_variwide_prints_nothing_in_the_mark():
+    """No dataLabels, and no gate constant either. A variwide's dataLabels default OFF (column's
+    behaviour, not a gauge's, which default ON and must be disabled explicitly), so the omitted
+    key IS the gate — and printing the width in the bar would fail exactly where it is most
+    wanted: a bar narrow enough to need its width read is too narrow to hold a label, and
+    Highcharts hides a colliding label by rendering it INVISIBLE, so every assertion would keep
+    passing while the number was absent."""
+    assert "dataLabels" not in _variwide_js()
+
+
+def test_variwide_sets_no_padding_so_its_bars_touch():
+    """Variwide OVERRIDES column's 0.1/0.2 padding defaults to 0/0 on purpose — the adjacency IS
+    the chart type (a band of the axis divided up, where a bar's share of the width is readable
+    only because no gaps eat it). Setting either key would silently un-make the type, so both are
+    pinned absent."""
+    js = _variwide_js()
+    assert "pointPadding" not in js
+    assert "groupPadding" not in js
+
+
+def test_variwide_requires_a_width_column():
+    with pytest.raises(ValueError, match="requires a width column"):
+        build_options(_variwide_df(), "variwide", "line", ["margin_pct"])
+
+
+def test_variwide_rejects_the_value_column_as_the_width_column():
+    """Claim-fabricating, not cosmetic, so it raises: every bar's width would be proportional to
+    its own height, making each bar's AREA its value SQUARED — a chart that draws perfectly while
+    stating something nobody asked."""
+    with pytest.raises(ValueError, match="cannot also be the width column"):
+        build_options(
+            _variwide_df(), "variwide", "line", ["margin_pct"], width_col="margin_pct"
+        )
+
+
+def test_variwide_rejects_x_as_a_y_series():
+    """The shared X_IN_Y_GUARD_TYPES rule: a variwide's x_col is a genuine category X axis (its
+    bars stand ON it, drawn vertically), so x_col == the height column is the same category-x
+    collision the rule was written for."""
+    with pytest.raises(ValueError, match="cannot also be"):
+        build_options(_variwide_df(), "variwide", "line", ["line"], width_col="revenue")
+
+
+def test_variwide_uses_only_the_first_y_column():
+    # The width comes from `width_col`, NEVER from `y_cols[1]` — which is what keeps both guards
+    # above independent of how many columns the selection happens to carry.
+    #
+    # The DECOY is what makes that testable rather than merely stated, and it has to sit IN
+    # `y_cols` to be one: an unused extra frame COLUMN pins nothing, because with a one-element
+    # `y_cols` the expressions `y_cols[0]`, `y_cols[1]` and `y_cols[-1]` are all the same value and
+    # no index-reading mutant is distinguishable. (This test was written that way first and caught
+    # nothing — a `y_cols[-1]` mutant left the whole suite green.) So `stretch` goes in the
+    # selection, its values appear NOWHERE below, and the heights that do appear are
+    # `margin_pct`'s. Bullet's `test_bullet_uses_only_first_y_col` is the same decoy one type over.
+    df = pd.DataFrame(
+        {
+            "line": ["A", "B"],
+            "margin_pct": [10.0, 20.0],
+            "stretch": [99.0, 99.0],
+            "revenue": [5.0, 6.0],
+        }
+    )
+    opts = build_options(
+        df, "variwide", "line", ["margin_pct", "stretch"], width_col="revenue"
+    )
+    assert len(opts["series"]) == 1
+    assert opts["series"][0]["name"] == "margin_pct"
+    assert _variwide_points(opts) == [[10.0, 5.0], [20.0, 6.0]]
+
+
+def test_variwide_count_marks_counts_drawable_categories():
+    """One bar per surviving LABEL — the same number columnrange and bullet return, by a third
+    argument: neither channel can drop a row here because `_variwide_point` nulls all-or-nothing
+    and KEEPS the slot. A null slot is still a counted bar, so the count never exceeds the row
+    count and never falls below the number of ticks drawn."""
+    df = _variwide_df()
+    df.loc[1, "revenue"] = None  # a bad WIDTH nulls its slot, keeps its tick
+    df.loc[2, "revenue"] = -5.0  # likewise
+    # A bad HEIGHT too, and this row is the load-bearing one: without it the test passes just as
+    # happily against a `count_marks` that ANDs a value mask onto the label one (verified by
+    # mutation — that mutant SURVIVED until this row was added). The two channels have to be shown
+    # separately, because the rule being pinned is that NEITHER of them can drop a row.
+    df.loc[3, "margin_pct"] = None
+    assert (
+        count_marks(df, "variwide", "line", ["margin_pct"])
+        == 4
+        == len(_variwide_points(_variwide_opts(df)))
+    )
+    # An undrawable LABEL does drop its row, and the count follows the chart down.
+    df.loc[0, "line"] = None
+    assert (
+        count_marks(df, "variwide", "line", ["margin_pct"])
+        == 3
+        == len(_variwide_points(_variwide_opts(df)))
+    )
+
+
+def test_variwide_count_marks_casts_its_mask_on_a_row_less_frame():
+    """Variwide's `count_marks` branch is covered by NO sweep, exactly as bullet's is not.
+
+    `test_row_less_frame_draws_an_empty_chart_in_every_type` sweeps `build_options` over
+    `SUPPORTED_TYPES`, so variwide's BUILD is covered the day it joins — but it never calls
+    `count_marks` at all, while `test_count_marks_casts_every_mask_not_just_the_label_one` and
+    `test_count_marks_matches_the_built_series` are both explicit LISTS that variwide is in
+    neither of. So the `.astype(bool)` rule — a `.map()` over a row-less column returns an empty
+    NON-boolean Series, which pandas reads as a list of COLUMN NAMES rather than as a mask — is
+    otherwise unpinned on the one function of variwide's that reads a mask at all.
+
+    Warnings are promoted to errors because that is the only way the failure is observable before
+    pandas 4: today an object-dtype mask merely warns where it will later raise.
+    """
+    empty = _variwide_df().iloc[:0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert count_marks(empty, "variwide", "line", ["margin_pct"]) == 0
+        assert _variwide_points(_variwide_opts(empty)) == []
+    # The KPI and the chart must agree here too — the app's metric row runs above its guards, so
+    # a count that disagreed with an empty chart would report marks nobody drew.
+    assert count_marks(empty, "variwide", "line", ["margin_pct"]) == len(
+        _variwide_points(_variwide_opts(empty))
+    )
+
+
+def test_variwide_resolves_its_own_module_and_not_highcharts_more():
+    """`modules/variwide` from `chart.type` alone, and NOT `highcharts-more` — the plausible guess
+    the round trip corrects, as it does for columnrange, funnel and bullet. Dropping the module is
+    a SILENT blank: verified by stripping the tag, the browser renders an SVG with zero series
+    paths, no Highcharts error band and no console error, while the export server rasterizes the
+    PNG perfectly — the solidgauge-pane trap, and the class of bug the two-render-modes rule
+    exists to close.
+
+    Note the chart must carry a SERIES: resolution is by the series' effective type, and an
+    options tree with `chart.type` and no series emits only `highcharts.js`, so a test omitting it
+    would pin nothing.
+    """
+    from highcharts_builder import _order_script_tags
+
+    tags = _variwide_chart().get_script_tags(as_str=True)
+    assert "modules/variwide" in tags
+    assert "highcharts-more" not in tags
+    # And no reordering is needed: variwide.js declares `@requires highcharts` only, unlike
+    # dependency-wheel's and organization's modules/sankey and solid-gauge's highcharts-more.
+    assert _order_script_tags(tags) == tags
+
+
+def test_variwide_dark_mode_dissolves_its_bar_borders():
+    """Variwide is the SIXTH member of the border-dissolve tuple, joined on a MEASUREMENT (its
+    default border came back as pure white, the background var — column/bar's case, not
+    waterfall's fixed #333333) and on an argument the other five do not share.
+
+    Their bars have GAPS, so the white outline is a spurious ring. A variwide's bars TOUCH, so the
+    border is the only thing DIVIDING two neighbours — which is why dissolving it was rendered as
+    its own question, with adjacent bars of EQUAL height, the case a silhouette cannot
+    disambiguate. The seam survives, drawn in the page colour, exactly as the white border is on
+    the light shell; it is the ABSENCE of the hook that would break the symmetry, leaving a white
+    seam on a navy page. Same fix as column/bar, opposite reason.
+    """
+    assert (
+        _variwide_opts(dark=True)["plotOptions"]["variwide"]["borderColor"] == "#0f172a"
+    )
+    # Light mode is untouched — the branch emits no plotOptions at all.
+    assert "plotOptions" not in _variwide_opts()
+
+
+def test_variwide_sample_builds():
+    from sample_data import SAMPLES
+
+    df = SAMPLES["Product line margin by revenue (variwide)"]()
+    opts = build_options(
+        df, "variwide", "product_line", ["margin_pct"], width_col="revenue_musd"
+    )
+    assert len(_variwide_points(opts)) == len(df)
+    # The sample's whole point: margin ANTI-correlates with revenue, so the tallest bar is the
+    # narrowest. A staircase would hide that AREA is the reading.
+    tallest = max(_variwide_points(opts), key=lambda p: p[0])
+    assert tallest[1] == min(p[1] for p in _variwide_points(opts))
+
+
 # --------------------------------------------------------------------------- #
 # Gauge — concentric rings, each one COLUMN reduced to one number
 # --------------------------------------------------------------------------- #
@@ -7533,7 +7990,7 @@ def test_app_waterfall_kpi_shows_steps_including_the_appended_total(app):
 def _pick_sample(app, chart_type: str):
     """Select the sample dataset built FOR ``chart_type``, and that type, in the sidebar.
 
-    The shared body of the five ``_pick_*_sample`` helpers below, each of which keeps its own
+    The shared body of the six ``_pick_*_sample`` helpers below, each of which keeps its own
     name and its own argument for why that type needs a dedicated sample rather than the
     landing dataset. Only the mechanics live here.
 
@@ -8595,6 +9052,129 @@ def test_app_leaving_bullet_retires_the_goal_control_and_the_measures_kpi(app):
 
 
 # --------------------------------------------------------------------------- #
+# Variwide's Width control
+# --------------------------------------------------------------------------- #
+# The bullet AppTests one type over, and worth writing out rather than trusting to the sweep for
+# the same reason bullet's were: variwide reuses that control SHAPE wholesale (a category X, a
+# single-select magnitude Y, a second magnitude selectbox drawn from numeric_cols with the same
+# constant index, a dedicated equality guard the x-in-y rule cannot express) while meaning
+# something else entirely — the width is not a goal, and it feeds `width_col`, not `goal_col`. A
+# control shape copied wholesale is exactly what silently ends up wired to the wrong kwarg, and
+# nothing but the emitted config can tell.
+def _pick_variwide_sample(app):
+    """Select the variwide sample dataset and switch the chart type to variwide.
+
+    The product-line sample is the one whose two leading numeric columns ARE a height and a width,
+    and — unlike any other sample here — whose two columns deliberately ANTI-correlate, so a test
+    that read them in the wrong order would produce visibly different numbers rather than
+    plausible ones."""
+    return _pick_sample(app, "variwide")
+
+
+def test_app_switch_to_variwide_shows_width_control_and_regenerates_config(app):
+    # The seventh type with a required extra column (after bubble's Size, sankey's Target,
+    # sunburst's Parent, xrange's End, the magnitude-range family's High and bullet's Goal).
+    assert not any(sb.label == "Width" for sb in app.selectbox)
+    _pick_variwide_sample(app)
+    assert not app.exception
+    assert not app.error  # the no-numeric-columns gate stays silent
+    assert len([sb for sb in app.selectbox if sb.label == "Width"]) == 1
+    # The Y control is a single-select named for the GEOMETRIC CHANNEL, so it pairs with "Width"
+    # and the two read as the two dimensions of one rectangle.
+    assert any(sb.label == "Height (bar)" for sb in app.selectbox)
+    assert not app.pills
+    assert not app.multiselect
+
+    height = next(sb for sb in app.selectbox if sb.label == "Height (bar)")
+    width = next(sb for sb in app.selectbox if sb.label == "Width")
+    # The defaults land on DISTINCT columns, so the sample demonstrates the type on landing and
+    # the equality guard does not fire.
+    assert (height.value, width.value) == ("margin_pct", "revenue_musd")
+    assert not app.warning
+
+    _reveal_config(app)
+    assert not app.exception
+    js = app.code[0].value
+    assert "type: 'variwide'" in js
+    # Both channels reached the config, in the right slots — the check that a copied control
+    # shape wired to `goal_col` would fail while every other assertion here still passed.
+    assert "[62.0,21.0]" in "".join(js.split())
+
+
+def test_app_variwide_height_and_width_pickers_offer_only_numeric_columns(app):
+    """Both are magnitudes, so both are sourced from numeric_cols — not from all columns (unlike
+    Target/Parent/Title, which name LABELS) and not from coordinate_columns (unlike xrange's End,
+    which names a coordinate that may be a date). A width can never be a date and never a label."""
+    df = _pick_variwide_sample(app)
+    numeric = list(df.select_dtypes("number").columns)
+    height = next(sb for sb in app.selectbox if sb.label == "Height (bar)")
+    width = next(sb for sb in app.selectbox if sb.label == "Width")
+    assert list(height.options) == numeric
+    assert list(width.options) == numeric
+    assert "product_line" not in width.options
+
+
+def test_app_variwide_width_survives_a_height_change(app):
+    """The keyless-widget rule, stated in full at bullet's equivalent: fold the default into the
+    widget's identity IFF the SELECTION depends on the state the default DERIVES from. A width
+    default derives from the numeric-column LIST, never from the Height selection — and a chosen
+    Width stays perfectly VALID when Height moves, so re-minting it would discard a real answer.
+    That is Target's/Parent's/End's/High's/Goal's case, not the gauge Dial's."""
+    _pick_variwide_sample(app)
+    width = next(sb for sb in app.selectbox if sb.label == "Width")
+    # The constant index landed on the SECOND numeric column.
+    assert width.value == "revenue_musd"
+    width.set_value("sku_count").run()
+    assert not app.exception
+    next(sb for sb in app.selectbox if sb.label == "Height (bar)").set_value(
+        "revenue_musd"
+    ).run()
+    assert not app.exception
+    # Unchanged: a Width is still a valid width when the Height moves.
+    assert next(sb for sb in app.selectbox if sb.label == "Width").value == "sku_count"
+
+
+def test_app_variwide_height_equals_width_shows_guard_warning(app):
+    """Claim-fabricating rather than cosmetic, so the app warns and stops IN FRONT of the
+    builder's ValueError (the interactive path does not catch): every bar's area would be its
+    height squared."""
+    _pick_variwide_sample(app)
+    next(sb for sb in app.selectbox if sb.label == "Width").set_value(
+        "margin_pct"
+    ).run()
+    assert not app.exception
+    assert app.warning
+    assert "different columns" in app.warning[0].value
+
+
+def test_app_variwide_kpi_shows_bars(app):
+    """ "Bars", xrange's noun rather than bullet's "Measures": a variwide draws exactly one
+    rectangle per category, the width being a property OF the bar rather than a second mark
+    beside it. Checked against the sample's literal row count rather than against count_marks,
+    which would be circular."""
+    df = _pick_variwide_sample(app)
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    assert metrics["Bars"] == str(len(df))
+
+
+def test_app_leaving_variwide_retires_the_width_control_and_the_bars_kpi(app):
+    """The subtractive direction, which is where a control that is added but never removed shows
+    up: the Width picker and the "Bars" KPI must both disappear when the type changes."""
+    _pick_variwide_sample(app)
+    assert any(sb.label == "Width" for sb in app.selectbox)
+    assert "Bars" in {m.label for m in app.metric}
+
+    app.selectbox[1].set_value("column").run()
+    assert not app.exception
+    assert not any(sb.label == "Width" for sb in app.selectbox)
+    assert not any(sb.label == "Height (bar)" for sb in app.selectbox)
+    labels = {m.label for m in app.metric}
+    assert "Bars" not in labels
+    assert "Series plotted" in labels
+
+
+# --------------------------------------------------------------------------- #
 # The app's CACHE LAYER — the wiring, checked without the network
 # --------------------------------------------------------------------------- #
 # The three `@st.cache_data` renderers are the one part of the app no other test
@@ -8613,7 +9193,7 @@ def test_app_leaving_bullet_retires_the_goal_control_and_the_measures_kpi(app):
 # argument passing.
 #
 # What they catch is precisely what the keyword form does NOT prevent: `goal_col=high_col`
-# type-checks, caches and renders, and just draws the wrong column. Nine of these
+# type-checks, caches and renders, and just draws the wrong column. Ten of these
 # parameters are `str | None`, so nothing else in the toolchain can tell them apart.
 _CACHE_LAYER = {  # cached wrapper -> the builder it must forward to
     "cached_chart_html": "build_chart_html",
@@ -8632,6 +9212,7 @@ _FORWARDED = (
     "high_col",
     "title_col",
     "goal_col",
+    "width_col",
     "agg",
     "dial",
 )
@@ -8650,7 +9231,7 @@ def test_app_cached_renderer_forwards_every_column_kwarg_under_its_own_name(
 ):
     """Each cached wrapper must pass `foo=foo`, never `foo=bar`.
 
-    A transposition here is invisible to every other gate: it type-checks (nine of the
+    A transposition here is invisible to every other gate: it type-checks (ten of the
     parameters are `str | None`), it caches (the key is the bound arguments, which are
     still distinct), and it renders — it just draws the wrong column. For
     `cached_chart_png` nothing else in the suite would notice at all.
@@ -8675,7 +9256,7 @@ def test_app_cached_renderer_forwards_every_column_kwarg_under_its_own_name(
 
 
 def test_app_calls_its_cached_renderers_with_named_column_arguments():
-    """The call SITES pass the same nine by keyword, so ordering is not a failure mode.
+    """The call SITES pass the same ten by keyword, so ordering is not a failure mode.
 
     The wrapper test above pins the inside of each wrapper; this pins the outside. Passing
     these positionally is what made a `high_col`/`title_col`/`goal_col` transposition a

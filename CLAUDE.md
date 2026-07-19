@@ -32,7 +32,16 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   and one word cannot name both a label and a magnitude — the very collision that made it a new
   kwarg. It sits directly after the Y control so the sidebar reads as the pair it is
   (Category → Measure → Goal), and its `index` is a constant `min(1, …)`, landing on the *second*
-  numeric column so it starts distinct from Measure and still clamps a one-column frame) — and
+  numeric column so it starts distinct from Measure and still clamps a one-column frame),
+  **Width** for **variwide** (the *third* control drawn from `numeric_cols` and the third to feed a
+  kwarg of its own — a width is neither the far END of the mark (`high_col`) nor a REFERENCE it is
+  read against (`goal_col`) but the mark's OTHER DIMENSION, so `width_col`, and so the cache layer
+  is touched. Called plain **Width**, *not* "Width (weight)", which is the more natural reading of
+  the column: **Flow value (weight)** already names a link's magnitude in this sidebar for the
+  weighted node-link types, and one word cannot name both a link's size and a bar's extent — the
+  same collision that made bullet's control **Goal** rather than Target. It sits directly after the
+  Y control, which is itself renamed **Height (bar)** so the two read as the two dimensions of one
+  rectangle, and its `index` is the same constant `min(1, …)` Goal's and High's use) — and
   the **gauge family's** two, which are the only ones that name a **policy** and
   a **scale** rather than a column: an aggregation picker sourced from the builder's
   `GAUGE_AGGREGATIONS`, and a Dial min/max pair *seeded* from its `gauge_dial`. The gauge family is
@@ -57,7 +66,7 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   links for a networkgraph, reports for an organization,
   boxes for a boxplot, steps for a waterfall, sectors for a sunburst, bars for an
   xrange, ranges for a columnrange, points for an **arearange** (its band's vertices), measures for
-  a **bullet** — sourced
+  a **bullet**, bars for a **variwide** — sourced
   there
   rather than recomputed
   here so it can't drift from what the chart draws; waterfall's and sunburst's are the
@@ -73,7 +82,12 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   value columns because a missing end nulls the *whole* slot, while bullet never reads *either*
   because **neither** channel can drop a row — and its noun is **"Measures"** rather than xrange's
   "Bars", because the bar is only half of what a bullet draws: the count is of the pairing, not of
-  the rectangles;
+  the rectangles. Variwide then reaches that same number by a **third** argument and takes xrange's
+  noun **back**: neither of its channels can drop a row either, but for its own reason
+  (`_variwide_point` nulls all-or-nothing and KEEPS the tick, so a bad cell costs a bar its ink and
+  never its slot), and it draws exactly ONE rectangle per category — the width being a property OF
+  the bar rather than a second mark beside it, which is precisely what bullet's noun exists to
+  say and variwide's therefore must not;
   membership of the `MARK_METRICS` dict is what makes a type count-adaptive, so the
   KPI stays one branch however many such types there are — and gauge is the first type
   whose *absence* from that dict is a decision worth stating: its marks ARE its series
@@ -141,7 +155,7 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   organization's reporting lines, a boxplot's
   boxes, a waterfall's steps, a
   sunburst's sectors, an
-  xrange's bars, a columnrange's ranges, a bullet's measures — funnel/pyramid counting
+  xrange's bars, a columnrange's ranges, a bullet's measures, a variwide's bars — funnel/pyramid counting
   `label_ok & value_ok` exactly
   like treemap, columnrange counting by label like waterfall minus the
   appended total, organization counting `label_ok & not _is_top_level(mgr)` — its own second
@@ -214,6 +228,22 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   the biggest group at the bottom) — so reading the two side by side shows the only difference is
   which way the shape points, not the data (the row-0-at-base direction was **verified by
   rendering**, since Highcharts draws a pyramid as the vertical flip of a funnel).
+  `Product line margin by revenue (variwide)` closes that set of mirrors into a **three**: the
+  temperature range, the sales-vs-quota strip and this one all lead with a category and carry two
+  magnitude columns, and all three mean something different by them — two **ends of one bar**, two
+  **independent claims** on one channel, and **one claim over two geometric channels** (a height and
+  a width, whose reading is their AREA). So the three side by side are the fastest way to see that
+  "two magnitude columns" is a data **shape**, not a chart. Its two columns deliberately
+  **anti-correlate** — the best margin belongs to the smallest line — because a frame where margin
+  simply rose with revenue would draw as a staircase, every bar's area ranked the way its height
+  was, and a reader would never learn the width was carrying information. Revenues span ~3x so the
+  width channel is unmistakable; every value is present and every width positive, the
+  `_temperature_range`/`_forecast_range`/`_sales_vs_quota` rule (the missing-, zero- and
+  **negative**-width cases are the tests' job, the negative one especially, since it does not merely
+  fail to draw itself but shrinks the total every other bar's width is a share of). `sku_count` is
+  the throwaway numeric column, and it earns its second keep by POSITION exactly as
+  `deals_closed` does: the Width picker defaults to the *second* numeric column, so `revenue_musd`
+  must sit directly below `margin_pct` and this one below both.
   `Company reporting lines (organization)` is the **edge-list cousin** of the sunburst
   `_org_headcount` sample: both describe a hierarchy, but that one sizes concentric rings by a
   headcount **value** while this one draws titled boxes and carries no magnitude at all (an org
@@ -246,6 +276,18 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   chart_type`, a byte-diff proving the branch stays shared, and `test_arearange_has_no_dark_mode_
   theme_hook`, which pins the *absence* of the border-dissolve hook — the mirror of columnrange's
   presence, and the render-verified divergence — plus the "Points" KPI distinct from "Ranges"),
+  variwide's width-weighted bars (the `[value, width]` 2-array, read as `[y, z]` because
+  `xAxis.categories` supplies the names — where the literal key `z`, like bullet's `target`, must
+  appear **nowhere** in the emitted JS, so the inverted idiom again; the all-or-nothing null slot
+  and its *render-derived* premise, that a bad width drops out of the width TOTAL and silently
+  widens every OTHER bar; the negative width nulled where a negative HEIGHT survives, the one type
+  whose two value columns take different predicates; the dict-point-form companion proving a null
+  `z` VANISHES there, so the single hue is structural; `colorByPoint` asserted NOWHERE beside its
+  survives-the-round-trip twin; the absent `pointPadding`/`groupPadding` that make the bars touch;
+  the sixth seat in the border-dissolve tuple; the row-less `count_marks` cast that no sweep covers
+  (bullet's gap, closed the same way); the `y_cols` DECOY, which must sit in the SELECTION rather
+  than in the frame or it pins nothing; and `modules/variwide` from `chart.type` alone with no
+  `highcharts-more`),
   bullet's measure-against-goal pairs (the `[measure, goal]` 2-array — where the literal key
   `target` must appear **nowhere** in the emitted JS, since the value survives *positionally*, so
   the module's dominant `assert "…" in js` idiom is **inverted** here and every JS-level pin
@@ -292,7 +334,7 @@ with Highcharts. Every chart is produced by the Highcharts for Python toolkit
   an end-to-end pass driving every supported type through `Chart.from_options` /
   `to_js_literal`) and `sample_data` unit tests, plus headless `AppTest`
   interaction tests. The AppTests find widgets by **label**, not by position —
-  `_pick_sample(app, chart_type)` is the shared body of the five `_pick_*_sample` helpers, each
+  `_pick_sample(app, chart_type)` is the shared body of the six `_pick_*_sample` helpers, each
   of which keeps its own name and its own argument for why that type needs a dedicated sample
   rather than the landing dataset.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure
@@ -647,8 +689,8 @@ reversed-emission bug dependencywheel does, so `_order_script_tags`/`_MODULE_LOA
 **generalized** from a single hardcoded pair to a **list** (the "a second edge would generalize it"
 the code's own comment predicted). All of the palette / no-hook / inverted / cycle facts were decided
 by **rendering** in both themes),
-`boxplot` (per-category Tukey distributions — the only type whose builder
-*aggregates*: every other maps rows 1:1 onto marks, but a box summarizes many rows.
+`boxplot` (per-category Tukey distributions — the **first** type whose builder
+*aggregates* (the gauge family is the second, and says so): every other maps rows 1:1 onto marks, but a box summarizes many rows.
 The data is long/tidy — `x_col`'s values *repeat*, one row per observation — and each
 distinct `x_col` value becomes one box over that group's raw `y_cols[0]` numbers,
 encoded as a positional `[low, q1, median, q3, high]` 5-array matched to
@@ -960,8 +1002,10 @@ channels** drawn as two shapes: a filled bar from zero to the **measure** (`y_co
 crossbar floating over it at the **goal** (a new `goal_col`). That is why it does **not** join
 `MAGNITUDE_RANGE_TYPES` and does **not** reuse `high_col` — a high is the far END of the mark it
 shares a point with, a goal is the REFERENCE that mark is read against; the `title_col` "a title is
-not a weight" precedent, here "a goal is not a high" — so it is the one recent type that **does**
-touch the cache layer.
+not a weight" precedent, here "a goal is not a high" — so it is one of the **two** recent types
+that **do** touch the cache layer (`variwide`'s `width_col` is the other, and reaches the same
+conclusion from a third premise: a width is neither the far end of the mark nor a reference it is
+read against, but the mark's other DIMENSION).
 
 The independence is the type's **policy**, not a nicety, and `_bullet_point` is `_range_point`'s
 shape with the opposite verdict on the same input, which is why it is a second helper rather than a
@@ -1016,7 +1060,8 @@ call). Setting no numeric key there, and deriving none from the frame, makes bot
 rather than remembered.
 
 So it needs **two** `_themed` hooks. The first is the `borderColor` dissolve, where bullet is the
-**fifth** member of the literal tuple (`column`, `bar`, `xrange`, `columnrange`, `bullet`) — joined
+**fifth** member of the literal tuple (`column`, `bar`, `xrange`, `columnrange`, `bullet`,
+`variwide`) — joined
 on a **measurement**, not on an inference: its bars are a column subclass, but so are waterfall's,
 and waterfall is the standing proof the base class settles nothing (its border is a fixed
 `#333333`). Rendered in dark mode a bullet's bars come back crisply ringed white, the background
@@ -1074,7 +1119,95 @@ value where a run-together "120 of {point.target}" would trail off mid-sentence.
 `modules/bullet` from `chart.type` alone and **not** `highcharts-more` — the plausible guess the
 round-trip corrects, as for columnrange and funnel — and needs **no** `_MODULE_LOAD_ORDER` entry:
 `bullet.js` declares `@requires highcharts` only, unlike dependency-wheel and organization (which
-require `modules/sankey`) and solid-gauge (which requires `highcharts-more`)), and `solidgauge` (concentric
+require `modules/sankey`) and solid-gauge (which requires `highcharts-more`)), and `variwide` (columns
+whose **WIDTH** is a second magnitude — columnrange's data SHAPE read a **third** way, and the third
+reading is the whole of the type. Line the three up, because every decision falls out of the
+difference: a **columnrange**'s two numbers are the two **ends of one mark** (neither means anything
+alone — the mark IS the span between them); a **bullet**'s are two **independent claims** about one
+category on the **same** channel (what happened, what was meant to); a **variwide**'s are **one claim
+spread over two geometric channels** — a height and a width, whose reading is their PRODUCT, the
+bar's **AREA**. The width is not compared to the height and is not the far end of it: it **weights**
+it.
+
+So `width_col` is a **new** kwarg, the **eighth**, and the **third** that is not a reuse. Not
+`high_col` (a high is the far END of the mark it shares a point with, a Y magnitude on the low's own
+axis, while a width sizes the mark's X extent — "a coordinate is not a magnitude" transposed: *a
+width is not a high*). Not `goal_col` (a goal is a REFERENCE ON THE SAME AXIS the measure is read
+against, and bar-vs-crossbar is two lengths compared, while a width is not compared to the height at
+all — it multiplies it). `title_col`'s and `goal_col`'s precedent a third time: the dtype and the
+picker source match an existing kwarg exactly, and the **role** is what differs. The cost is worth
+stating because it is the largest consequence of the call — variwide **touches the cache layer**
+(three wrappers, three call sites, a `_FORWARDED` entry), which arearange and dependencywheel escaped
+by reusing. Buying that back would have meant the lie. It joins `X_IN_Y_GUARD_TYPES` (its `x_col` is
+a genuine category X axis — the bars stand ON it, drawn vertically) and **not**
+`MAGNITUDE_RANGE_TYPES`, which binds five sites where columnrange and arearange are byte-identical
+modulo `chart.type`; variwide shares **none** of them, so joining would be exactly the "consistency"
+edit this file keeps warning about.
+
+Its two value columns take **different predicates**, and it is the **first** type here that needs to.
+The height is `_plottable`; the **width is `_sizable`** — sunburst's non-negative predicate, borrowed
+with its argument intact, because a width is a **share of a total**. That is the type's organizing
+hazard and it was **measured**: Highcharts sizes each column as its width's share of the width SUM,
+so a bad width does not merely fail to draw its own bar — it drops out of the **denominator** and
+silently makes every OTHER bar wider. Rendered, five clean rows drew the first bar 87px wide; nulling
+the SECOND row's width redrew that same first bar at **134px**, pixel-identical to a control render
+with the offending row **deleted**. A negative is worse still: a `-30` beside a `21` and a `44` drew
+its own bar 1px wide and inflated the other two to 410px and 860px inside a **760px** chart — bars
+overflowing the canvas, every width overstated, no error anywhere. Zero is **kept** (`_sizable`'s own
+rule, verified the same way: a 1px sliver, its tick, and nothing added to the total).
+
+Hence `_variwide_point`, the module's **third** pair helper, which reaches `_range_point`'s
+ALL-OR-NOTHING answer from a **different premise** — and the premise is what the next edit will
+reason from. `_range_point` nulls the whole slot because *a range with one end is not a range* (a
+fact about the MARK); `_bullet_point` nulls each end alone because half a comparison is still worth
+drawing; `_variwide_point` nulls the whole slot because **a half-row repaints its siblings** (a fact
+about the OTHER ROWS). The slot is **kept**, never dropped: the points are positional against
+`xAxis.categories`, so dropping would desynchronize the two *and* hide the category outright, which
+is the one thing worse than a renormalized neighbour. **No `EnforcedNull` carve-out** — verified,
+`z` coerces both tokens, so bullet's `None` must not be copied here.
+
+The point is a `[value, width]` **2-array**, read as `[y, z]` because `xAxis.categories` supplies the
+names, and it is load-bearing in bullet's two directions: the literal key **`z` never reaches the
+emitted JS** (the width survives POSITIONALLY, so `assert "z" in js` is **false** on a correct chart
+and this module's dominant test idiom is **inverted** again), and any key outside `{x, y, z, name}`
+forces the point **dict** form, in which a null `z` **vanishes entirely** rather than nulling. So the
+**single brand hue** (`colorByPoint` pinned to appear NOWHERE) is what keeps the null-width policy
+expressible — and, like bullet's, that pin guards a real **decision**, since variwide's
+`colorByPoint` *survives* the round-trip at both levels.
+
+It **prints nothing in the mark** — but **not** by xrange's premise, which is **false** here: an
+xrange's two ends both land on a ticked axis, whereas a variwide's **width lands on no readable axis
+at all** (the x axis carries variable-width category slots, not a scale). It is the one number in
+this module a **tooltip is the only home for**, carried as `{point.z}` beside `{point.category}` and
+`{point.y}`. Printing it in the bar would fail exactly where it is most wanted: a bar narrow enough
+to need its width read is too narrow to hold a label, and Highcharts hides a colliding label by
+rendering it **invisible**. It sets **no `pointPadding`/`groupPadding`**: variwide overrides column's
+0.1/0.2 defaults to **0/0** deliberately, so its bars **touch** — that adjacency IS the chart type,
+and "restoring" column's values would silently un-make it.
+
+It needs **one** `_themed` hook, and it is the **sixth** member of the border-dissolve tuple — the
+one member whose border is **not a spurious ring**. Every other member's bars have gaps, so the white
+outline is an artefact; a variwide's bars touch, so the border is the **only thing dividing two
+neighbours**, and dissolving a load-bearing divider is exactly the edit to suspect. So it was
+rendered as its own question, with adjacent bars of **equal height** — the case a silhouette cannot
+disambiguate — and the dissolve survives it: the seam remains, drawn in the page colour, which is
+precisely what the white border does on the light shell. It is the **absence** of the hook that would
+break the symmetry, leaving a white seam on a navy page matching nothing on it. Same fix as
+column/bar, opposite reason. Its marks are the bars, so it needs a `count_marks` rule and a
+`MARK_METRICS` entry (**"Bars"**, xrange's noun rather than bullet's "Measures": a variwide draws
+exactly one rectangle per category, the width being a property OF the bar rather than a mark beside
+it) — counting by label, the same number columnrange and bullet return by a **third** argument, which
+is what earns it its own branch. Two guards, both **raising**: width required, and `value != width`,
+the second **claim-fabricating** rather than cosmetic (every bar's width proportional to its own
+height, so each bar's AREA would be its value **squared** — a chart that draws perfectly while
+stating something nobody asked). **No `explain_variwide_error`**: every data combination has a right
+drawing, so the two guards are *column*-level collisions, not contradictions the data states. Pulls
+in `modules/variwide` from `chart.type` alone and **not** `highcharts-more` — the plausible guess the
+round-trip corrects, as for columnrange, funnel and bullet — and needs **no** `_MODULE_LOAD_ORDER`
+entry (`variwide.js` requires only `highcharts`). Dropping the module is a **silent blank**: the
+browser renders an SVG with zero series paths, no error band and no console error, while the export
+server rasterizes the PNG perfectly — the solidgauge-pane trap, pinned on `get_script_tags`), and
+`solidgauge` (concentric
 rings on one shared dial — an "activity gauge", and the only type with **no label channel
 at all**. Every other type names its marks from a column: a slice, an axis category, a
 node, a box, a lane. A gauge's marks are the **selected columns themselves**, each
@@ -1716,6 +1849,15 @@ before it runs.
   needing **two** `_themed` hooks" (bullet is the second), and its "the one type whose mark count
   exceeds its row count" — which `sunburst`'s appended root had falsified long before, while
   sunburst's own passage already said "this is the second such type".
+  Three more were stale when `variwide` landed, and the third is the instructive one: bullet's
+  "the one recent type that **does** touch the cache layer" (variwide's `width_col` is a second),
+  bullet's "the **fifth** member of the literal tuple" (variwide is the sixth), and — surfaced by
+  the sweep rather than caused by it — boxplot's "the **only** type whose builder *aggregates*",
+  which the gauge family had already falsified while gauge's own passage said "the second
+  aggregating type". So the sweep catches PRE-EXISTING drift too, not only what you just added;
+  fix what it finds rather than only what your diff caused. Note also that the prescribed grep
+  does **not** catch ORDINAL claims ("the fifth member", "the seventh column kwarg") — sweep
+  ``grep -noE 'the (first|second|third|fourth|fifth|sixth|seventh|eighth)' CLAUDE.md`` as well.
 - Render every visualization with Highcharts (`highcharts-core`); do not use
   native Streamlit charts.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points
@@ -1793,6 +1935,19 @@ before it runs.
   with nothing to compare it to, and a row missing both still keeps its category tick
   (keep-the-slot, never a drop, never a raise). The two ends null with *different tokens* for the
   library reason in the `EnforcedNull` bullet above: `_num` for the measure, `None` for the goal.
+  **Variwide is the third reading of that same two-magnitude shape and is deliberately NOT
+  independent**, which is why bullet's claim above stays true rather than being quietly broken: a
+  variwide's pair are ONE claim over two geometric channels, so `_variwide_point` nulls the **whole
+  slot**. Not columnrange's reason ("a range with one end is not a range" — a fact about the MARK)
+  but its own, and the sharper one, because it is a fact about the **other rows**: a variwide's
+  widths are **shares of a total**, so a bad width drops out of the denominator and silently makes
+  every *other* bar wider (measured — nulling one row's width redrew a sibling from 87px to 134px,
+  pixel-identical to deleting the row outright). That is also why it is the **one type whose two
+  value columns take different predicates**: `_plottable` for the height, `_sizable` for the width,
+  since a negative width does not merely fail to draw itself but corrupts the denominator every
+  sibling is measured against (rendered: a `-30` inflated its two neighbours past the canvas edge).
+  It needs **no** `EnforcedNull` carve-out — `z` coerces both tokens, so bullet's `None` must not be
+  copied across.
   Gauge adds one twist the others have
   no analogue for, and it is pandas', not Highcharts': an **empty** column is not merely a
   no-op for `sum`, it is a `0.0` — the additive **identity**, a confident claim of "the total is
