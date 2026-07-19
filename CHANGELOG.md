@@ -33,6 +33,78 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.17.0] - 2026-07-19
+
+### Added
+
+- **`dumbbell` chart type** — two markers per category joined by a connector: a **before** and an
+  **after** ("where each region started and where it ended up"). It is columnrange's data shape read
+  a **fourth** way, and — as with the three before it — the reading settles every decision. A
+  columnrange's two numbers are the two **ends of one mark**; a bullet's are two **independent
+  claims** on one channel; a variwide's are **one claim over two geometric channels**; a dumbbell's
+  are **one claim at two times**, so the reading is neither number but the *delta*, and the
+  connector is the mark. It therefore does not join `MAGNITUDE_RANGE_TYPES` and reuses neither
+  `high_col`, `goal_col` nor `width_col` — the new **`after_col`** kwarg is the ninth, the fourth
+  that is not a reuse, and the third recent type to touch the cache layer. Joins
+  `X_IN_Y_GUARD_TYPES`, adds a dedicated `before == after` guard for the collision that rule cannot
+  express, and reads the **"Changes"** KPI.
+- **The pair is not normalized, and that is the type.** Highcharts paints `lowColor` onto the marker
+  at the **first array slot**, not onto the numerically smaller value — verified by rendering a
+  falling row, where the low-coloured marker drew at the **top**. So slot 0 is reliably the *before*
+  whichever direction the row moved, and a fall reads as a fall. Had it tracked the smaller value,
+  the type would have silently inverted its own colour coding on exactly the rows a reader most
+  needs to trust; a dedicated test pins the order so a `sorted()` "tidy-up" cannot land.
+- **`_range_point` reused across a family boundary**, without joining the family constant — a shared
+  *helper* is shared behaviour, a shared *family constant* is a claim the types are interchangeable
+  at the five sites it binds (`_is_top_level` and `_sizable` are the precedent). Dumbbell reaches
+  that helper's all-or-nothing policy from a **third premise**, and the only one of the four that is
+  not a choice at all: Highcharts draws **nothing** for a half-pair — verified, `[42, null]`
+  serializes cleanly and renders no marker, no connector, just an empty tick — so there is no
+  half-drawn state a per-end policy could prefer.
+- **No `_themed` hook**, which is the surprising half and was **measured** rather than inferred.
+  Dumbbell is a `highcharts-more` bar cousin of columnrange, which *is* in the border-dissolve
+  tuple, but its markers carry `stroke: var(--highcharts-background-color)` at **`stroke-width: 0`**
+  — the white ring the tuple exists to remove is declared and never painted. The tuple stays at six.
+  Its **before** hue is instead a fixed off-palette slate (`_DUMBBELL_BEFORE_COLOR`, aliased to
+  `_SUNBURST_ROOT_COLOR`), which needs no dark flip because a dumbbell's markers sit only on the
+  background — unlike bullet's crossbar, drawn at 140% of the bar width, which necessarily crosses
+  both the bar and the background and so cannot take a fixed value. Setting it at all is
+  load-bearing: Highcharts' own default is a near-black that all but vanishes on the dark shell.
+- Sample dataset **"Market share shift by region (dumbbell)"**, whose rows deliberately move in
+  **mixed** directions. A frame that only rose would draw identically whether the before/after hues
+  track the first slot or the smaller value, so the falls are what make the sample demonstrate the
+  type rather than merely exercise it.
+
+### Fixed
+
+- **`build_options`' own docstring was a per-type inventory that had gone stale**, and unlike
+  `CLAUDE.md` nothing sweeps it. `bullet` and `variwide` had **no entry at all**, its `Raises`
+  paragraph never mentioned their guards, and it still described the x-in-y rule as covering "the
+  category-axis types — cartesian, radar, heatmap, boxplot, and waterfall", four families out of
+  date. `count_marks`' mark list was likewise missing xrange's bars, bullet's measures and
+  variwide's bars. Both are now current, and the `Raises` paragraph states the
+  cosmetic-collision-warns / claim-fabricating-collision-raises rule once rather than leaving it
+  implicit across four guards.
+- **Stale tallies corrected across both prose homes**, most of them pre-existing rather than caused
+  by this change: the cache-layer tally (two recent types → three), the `_pick_*_sample` family (six
+  → seven), `_FORWARDED`'s forwarded parameters (ten → eleven) and the extra-column-kwarg count (six
+  → **nine**, having missed the `variwide` bump too), the `highcharts-more` and x-in-y enumerations
+  (both, in **two** homes each), boxplot's "the one mark-styling type with no `_themed` hook" (four
+  types now), and the `count_marks` note claiming *two* branches return the identical expression
+  where **four** do.
+- **One tally replaced by its criterion instead of being re-counted.** xrange's "the one mark-bearing
+  type that prints nothing in the mark… the five that do" was stale on *both* halves, in both its
+  homes, and would have gone stale again on the next type. It now states the rule that decides the
+  question — a type prints a value in the mark exactly when that value can be read against no axis —
+  which cannot drift, and says why it is put that way. A count of types on each side of a rule is
+  prose only a reader can check; the rule itself is checkable against any type at all.
+
+### Changed
+
+- `CLAUDE.md`'s ordinal grep gained `ninth`, and now says outright that the regex is **itself a
+  tally that goes stale** — each new type can push an ordinal past the end of the alternation, so
+  the sweep silently stops covering the top of its own range. `dumbbell` made `ninth` reachable.
+
 ## [0.16.0] - 2026-07-18
 
 ### Added

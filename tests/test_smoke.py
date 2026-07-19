@@ -119,6 +119,7 @@ from highcharts_builder import (  # noqa: E402
     CARTESIAN_TYPES,
     CATEGORY_X_TYPES,
     DEFAULT_COLORS,
+    DUMBBELL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     MAGNITUDE_RANGE_TYPES,
@@ -262,6 +263,24 @@ def _width_for(chart_type: str) -> str | None:
     return "end" if chart_type in VARIWIDE_TYPES else None
 
 
+def _after_for(chart_type: str) -> str | None:
+    """The after column those same sweeps pass for the dumbbell case: dumbbell requires one (the
+    LATER of its two readings); other types ignore it, so it's None. The EIGHTH of the
+    ``_size_for``/``_target_for``/``_parent_for``/``_end_for``/``_high_for``/``_goal_for``/
+    ``_width_for`` family — see ``_target_for`` for why a type with a required companion column
+    adapts its input rather than dropping out of the sweeps.
+
+    It reuses the fixtures' ``"end"`` column, the one extra that is NUMERIC, exactly as
+    ``_high_for``, ``_goal_for`` and ``_width_for`` do — but reading it as an AFTER, which is none
+    of those three (not the far end of one mark, not a reference the mark is read against, not the
+    mark's other dimension, but the same quantity at a later time). The fixtures keep "end"
+    strictly above "value", so every sweep row is a clean RISE — the ordinary drawable case. The
+    fall, where the before/after hues could have swapped had Highcharts painted ``lowColor`` onto
+    the smaller value rather than the first slot, is pinned by the dedicated tests and by the
+    sample rather than here."""
+    return "end" if chart_type in DUMBBELL_TYPES else None
+
+
 # Radar remains the ONE "meta" type: Highcharts has no radar series, so it renders as a polar
 # *line* chart and its chart.type serializes as "line". Every other supported type's chart.type
 # equals its own name — and the gauge FAMILY is why that stayed true. `solidgauge` was never
@@ -295,6 +314,7 @@ def test_supported_type_builds(labeled_frame, chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     )
     assert opts["chart"]["type"] == _hc_type(chart_type)
     assert opts["series"]  # at least one series/data set was produced
@@ -327,6 +347,7 @@ def test_supported_type_builds_a_working_highcharts_core_chart(
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -388,6 +409,7 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     ).to_js_literal()
     assert js
     # `Infinity` is capitalized, so a lowercase "inf" can only be the broken token. None
@@ -459,6 +481,7 @@ def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
             high_col=_high_for(chart_type),
             goal_col=_goal_for(chart_type),
             width_col=_width_for(chart_type),
+            after_col=_after_for(chart_type),
         ).to_js_literal()
         assert js and token not in js.lower(), f"{chart_type} kept a '{token}' label"
 
@@ -509,6 +532,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     )
     # An empty chart, not a raise. Gauge is the one type whose empty chart is not zero marks:
     # its marks are the selected COLUMNS, not the rows, so a header-only CSV still selects one
@@ -531,6 +555,7 @@ def test_row_less_frame_draws_an_empty_chart_in_every_type(chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     ).to_js_literal()
     assert js and f"type: '{_hc_type(chart_type)}'" in js
 
@@ -801,6 +826,7 @@ def test_default_title_per_type(labeled_frame, chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     )
     assert opts["title"]["text"] == f"{chart_type.title()} chart"
 
@@ -825,6 +851,7 @@ def test_default_palette_applied_per_type(labeled_frame, chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -858,6 +885,7 @@ def test_dark_mode_sets_chart_background(labeled_frame, chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     )
     assert opts["chart"]["backgroundColor"] == "#0f172a"
 
@@ -878,6 +906,7 @@ def test_light_mode_leaves_chart_background_unset(labeled_frame, chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     )
     assert "backgroundColor" not in opts["chart"]
 
@@ -897,6 +926,7 @@ def test_dark_mode_keeps_the_shared_palette(labeled_frame, chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     )
     assert opts["colors"] == list(DEFAULT_COLORS)
 
@@ -959,6 +989,7 @@ def test_dark_mode_themes_the_tooltip(labeled_frame, chart_type):
         high_col=_high_for(chart_type),
         goal_col=_goal_for(chart_type),
         width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
     )
     assert opts["tooltip"]["backgroundColor"] == "#0f172a"
     assert opts["tooltip"]["borderColor"] == "#475569"
@@ -6139,6 +6170,409 @@ def test_variwide_sample_builds():
 
 
 # --------------------------------------------------------------------------- #
+# Dumbbell — a before and an after per category, joined by a connector
+#
+# The SUPPORTED_TYPES sweeps already cover, via `_after_for`: that it builds, serializes through
+# the real Chart.from_options -> to_js_literal pipeline, carries DEFAULT_COLORS, takes the dark
+# background, emits no bare `inf`, drops a row whose LABEL is missing or non-finite, and survives a
+# row-less frame. What follows is only what is dumbbell's own.
+# --------------------------------------------------------------------------- #
+def _dumbbell_df() -> pd.DataFrame:
+    """Four regions, each with a BEFORE and an AFTER reading of one quantity.
+
+    Directions are deliberately MIXED — two rise, two fall — because the type's sharpest failure
+    mode is only reachable on a FALLING row (see the slot-order test below). A frame that only
+    rose would draw identically whether the before/after hues track the first slot or the smaller
+    value, so several assertions here would go quietly vacuous.
+    """
+    return pd.DataFrame(
+        {
+            "region": ["Nordics", "DACH", "Iberia", "Benelux"],
+            "q1": [12.0, 28.0, 9.0, 17.0],  # two below their after, two above
+            "q4": [19.0, 21.0, 15.0, 13.0],
+        }
+    )
+
+
+def _dumbbell_opts(df: pd.DataFrame | None = None, **kwargs) -> dict:
+    return build_options(
+        df if df is not None else _dumbbell_df(),
+        "dumbbell",
+        "region",
+        ["q1"],
+        after_col="q4",
+        **kwargs,
+    )
+
+
+def _dumbbell_points(opts: dict) -> list:
+    return opts["series"][0]["data"]
+
+
+def _dumbbell_chart(df: pd.DataFrame | None = None, **kwargs):
+    return make_chart(
+        df if df is not None else _dumbbell_df(),
+        "dumbbell",
+        "region",
+        ["q1"],
+        after_col="q4",
+        **kwargs,
+    )
+
+
+def _dumbbell_js(df: pd.DataFrame | None = None, **kwargs) -> str:
+    js = _dumbbell_chart(df, **kwargs).to_js_literal()
+    assert js
+    return js
+
+
+def test_dumbbell_builds_before_after_pairs_per_category():
+    """Each point is a positional `[before, after]` 2-array matched to xAxis.categories by
+    POSITION — columnrange's, bullet's and variwide's data shape."""
+    opts = _dumbbell_opts()
+    assert opts["chart"]["type"] == "dumbbell"
+    assert opts["xAxis"]["categories"] == ["Nordics", "DACH", "Iberia", "Benelux"]
+    assert _dumbbell_points(opts) == [
+        [12.0, 19.0],
+        [28.0, 21.0],
+        [9.0, 15.0],
+        [17.0, 13.0],
+    ]
+    # BOTH column names, in order, on the axis and the series: the two ends share one axis and
+    # one unit, so neither name alone describes what is being measured. (Variwide names only its
+    # height column, because there the second number is on no axis at all.)
+    assert opts["yAxis"]["title"]["text"] == "q1 \u2192 q4"
+    assert opts["series"][0]["name"] == "q1\u2192q4"
+    assert opts["legend"]["enabled"] is False
+
+
+def test_dumbbell_keeps_the_before_in_slot_zero_even_when_the_value_falls():
+    """The type's headline fact, and the one a reader would most reasonably assume away.
+
+    Highcharts paints `lowColor` onto the marker at the FIRST array slot, NOT onto the
+    numerically smaller value (verified by rendering a falling row: the low-coloured marker drew
+    at the TOP). So the builder must not normalize the pair — and this test is what stops a future
+    `sorted(...)` or `min/max` "tidy-up" from landing, because such an edit would still draw a
+    plausible chart while silently swapping the before/after hues on exactly the falling rows.
+
+    DACH and Benelux both FELL. If the pair were normalized their slots would read [21, 28] and
+    [13, 17]; asserted here in the order the frame states them.
+    """
+    points = _dumbbell_points(_dumbbell_opts())
+    assert points[1] == [28.0, 21.0], "a falling row must keep its BEFORE in slot 0"
+    assert points[3] == [17.0, 13.0], "a falling row must keep its BEFORE in slot 0"
+    # Stated as the invariant rather than only as two literals, so a frame change cannot make the
+    # assertion above accidentally true: slot 0 is always the q1 cell, whatever the direction.
+    df = _dumbbell_df()
+    assert [p[0] for p in points] == list(df["q1"])
+    assert [p[1] for p in points] == list(df["q4"])
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "why"),
+    [
+        (float("nan"), 19.0, "a missing BEFORE"),
+        (12.0, float("nan"), "a missing AFTER"),
+        (float("nan"), float("nan"), "both missing"),
+        (float("inf"), 19.0, "a non-finite BEFORE"),
+        (12.0, float("-inf"), "a non-finite AFTER"),
+    ],
+)
+def test_dumbbell_nulls_the_whole_slot_when_either_reading_is_unusable(
+    before, after, why
+):
+    """All-or-nothing, and — unlike columnrange's, whose policy is a CHOICE about what a range
+    means — this one is not a choice at all: Highcharts draws NOTHING for a half-pair (verified by
+    rendering `[42, null]` — no marker, no connector, just an empty tick). So there is no
+    half-drawn state a per-end policy could prefer, which is why bullet's independent-ends rule is
+    unavailable here rather than merely rejected.
+
+    The slot is KEPT, never dropped: the points are positional against xAxis.categories, so the
+    tick must survive or the two desynchronize.
+    """
+    df = _dumbbell_df()
+    df.loc[1, "q1"] = before
+    df.loc[1, "q4"] = after
+    opts = _dumbbell_opts(df)
+    points = _dumbbell_points(opts)
+    assert points[1] is EnforcedNull, why
+    # the category tick survives, and the other rows are untouched
+    assert opts["xAxis"]["categories"] == ["Nordics", "DACH", "Iberia", "Benelux"]
+    assert points[0] == [12.0, 19.0]
+    js = _dumbbell_js(df)
+    assert "inf" not in js.lower()
+
+
+def test_dumbbell_null_slot_must_be_a_bare_token_not_a_pair_of_them():
+    """Why `_range_point`'s BARE `EnforcedNull` return is load-bearing for dumbbell specifically.
+
+    `EnforcedNull` INSIDE a dumbbell's array raises `CannotCoerceError` — and it raises at
+    `Chart.from_options`, one layer BELOW `build_options`, which is bullet's `target` trap in a
+    third validator. So `[EnforcedNull, EnforcedNull]` would pass every options-dict assertion in
+    this file while making the chart unbuildable, and the app's interactive path (which does not
+    catch builder errors) would show a bare traceback naming neither the column nor the type.
+
+    This test therefore drives `make_chart`, the only layer at which the failure is observable at
+    all, and pins BOTH halves: the spelling the builder uses works, and the spelling a reasonable
+    "tidy-up" would reach for does not.
+    """
+    # what the builder actually emits, through the layer that would reject a bad spelling
+    df = _dumbbell_df()
+    df.loc[1, "q4"] = float("nan")
+    js = _dumbbell_js(df)
+    assert "null" in js
+
+    # and the alternative, proven to raise rather than merely being unused
+    from highcharts_core.chart import Chart
+
+    with pytest.raises(Exception) as excinfo:
+        Chart.from_options(
+            {
+                "chart": {"type": "dumbbell"},
+                "xAxis": {"categories": ["A"]},
+                "series": [
+                    {
+                        "type": "dumbbell",
+                        "name": "s",
+                        "data": [[EnforcedNull, EnforcedNull]],
+                    }
+                ],
+            }
+        )
+    assert (
+        "EnforcedNull" in str(excinfo.value) or "coerce" in str(excinfo.value).lower()
+    )
+
+
+def test_dumbbell_paints_the_before_marker_off_the_categorical_palette():
+    """The BEFORE marker takes a fixed slate, NOT an entry from `colors`.
+
+    Two separate claims, both deliberate. It is off-palette because a prior reading is not one of
+    the categories (the `_WATERFALL_SUM_COLOR` / `_SUNBURST_ROOT_COLOR` / `_BULLET_TARGET_COLOR`
+    argument), so a caller's custom palette must not repaint it into looking like a second series.
+    And it is set AT ALL because Highcharts' own default here is a near-black that all but
+    vanishes on the dark shell — verified by rendering both ways, which is what makes this
+    load-bearing rather than decorative.
+    """
+    opts = _dumbbell_opts()
+    low = opts["plotOptions"]["dumbbell"]["lowColor"]
+    assert low not in DEFAULT_COLORS
+    # A custom palette repaints the AFTER marker and the connector (they are the series hue) and
+    # must leave the BEFORE marker alone.
+    custom = ["#111111", "#222222"]
+    assert _dumbbell_opts(colors=custom)["plotOptions"]["dumbbell"]["lowColor"] == low
+
+
+def test_dumbbell_takes_a_single_hue_and_never_color_by_point():
+    """`colorByPoint` must appear NOWHERE — but unlike bullet's and variwide's identical-looking
+    pins, this one restates a LIBRARY limitation rather than guarding a decision, and saying so is
+    the point of the test.
+
+    highcharts-core DROPS `colorByPoint` for this type at both the series and the plotOptions
+    level (pinned by its companion below), so there is no choice here to protect: networkgraph's
+    and sunburst's case, not bullet's. The pin still earns its place — it stops someone "fixing"
+    a per-point hue in and believing it works.
+    """
+    js = _dumbbell_js()
+    assert "colorByPoint" not in js
+    assert "colorByPoint" not in str(_dumbbell_opts())
+
+
+def test_dumbbell_color_by_point_really_is_dropped_by_the_library():
+    """The companion that turns the claim above from an assertion into a measurement.
+
+    Without this, `colorByPoint not in js` would be indistinguishable from "the builder happens
+    not to set it" — and the reason for the absence would be undocumented and free to be wrong.
+    Bullet's and variwide's equivalents prove the OPPOSITE (theirs survive, so their absence is a
+    decision); this one proves the key cannot be made to work at all.
+    """
+    from highcharts_core.chart import Chart
+
+    chart = Chart.from_options(
+        {
+            "chart": {"type": "dumbbell"},
+            "xAxis": {"categories": ["A"]},
+            "plotOptions": {"dumbbell": {"colorByPoint": True}},
+            "series": [
+                {
+                    "type": "dumbbell",
+                    "name": "s",
+                    "data": [[1.0, 2.0]],
+                    "colorByPoint": True,
+                }
+            ],
+        }
+    )
+    chart.container = "c"
+    js = chart.to_js_literal()
+    assert js and "colorByPoint" not in js
+
+
+def test_dumbbell_tooltip_reads_the_category_and_both_readings():
+    """`{point.category}`, not xrange's `{point.name}`: a dumbbell's categories are on the X axis
+    (its markers stand ON it), so this reads the RIGHT axis — waterfall's fix, reached for
+    columnrange's/bullet's/variwide's reason. `{point.name}` is blank here anyway (positional
+    arrays), and a bare `{point.y}` would print null, since a range-shaped point carries low/high.
+
+    Both column names are LABELLED rather than run together (bullet's rule): on a nulled slot each
+    value renders as nothing at all, so the labelled form degrades to a clean "q1: / q4:" where a
+    run-together "{low} -> {high}" would collapse to a bare arrow.
+    """
+    fmt = _dumbbell_opts()["tooltip"]["pointFormat"]
+    assert "{point.category}" in fmt
+    assert "{point.name}" not in fmt
+    assert "{point.y}" not in fmt
+    assert "{point.low}" in fmt and "{point.high}" in fmt
+    assert "q1:" in fmt and "q4:" in fmt
+
+
+def test_dumbbell_tooltip_sanitizes_user_column_names():
+    """Column names come from an uploaded CSV, so they reach the tooltip through `_tooltip_label`:
+    Highcharts parses `{...}` as value tokens and renders tooltips as HTML."""
+    df = _dumbbell_df().rename(columns={"q1": "share {pct}", "q4": "<b>q4</b>"})
+    fmt = build_options(
+        df, "dumbbell", "region", ["share {pct}"], after_col="<b>q4</b>"
+    )["tooltip"]["pointFormat"]
+    assert "share pct" in fmt  # the braces are stripped, the unit survives
+    assert "&lt;b&gt;q4&lt;/b&gt;" in fmt  # markup escaped, not rendered
+
+
+def test_dumbbell_prints_nothing_in_the_mark():
+    """xrange's rule reached from xrange's OWN premise, unlike variwide where that premise is
+    false: BOTH of a dumbbell's numbers land on a real, ticked, gridlined y axis that renders in
+    the Static PNG too, and the only other identity — the category name — is already on the X
+    axis. A dumbbell's dataLabels default OFF (column/bar's behaviour, not a gauge's), so the
+    OMITTED key is the gate.
+    """
+    opts = _dumbbell_opts()
+    assert "dataLabels" not in opts["plotOptions"]["dumbbell"]
+    assert "dataLabels" not in opts["series"][0]
+
+
+def test_dumbbell_requires_an_after_column():
+    with pytest.raises(ValueError, match="requires an after column"):
+        build_options(_dumbbell_df(), "dumbbell", "region", ["q1"])
+
+
+def test_dumbbell_rejects_the_before_column_as_the_after_column():
+    """The start-is-end collision a seventh time, and CLAIM-FABRICATING rather than cosmetic, so
+    it raises: every category would draw its two markers at one value, which renders as a single
+    dot with no connector — a chart reporting that nothing changed anywhere."""
+    with pytest.raises(ValueError, match="cannot also be the after column"):
+        build_options(_dumbbell_df(), "dumbbell", "region", ["q1"], after_col="q1")
+
+
+def test_dumbbell_rejects_x_as_a_y_series():
+    """Its x_col is a genuine category X axis (the markers stand ON it), so it joins
+    X_IN_Y_GUARD_TYPES — the collision the dedicated guard above cannot express."""
+    df = _dumbbell_df()
+    with pytest.raises(ValueError, match="cannot also be a y series"):
+        build_options(df, "dumbbell", "q1", ["q1"], after_col="q4")
+
+
+def test_dumbbell_uses_only_the_first_y_column():
+    """A second Y is ignored — the app offers a single-select, but the pure API does not enforce
+    it. The DECOY sits in the SELECTION, not merely in the frame: written the other way a
+    `y_cols[-1]` mutant would leave this green.
+    """
+    df = _dumbbell_df()
+    df["decoy"] = [99.0, 98.0, 97.0, 96.0]
+    opts = _dumbbell_opts(df, **{})
+    assert _dumbbell_points(opts) == _dumbbell_points(
+        build_options(df, "dumbbell", "region", ["q1", "decoy"], after_col="q4")
+    )
+    assert 99.0 not in [p[0] for p in _dumbbell_points(opts) if p is not EnforcedNull]
+
+
+def test_dumbbell_count_marks_counts_drawable_categories():
+    """One change per drawable LABEL, agreeing with the built series length by construction."""
+    df = _dumbbell_df()
+    df.loc[2, "q4"] = float("nan")  # a null slot still COUNTS: its tick survives
+    assert count_marks(df, "dumbbell", "region", ["q1"]) == len(df)
+    assert len(_dumbbell_points(_dumbbell_opts(df))) == count_marks(
+        df, "dumbbell", "region", ["q1"]
+    )
+    # a row whose LABEL is undrawable loses its tick, so it is not counted
+    df.loc[0, "region"] = None
+    assert count_marks(df, "dumbbell", "region", ["q1"]) == len(df) - 1
+
+
+def test_dumbbell_count_marks_casts_its_mask_on_a_row_less_frame():
+    """A header-only CSV is legitimate input and must draw an empty chart, not raise. Uncast, the
+    `.map()` mask comes back non-boolean and `int(...sum())` blows up."""
+    empty = pd.DataFrame({"region": [], "q1": [], "q4": []})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert count_marks(empty, "dumbbell", "region", ["q1"]) == 0
+        assert _dumbbell_points(_dumbbell_opts(empty)) == []
+
+
+def test_dumbbell_resolves_its_module_and_highcharts_more():
+    """Unlike columnrange/funnel/bullet/variwide — where `highcharts-more` is the plausible guess
+    the round-trip CORRECTS — a dumbbell genuinely needs both, and `modules/dumbbell.js` requires
+    `highcharts-more.js`, so the ORDER matters too.
+
+    Driven off the BUILT chart: an assertion against a `build_options` dict would be vacuous, and
+    an options tree with a chart.type and no series emits only `highcharts.js`.
+    """
+    from highcharts_builder import _order_script_tags
+
+    tags = _dumbbell_chart().get_script_tags(as_str=True)
+    assert "modules/dumbbell.js" in tags
+    assert "highcharts-more.js" in tags
+    assert tags.index("highcharts-more.js") < tags.index("modules/dumbbell.js")
+    # and it needs no _MODULE_LOAD_ORDER entry: highcharts-core already emits them in that order,
+    # unlike dependency-wheel's and organization's, which come out reversed.
+    assert _order_script_tags(tags) == tags
+
+
+def test_dumbbell_has_no_dark_mode_theme_hook():
+    """Pins an ABSENCE, arearange's precedent — and here the absence is the surprising half.
+
+    Dumbbell is a `highcharts-more` bar cousin of columnrange, which IS in the border-dissolve
+    tuple, so the inference from kinship says it should be too. It is not, and that was MEASURED
+    rather than assumed: its markers carry `stroke: var(--highcharts-background-color)` at
+    `stroke-width: 0`, so the white ring the tuple exists to remove is declared but never painted.
+    Adding a hook here would dissolve a border that was never drawn.
+    """
+    assert (
+        "plotOptions" in _dumbbell_opts()
+    )  # it HAS plotOptions, for lowColor/connector
+    light = _dumbbell_opts()["plotOptions"]["dumbbell"]
+    dark = _dumbbell_opts(dark=True)["plotOptions"]["dumbbell"]
+    assert light == dark, "dumbbell's plotOptions must not differ between themes"
+    # Asserted at the PATH, never as a bare substring: `borderColor` appears in EVERY dark chart's
+    # emitted JS as part of the tooltip chrome `_themed` writes, so `"borderColor" not in js`
+    # fails on a correct chart — and, written the other way round, a `"borderColor" in js` pin
+    # would pass with the hook it existed for deleted outright. That is this file's standing
+    # dark-mode trap, and it caught this very test while it was being written.
+    assert "borderColor" not in _dumbbell_opts(dark=True)["plotOptions"]["dumbbell"]
+    # The theme still reaches the CHROME, so the absence above is specific rather than a dead flag.
+    assert _dumbbell_opts(dark=True)["chart"]["backgroundColor"] == "#0f172a"
+
+
+def test_dumbbell_sample_builds():
+    from sample_data import SAMPLES
+
+    df = SAMPLES["Market share shift by region (dumbbell)"]()
+    opts = build_options(
+        df, "dumbbell", "region", ["q1_share_pct"], after_col="q4_share_pct"
+    )
+    assert len(_dumbbell_points(opts)) == len(df)
+    assert not df.isna().any().any()
+    # The sample's load-bearing property: directions are MIXED. A frame that only rose would draw
+    # identically whether the before/after hues track the first slot or the smaller value, so the
+    # falls are what make the sample demonstrate the type rather than merely exercise it.
+    rose = [p for p in _dumbbell_points(opts) if p[1] > p[0]]
+    fell = [p for p in _dumbbell_points(opts) if p[1] < p[0]]
+    assert rose and fell, "the sample must contain both a rise and a fall"
+    # numeric column ORDER is load-bearing: the app's After picker defaults to the SECOND numeric
+    # column, so before/after must be the first two.
+    numeric = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    assert numeric[:2] == ["q1_share_pct", "q4_share_pct"]
+
+
+# --------------------------------------------------------------------------- #
 # Gauge — concentric rings, each one COLUMN reduced to one number
 # --------------------------------------------------------------------------- #
 @pytest.fixture
@@ -7990,7 +8424,7 @@ def test_app_waterfall_kpi_shows_steps_including_the_appended_total(app):
 def _pick_sample(app, chart_type: str):
     """Select the sample dataset built FOR ``chart_type``, and that type, in the sidebar.
 
-    The shared body of the six ``_pick_*_sample`` helpers below, each of which keeps its own
+    The shared body of the seven ``_pick_*_sample`` helpers below, each of which keeps its own
     name and its own argument for why that type needs a dedicated sample rather than the
     landing dataset. Only the mechanics live here.
 
@@ -9174,6 +9608,125 @@ def test_app_leaving_variwide_retires_the_width_control_and_the_bars_kpi(app):
     assert "Series plotted" in labels
 
 
+def _pick_dumbbell_sample(app):
+    """Select the dumbbell sample dataset and switch the chart type to dumbbell.
+
+    The market-share sample is the one whose two leading numeric columns are the SAME quantity at
+    two times, and — uniquely here — whose rows move in MIXED directions. That mix is what these
+    tests need: on a frame that only rose, a before/after mix-up would produce a chart that looked
+    entirely reasonable, so several assertions below would pass while pinning nothing."""
+    return _pick_sample(app, "dumbbell")
+
+
+def test_app_switch_to_dumbbell_shows_after_control_and_regenerates_config(app):
+    # The eighth type with a required extra column (after bubble's Size, sankey's Target,
+    # sunburst's Parent, xrange's End, the magnitude-range family's High, bullet's Goal and
+    # variwide's Width).
+    assert not any(sb.label == "After" for sb in app.selectbox)
+    _pick_dumbbell_sample(app)
+    assert not app.exception
+    assert not app.error  # the no-numeric-columns gate stays silent
+    assert len([sb for sb in app.selectbox if sb.label == "After"]) == 1
+    # The Y control is a single-select named "Before", so the two read in the order they are
+    # drawn. This is the one extra-column pair in the sidebar whose halves are ORDERED.
+    assert any(sb.label == "Before" for sb in app.selectbox)
+    assert not app.pills
+    assert not app.multiselect
+
+    before = next(sb for sb in app.selectbox if sb.label == "Before")
+    after = next(sb for sb in app.selectbox if sb.label == "After")
+    # The defaults land on DISTINCT columns, so the sample demonstrates the type on landing and
+    # the equality guard does not fire.
+    assert (before.value, after.value) == ("q1_share_pct", "q4_share_pct")
+    assert not app.warning
+
+    _reveal_config(app)
+    assert not app.exception
+    js = app.code[0].value
+    assert "type: 'dumbbell'" in js
+    # Both readings reached the config in the right slots, and — the point of choosing a FALLING
+    # row for this assertion — in the frame's order rather than sorted. DACH went 28.1 -> 21.5, so
+    # a builder that normalized the pair would emit [21.5,28.1] here and every other assertion in
+    # this test would still pass.
+    assert "[28.1,21.5]" in "".join(js.split())
+
+
+def test_app_dumbbell_before_and_after_pickers_offer_only_numeric_columns(app):
+    """Both are magnitudes in one unit, so both are sourced from numeric_cols — not from all
+    columns (unlike Target/Parent/Title, which name LABELS) and not from coordinate_columns
+    (unlike xrange's End, which names a coordinate that may be a date). A reading can never be a
+    date and never a label."""
+    df = _pick_dumbbell_sample(app)
+    numeric = list(df.select_dtypes("number").columns)
+    before = next(sb for sb in app.selectbox if sb.label == "Before")
+    after = next(sb for sb in app.selectbox if sb.label == "After")
+    assert list(before.options) == numeric
+    assert list(after.options) == numeric
+    assert "region" not in after.options
+
+
+def test_app_dumbbell_after_survives_a_before_change(app):
+    """The keyless-widget rule, stated in full at bullet's equivalent: fold the default into the
+    widget's identity IFF the SELECTION depends on the state the default DERIVES from. An after
+    default derives from the numeric-column LIST, never from the Before selection — and a chosen
+    After stays perfectly VALID when Before moves, so re-minting it would discard a real answer.
+    That is Target's/Parent's/End's/High's/Goal's/Width's case, not the gauge Dial's."""
+    _pick_dumbbell_sample(app)
+    after = next(sb for sb in app.selectbox if sb.label == "After")
+    # The constant index landed on the SECOND numeric column.
+    assert after.value == "q4_share_pct"
+    after.set_value("accounts").run()
+    assert not app.exception
+    next(sb for sb in app.selectbox if sb.label == "Before").set_value(
+        "q4_share_pct"
+    ).run()
+    assert not app.exception
+    # Unchanged: an After is still a valid after when the Before moves.
+    assert next(sb for sb in app.selectbox if sb.label == "After").value == "accounts"
+
+
+def test_app_dumbbell_before_equals_after_shows_guard_warning(app):
+    """Claim-fabricating rather than cosmetic, so the app warns and stops IN FRONT of the
+    builder's ValueError (the interactive path does not catch). This is the one such collision
+    whose wrong chart is indistinguishable from a real result: every category would draw its two
+    markers at one value, i.e. as "nothing changed anywhere", which is a reading this type exists
+    to express."""
+    _pick_dumbbell_sample(app)
+    next(sb for sb in app.selectbox if sb.label == "After").set_value(
+        "q1_share_pct"
+    ).run()
+    assert not app.exception
+    assert app.warning
+    assert "two different readings" in app.warning[0].value
+
+
+def test_app_dumbbell_kpi_shows_changes(app):
+    """ "Changes" rather than "Pairs" or xrange's "Bars": a dumbbell draws three shapes per
+    category (two markers and the connector joining them) and counts none of them — what it counts
+    is the one before-to-after movement they jointly describe. Checked against the sample's literal
+    row count rather than against count_marks, which would be circular."""
+    df = _pick_dumbbell_sample(app)
+    metrics = _metrics(app)
+    assert "Series plotted" not in metrics
+    assert metrics["Changes"] == str(len(df))
+
+
+def test_app_leaving_dumbbell_retires_the_after_control_and_the_changes_kpi(app):
+    """The subtractive direction, which is where a control that is added but never removed shows
+    up: the After picker and the "Changes" KPI must both disappear when the type changes."""
+    _pick_dumbbell_sample(app)
+    assert any(sb.label == "After" for sb in app.selectbox)
+    assert "Changes" in {m.label for m in app.metric}
+
+    app.selectbox[1].set_value("column").run()
+    assert not app.exception
+    assert not any(sb.label == "After" for sb in app.selectbox)
+    assert not any(sb.label == "Before" for sb in app.selectbox)
+    labels = {m.label for m in app.metric}
+    assert "Changes" not in labels
+    assert "Series plotted" in labels
+
+
 # --------------------------------------------------------------------------- #
 # The app's CACHE LAYER — the wiring, checked without the network
 # --------------------------------------------------------------------------- #
@@ -9213,6 +9766,7 @@ _FORWARDED = (
     "title_col",
     "goal_col",
     "width_col",
+    "after_col",
     "agg",
     "dial",
 )
@@ -9256,12 +9810,14 @@ def test_app_cached_renderer_forwards_every_column_kwarg_under_its_own_name(
 
 
 def test_app_calls_its_cached_renderers_with_named_column_arguments():
-    """The call SITES pass the same ten by keyword, so ordering is not a failure mode.
+    """The call SITES pass the same eleven by keyword, so ordering is not a failure mode.
 
     The wrapper test above pins the inside of each wrapper; this pins the outside. Passing
     these positionally is what made a `high_col`/`title_col`/`goal_col` transposition a
     silent wrong-column bug rather than a `TypeError` — and the project has paid that risk
-    six times now, once per extra column kwarg.
+    NINE times now, once per extra column kwarg (`size_col` through `after_col`; `agg` and
+    `dial` are the two entries in `_FORWARDED` that name a policy and a scale rather than a
+    column, which is why the two counts differ).
     """
     tree = ast.parse((ROOT / "streamlit_app.py").read_text())
     # The renderer's name is captured HERE rather than read back off `call.func` in the

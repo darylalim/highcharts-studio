@@ -792,6 +792,75 @@ def _product_line_margin() -> pd.DataFrame:
     )
 
 
+def _market_share_shift() -> pd.DataFrame:
+    """Market share by region at the start and the end of the year.
+
+    Tailored to dumbbell, and the FOURTH sample in this file built on "a category plus two
+    magnitude columns" — which, as with the third, is the point of it. Read all four side by side
+    and the shape stops looking like a chart type at all:
+
+    * ``_temperature_range`` (columnrange): the two numbers are the two ENDS OF ONE BAR. Neither
+      means anything alone; the bar IS the span between them.
+    * ``_sales_vs_quota`` (bullet): two INDEPENDENT CLAIMS about one region, on the same channel —
+      what happened and what was meant to.
+    * ``_product_line_margin`` (variwide): ONE claim over TWO GEOMETRIC CHANNELS, a height and a
+      width, whose reading is their PRODUCT — the area.
+    * this one (dumbbell): ONE claim AT TWO TIMES. The same measurement, of the same thing, taken
+      twice — so the reading is neither number but the DISTANCE between them, and the connector
+      joining the two markers is the mark.
+
+    That last reading is what the data is arranged to force, and it is why the directions are
+    MIXED rather than uniformly up. ``Nordics`` and ``Iberia`` gained, ``DACH`` and ``Benelux``
+    lost, and the losses are the load-bearing half rather than the pessimistic one: a dumbbell's
+    two markers are distinguished by hue, and Highcharts paints that hue onto the FIRST array slot
+    rather than onto the numerically smaller value. A sample where every region rose would draw
+    identically under either rule and so would hide the one way this type can silently lie — a
+    falling row whose before/after colours swap, reporting a loss with the same picture a gain
+    gets. ``UK & Ireland`` is the honest edge: it moved by 0.3 of a point, a connector barely
+    longer than the markers it joins, which is what "no material change" actually looks like here
+    and is why the guard against picking one column twice matters (that would draw EVERY region
+    that way).
+
+    The two columns are the same quantity in the same unit at two times, which is the type's whole
+    premise — unlike ``_sales_vs_quota``'s pair, which share a unit but not a referent (one is the
+    world, one is an intention), and unlike ``_temperature_range``'s, which are one measurement's
+    two bounds. Every value is present: the missing-before, missing-after and missing-both cases
+    are the tests' job, not a demo's
+    (the ``_temperature_range``/``_forecast_range``/``_sales_vs_quota``/``_product_line_margin``
+    rule), and here that division is sharper than usual, since a half-pair draws literally nothing
+    and a demo full of blank ticks would read as a broken chart rather than as a policy.
+
+    ``region`` leads with the category column, like every sample here and for the same
+    load-bearing reason: the app opens on ``line`` with the first column as X, so a numeric first
+    column would trip the x-in-y guard the instant the dataset is selected. ``accounts`` is a
+    throwaway numeric column the chart never reads, carried for ``_reporting_lines``'s
+    ``tenure_years`` reason — and, like ``_sales_vs_quota``'s ``deals_closed`` and
+    ``_product_line_margin``'s ``sku_count``, it earns a second keep by its POSITION: the app's
+    After picker defaults to the SECOND numeric column, so ``q4_share_pct`` must sit directly
+    below ``q1_share_pct`` and this one below both, or the control lands on the wrong column and
+    the sample no longer demonstrates the type on landing.
+    """
+    return pd.DataFrame(
+        {
+            "region": [
+                "Nordics",
+                "DACH",
+                "Iberia",
+                "Benelux",
+                "UK & Ireland",
+            ],
+            # Percentage points of a segment. The BEFORE reading — the first numeric column, so
+            # the app's Y control lands on it.
+            "q1_share_pct": [12.4, 28.1, 9.6, 17.3, 22.8],
+            # The same measurement twelve months later. Deliberately MIXED in direction: two rise,
+            # two fall, one barely moves. The falls are what prove the before/after hues do not
+            # swap on a decrease.
+            "q4_share_pct": [18.9, 21.5, 15.2, 13.0, 22.5],
+            "accounts": [340, 1210, 275, 590, 880],
+        }
+    )
+
+
 def _weekly_bookings() -> pd.DataFrame:
     """Weekly bookings by sales region — four teams, eight weeks of observations.
 
@@ -979,6 +1048,7 @@ SAMPLES = {
     "Projected monthly active users (arearange)": _forecast_range,
     "Quarterly sales vs quota (bullet)": _sales_vs_quota,
     "Product line margin by revenue (variwide)": _product_line_margin,
+    "Market share shift by region (dumbbell)": _market_share_shift,
     "Weekly bookings by region (solidgauge)": _weekly_bookings,
     "Server utilization (gauge)": _server_utilization,
 }

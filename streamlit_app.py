@@ -19,6 +19,7 @@ import streamlit as st
 
 from highcharts_builder import (
     BULLET_TYPES,
+    DUMBBELL_TYPES,
     FUNNEL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
@@ -128,6 +129,15 @@ MARK_METRICS = {
     # because a variwide draws exactly one rectangle per category: there is no second shape for the
     # noun to have to cover, the width being a property OF the bar rather than a mark beside it.
     "variwide": "Bars",
+    # Dumbbell is a single before/after series, so its default "Series plotted" would misreport as
+    # a bare 1 like every other single-series type here. It reaches the surviving-label count by a
+    # FOURTH argument: Highcharts draws nothing at all for a half-pair, so neither value column can
+    # produce a partial mark the count could disagree about. "Changes" rather than "Pairs" or
+    # xrange's "Bars", because a dumbbell draws THREE shapes per category (two markers and the
+    # connector joining them) and counts none of them — what it counts is the one before-to-after
+    # movement they jointly describe. Variwide could take "Bars" back precisely because it draws a
+    # single rectangle; here there is no one shape to name, so the noun names the reading.
+    "dumbbell": "Changes",
     # Gauge is deliberately ABSENT, and it is the first type whose absence is worth stating.
     # Its marks ARE its series — one ring per y column, and a column with no data keeps its ring
     # as a null rather than being dropped — so "Series plotted" is already literally the ring
@@ -170,6 +180,7 @@ def cached_chart_html(
     title_col,
     goal_col,
     width_col,
+    after_col,
     agg,
     dial,
 ) -> str:
@@ -189,6 +200,7 @@ def cached_chart_html(
         title_col=title_col,
         goal_col=goal_col,
         width_col=width_col,
+        after_col=after_col,
         agg=agg,
         dial=dial,
     )
@@ -213,6 +225,7 @@ def cached_chart_png(
     title_col,
     goal_col,
     width_col,
+    after_col,
     agg,
     dial,
 ) -> bytes:
@@ -232,6 +245,7 @@ def cached_chart_png(
         title_col=title_col,
         goal_col=goal_col,
         width_col=width_col,
+        after_col=after_col,
         agg=agg,
         dial=dial,
     )
@@ -253,6 +267,7 @@ def cached_chart_js(
     title_col,
     goal_col,
     width_col,
+    after_col,
     agg,
     dial,
 ) -> str:
@@ -273,6 +288,7 @@ def cached_chart_js(
         title_col=title_col,
         goal_col=goal_col,
         width_col=width_col,
+        after_col=after_col,
         agg=agg,
         dial=dial,
     ).to_js_literal()
@@ -392,6 +408,12 @@ with st.sidebar:
             "each bar's **area** is the two multiplied ('margin, weighted by the revenue it "
             "earns'). Widths are shares of the width total, so the bars **touch**: it reads as a "
             "band of the axis divided up, not as separate columns\n"
+            "- **dumbbell** — a category X axis + a **Before** column and an **After** "
+            "column, drawn as two markers joined by a connector, one pair per category "
+            "('where each region started and where it ended up'). The two columns are the "
+            "**same measurement at two times**, so what you read is the **connector** — its "
+            "length is the change and its direction is the sign. A row missing either "
+            "reading draws neither marker\n"
             "- **solidgauge / gauge** — one mark per **numeric column**, each collapsed to a "
             "single number by the aggregation you choose (sum / mean / …), all read against one "
             "shared dial. There is **no X column**: a gauge has no labels, only readings. "
@@ -522,6 +544,20 @@ with st.sidebar:
         # names a GEOMETRIC CHANNEL that pairs with "Width": the two controls have to read as the
         # two dimensions of one rectangle, which "Value" beside "Width" would not.
         x_label, y_label, multi = "Category (X) axis", "Height (bar)", False
+    elif chart_type in DUMBBELL_TYPES:
+        # A category X axis (the paired markers stand on it, drawn vertically — columnrange's,
+        # bullet's and variwide's shape) plus TWO magnitude columns, read a FOURTH way: the Y
+        # control carries the EARLIER reading and the After selectbox below carries the later
+        # one, so the mark is the movement between them. Single-select Y for the family's
+        # reason — a second before would be a second chart.
+        #
+        # Labelled "Before" rather than a bare "Y" for xrange's Start/End reason (a reader
+        # picking a value should be told what it BECOMES) and, more pointedly, because this is
+        # the one extra-column pair in this sidebar whose two halves are ORDERED. High/Low,
+        # Measure/Goal and Height/Width can each be read in either order without changing what
+        # the chart claims; Before/After cannot, since swapping them turns every rise into a
+        # fall. The words have to carry that, which "Value 1"/"Value 2" would not.
+        x_label, y_label, multi = "Category (X) axis", "Before", False
     elif chart_type in GAUGE_TYPES:
         # The two types with NO X control at all (see the selectbox below): their marks are the
         # SELECTED COLUMNS, each collapsed to one number, so there is no label column to pick.
@@ -784,6 +820,45 @@ with st.sidebar:
     # that drives it. Only shown for bubble (None otherwise, and ignored by the
     # other builders). Default to the last numeric column, so it usually differs
     # from the X and Y pickers (which lead with the earlier columns).
+    # Dumbbell's AFTER column, sitting right after Before so the pair reads in the order it is
+    # drawn (Category -> Before -> After). Drawn from numeric_cols, like columnrange's High,
+    # bullet's Goal and variwide's Width and for the same reason: an after is a MAGNITUDE, never a
+    # coordinate (it can't be a date) and never a label. But it is none of those three — it is its
+    # own `after_col` kwarg, because a high is the far END of the mark it shares a point with, a
+    # goal is the REFERENCE that mark is read against, and a width is the mark's OTHER DIMENSION,
+    # while an after is THE SAME QUANTITY AT A LATER TIME. "A goal is not a high" a third time
+    # along: an after is none of them.
+    #
+    # Called plain "After" and NOT "After (high)" or "To": the pair is ORDERED, and the only thing
+    # a reader needs from these two words is which one comes first. "To" was available (no node-link
+    # collision, since those say "Target (to)"/"Manager (to)") and is rejected precisely because it
+    # reads as a DESTINATION — an xrange End, a sankey target — where this is a second reading of
+    # one quantity, not somewhere the first one went.
+    #
+    # The index is a CONSTANT and the widget is KEYLESS, by the rule Goal states in full: fold the
+    # default into the widget's identity IFF the SELECTION depends on the state the default DERIVES
+    # from. An after default derives from the numeric-column LIST (the dataset), never from the
+    # Before selection — and a chosen After stays perfectly VALID when Before moves, so re-minting
+    # it would discard a real answer. Target's / Parent's / End's / High's / Goal's / Width's case,
+    # not the gauge Dial's. min() lands on the SECOND numeric column so it starts distinct from
+    # Before (which leads with the first) and clamps a single-column frame. Before == After is
+    # caught by the guard in the main panel.
+    after_col = None
+    if chart_type in DUMBBELL_TYPES:
+        after_col = st.selectbox(
+            "After",
+            numeric_cols,
+            index=min(1, len(numeric_cols) - 1),
+            help=(
+                "The **later** of the two readings — a numeric column, the **same kind** as "
+                "Before and in the **same unit**, but a distinct column. Each category draws a "
+                "marker at each reading, joined by a connector: the connector's **length is the "
+                "change** and its direction is the sign. The Before marker is drawn in a **muted "
+                "slate** whichever way the row moved, so a fall reads as a fall. A row missing "
+                "**either** reading draws neither marker (it keeps its category tick)."
+            ),
+        )
+
     size_col = None
     if chart_type == "bubble":
         size_col = st.selectbox("Size (Z)", numeric_cols, index=len(numeric_cols) - 1)
@@ -1046,6 +1121,24 @@ with left.container(border=True, height="stretch"):
             icon=":material/warning:",
         )
         st.stop()
+    # Dumbbell's collision, the seventh, and claim-fabricating like bullet's and variwide's rather
+    # than cosmetic like organization's Title — so it gets the same treatment: a builder ValueError
+    # with this warning in FRONT of it, since the interactive path does not catch. It is the one of
+    # the four whose wrong chart is INDISTINGUISHABLE from a real result: every category would draw
+    # its two markers at one value, which Highcharts renders as a single dot with no connector —
+    # i.e. as "nothing changed anywhere", a reading this type exists to express. A bullet sitting on
+    # its own crossbar at least looks suspiciously perfect; this just looks like a quiet quarter.
+    # Like the three above it there is no column CONTRADICTION to report below: every combination of
+    # a before and an after has a right drawing, so there is no explain_dumbbell_error to call. (It
+    # also fires by accident on a single-numeric-column frame, where the constant index clamps After
+    # onto Before — the honest reading, since a dumbbell needs two numeric columns.)
+    if chart_type in DUMBBELL_TYPES and y_cols[0] == after_col:
+        st.warning(
+            f"The Before column **{y_cols[0]}** can't also be the After column — "
+            "a dumbbell needs two different readings to draw a change between them. "
+            "Pick a different After column."
+        )
+        st.stop()
     # And the columns' own contradiction, the one reachable from HERE: a date start beside a
     # numeric end. Both ends of a bar sit on one axis, so they must be the same kind. It is not
     # missing data — that is dropped, silently and correctly, a row at a time — and it has no
@@ -1112,6 +1205,7 @@ with left.container(border=True, height="stretch"):
                 title_col=title_col,
                 goal_col=goal_col,
                 width_col=width_col,
+                after_col=after_col,
                 agg=agg,
                 dial=dial,
             )
@@ -1154,6 +1248,7 @@ with left.container(border=True, height="stretch"):
             title_col=title_col,
             goal_col=goal_col,
             width_col=width_col,
+            after_col=after_col,
             agg=agg,
             dial=dial,
         )
@@ -1189,6 +1284,7 @@ with left.container(border=True, height="stretch"):
             title_col=title_col,
             goal_col=goal_col,
             width_col=width_col,
+            after_col=after_col,
             agg=agg,
             dial=dial,
         )

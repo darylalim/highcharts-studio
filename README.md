@@ -77,6 +77,8 @@ theme, which you can toggle from Streamlit's settings menu.
 | `columnrange` | Floating bars, each spanning a Low→High per category (a min–max range) | High |
 | `arearange` | A continuous filled band spanning a Low→High per category (columnrange's area mirror) | High |
 | `bullet` | A KPI strip: a Measure bar read against a Goal crossbar, one pair per category | Goal |
+| `variwide` | Columns whose Width is a second magnitude, so each bar's *area* is the reading | Width |
+| `dumbbell` | Two markers per category joined by a connector: a Before and an After | After |
 | `solidgauge` | An activity gauge: each column reduced to one reading, drawn as an arc | Aggregation, Dial (no X) |
 | `gauge` | A needle per column on a drawn tick scale | Aggregation, Dial (no X) |
 
