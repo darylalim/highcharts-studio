@@ -164,8 +164,11 @@ renderers, so it is part of their cache key.
 Beyond `x_col`/`y_cols`, a type may take **extra column kwargs**. Nine exist, and
 which types share one is a deliberate claim — *a link is a link, but a goal is not a
 high*. Reusing a kwarg leaves the cache layer untouched; a new one costs three
-wrappers, three call sites and a `_FORWARDED` entry, and that cost is paid whenever
-the **role** differs even though the dtype and picker source match.
+wrappers and three call sites, and that cost is paid whenever the **role** differs even
+though the dtype and picker source match. It costs no test edit: `_FORWARDED` is
+**derived** from the builders' signatures, so the cache-layer checks pick a new kwarg up
+automatically — but the kwarg **table above** is pinned by name, so a new row here is not
+optional.
 
 | Kwarg | Control label | Types |
 |---|---|---|
@@ -262,15 +265,27 @@ whenever someone remembers — prefer extending a sweep to writing a per-type te
   `test_count_marks_casts_every_mask_not_just_the_label_one` (which promotes warnings to
   errors — the only way the non-label casts are observable at all).
 
-The app's **cache layer** is the one part no runtime test reaches.
+The app's **cache layer** is the part the ordinary AppTests barely reach.
 `cached_chart_html`/`cached_chart_js` are covered only *indirectly*, and
-`cached_chart_png` is executed by **nothing**: the AppTests stay on the network-free
-interactive path. So its wiring is pinned **statically**, by two `ast` tests that read
-`streamlit_app.py` as source: every cached wrapper forwards each column/policy argument
-under its **own** name, and all three call sites pass them by keyword. Static because
-`import streamlit_app` **executes the whole Streamlit script** — and because it catches
-what the keyword form cannot: `goal_col=high_col` type-checks, caches and renders the
-wrong column.
+`cached_chart_png` was for a long time executed by **nothing**: the AppTests stay on the
+network-free interactive path. It is now pinned from **two** directions, because the
+network and the wiring are separable and only the network was ever worth avoiding:
+
+- **Statically**, by two `ast` tests that read `streamlit_app.py` as source: every cached
+  wrapper forwards each column/policy argument under its **own** name, and all three call
+  sites pass them by keyword. Static because `import streamlit_app` **executes the whole
+  Streamlit script** — and because it catches what the keyword form cannot:
+  `goal_col=high_col` type-checks, caches and renders the wrong column.
+- **Dynamically**, by `test_app_static_png_mode_executes_the_cached_png_wrapper`, which
+  selects Static PNG for real with `highcharts_builder.build_chart_png` monkeypatched to a
+  recorder — so the wrapper actually runs and its forwarding is observed as **values**,
+  while no export server is contacted. It clears the `@st.cache_data` caches on the way
+  **out** as well as in: `monkeypatch` restores the function but not the cached *value*,
+  so a stand-in PNG left behind would be served to any later Static PNG render, which
+  would then pass without calling the builder at all.
+
+The set of arguments both layers check is **derived** from the three builders' signatures
+(`_forwarded_arguments`), not hand-listed, so a new kwarg is covered the day it is added.
 
 ## Lint & format
 
@@ -384,6 +399,22 @@ conventions in their original, fully-enumerated form).
   what you just added — fix what it finds, not only what your diff caused. Note the second
   regex is itself a tally that goes stale: each new type can push an ordinal past the end of
   the alternation, so extend it rather than assuming it still covers the top of the range.
+
+  **Bare CARDINALS ("the four extra column selectors") are deliberately *not* swept.** They
+  are the same bug — a number in prose is a fact about the code with no second home — and
+  they have drifted twice, in `docs/chart-types.md` and in `tests/test_smoke.py`'s AppTest
+  preamble, both saying "the four"/"the three" long after there were nine. But a sweep is the
+  wrong instrument: widened to cardinals it turns up ~59 hits across the docs and the source
+  against ~1 real one, because almost every cardinal is structurally fixed ("the two ends of a
+  bar", "the three builders"). A signal rate that low does not survive being run by hand.
+  So the counts that **scale with chart types** are pinned mechanically instead, by the
+  docs-count tests in `tests/test_smoke.py` (a rule, not a tally — this sentence would
+  otherwise need editing every time one was added): they pin the supported-type count in
+  both docs, the extra-column kwarg count, and the kwarg table below checked **by name**,
+  so a rename cannot pass by keeping the total the same. Adding a type or a kwarg fails them on the day it lands.
+  Two consequences for prose: a count that scales needs no sweep but **must** appear in a
+  form one of those tests reads, and new prose about a type-scaled set should prefer a rule
+  ("one selector per extra column kwarg") to a tally — a rule cannot go stale.
 - Render every visualization with Highcharts (`highcharts-core`); do not use native
   Streamlit charts.
 - Use `EnforcedNull` (from `highcharts_core.constants`) for missing data points in dict

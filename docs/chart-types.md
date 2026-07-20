@@ -1181,8 +1181,12 @@ not merely the format string that used to hide the absurd number.
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), chart-type/column controls (pills for the Y series, falling back to
-  `st.multiselect` on wide CSVs, plus the four type-specific extra column
-  selectors — Size (Z) for bubble, Target (to) for sankey (and **dependencywheel**,
+  `st.multiselect` on wide CSVs, plus one type-specific extra column selector per extra
+  column kwarg (stated as a rule rather than as a COUNT: this sentence read "the four"
+  long after there were nine, and the enumeration below it had already outgrown the
+  tally — so the number is left to the code, which the kwarg table in `CLAUDE.md` is
+  pinned against)
+  — Size (Z) for bubble, Target (to) for sankey (and **dependencywheel**,
   **networkgraph** and **organization**, all four of which reuse the very same control and
   `target_col`, since a link is a link — organization relabels it **Manager (to)** and adds a
   **Title** selector, the one extra control a node-link type has ever added, since a title is not a

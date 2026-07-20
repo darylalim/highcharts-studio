@@ -101,7 +101,9 @@ Layers:
 """
 
 import ast
+import inspect
 import math
+import re
 import sys
 import warnings
 from datetime import date
@@ -131,6 +133,7 @@ from highcharts_builder import (  # noqa: E402
     _needle_radii,
     _pct,
     build_chart_html,
+    build_chart_png,
     build_options,
     count_marks,
     explain_gauge_error,
@@ -7951,14 +7954,21 @@ def test_org_headcount_sample_builds_a_sunburst_chart():
 # Sidebar widgets are addressed by position: selectbox [0] Dataset, [1] Chart
 # type, [2] X axis; segmented_control [0] Source, [1] Render mode; pills [0] the
 # Y series (a wide CSV upload swaps these pills for a multiselect); toggle [0] the
-# generated-config reveal. Those indices hold for every type, because the three
-# type-specific extra controls are created *after* the X selectbox: bubble's
-# "Size (Z)", sankey's "Target (to)" and sunburst's "Parent". All three are addressed by
-# LABEL rather than index, since they shift the widgets that follow them. The Upload CSV
+# generated-config reveal. Those indices hold for every type, because EVERY
+# type-specific extra control is created *after* the X selectbox — one per extra column
+# kwarg ("Size (Z)", "Target (to)"/"Manager (to)", "Parent", "End", "High (top)",
+# "Title", "Goal (target)", "Width", "After"), plus the gauge family's two non-column
+# controls. Stated as "every" rather than as a COUNT deliberately: this comment read
+# "the three" of them long after there were nine, naming the three types that happened
+# to exist when it was written. A tally invites that drift and a rule does not — and
+# neither `grep` sweep in CLAUDE.md would have caught it, since a bare cardinal is not
+# an ordinal and "the three" is not a uniqueness claim. All of them are addressed by
+# LABEL rather than index, since each shifts the widgets that follow it. The Upload CSV
 # path shifts them again — it has no Dataset selectbox — so a test on that path addresses
-# "Chart type" by label too. Everything here stays on
-# the network-free interactive path (the Static PNG mode would call the export
-# server).
+# "Chart type" by label too. Everything in THIS section stays on the network-free
+# interactive path; the one test that selects Static PNG lives in the cache-layer section
+# at the end of the file and swaps the builder out, so it contacts no export server
+# either.
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def app():
@@ -9730,20 +9740,26 @@ def test_app_leaving_dumbbell_retires_the_after_control_and_the_changes_kpi(app)
 # --------------------------------------------------------------------------- #
 # The app's CACHE LAYER — the wiring, checked without the network
 # --------------------------------------------------------------------------- #
-# The three `@st.cache_data` renderers are the one part of the app no other test
-# reaches. `cached_chart_html` and `cached_chart_js` are covered INDIRECTLY — every
+# The three `@st.cache_data` renderers are the one part of the app the ordinary AppTests
+# barely reach. `cached_chart_html` and `cached_chart_js` are covered INDIRECTLY — every
 # AppTest runs the app, which calls them, so a bad forward there surfaces as a wrong
-# chart — but `cached_chart_png` is executed by NOTHING: the AppTests deliberately stay
-# on the network-free interactive path, and `test_app_render_mode_selector_offers_the_
-# two_modes` pins that Static PNG is OFFERED without ever selecting it. So a slip in that
-# wrapper ships silently and surfaces only as a wrong Static PNG in production.
+# chart — but `cached_chart_png` used to be executed by NOTHING: the AppTests stay on the
+# network-free interactive path, and `test_app_render_mode_selector_offers_the_two_modes`
+# pins that Static PNG is OFFERED without ever selecting it. A slip in that wrapper
+# shipped silently and surfaced only as a wrong Static PNG in production.
 #
-# The gap is not really "the export server is untested" — that is a deliberate and correct
+# The gap was never "the export server is untested" — that is a deliberate and correct
 # choice. It is that avoiding the network also un-tested the WIRING, and the two are
-# separable. These read the SOURCE rather than importing the module (importing
-# `streamlit_app` executes the whole Streamlit script), which is `test_packaging.py`'s
-# and `test_theme_colors_stay_in_sync_with_config`'s mechanical-sync idea applied to
-# argument passing.
+# separable. Both halves are now covered, from opposite directions:
+#
+#   - STATICALLY, by the two `ast` tests below, which read the SOURCE rather than
+#     importing the module (importing `streamlit_app` executes the whole Streamlit
+#     script) — `test_packaging.py`'s and `test_theme_colors_stay_in_sync_with_config`'s
+#     mechanical-sync idea applied to argument passing.
+#   - DYNAMICALLY, by `test_app_static_png_mode_executes_the_cached_png_wrapper`, which
+#     selects Static PNG for real with the BUILDER swapped for a recorder. That executes
+#     the wrapper, builds its cache key, and observes the forwarding as VALUES instead of
+#     as AST names — while still contacting no export server.
 #
 # What they catch is precisely what the keyword form does NOT prevent: `goal_col=high_col`
 # type-checks, caches and renders, and just draws the wrong column. Ten of these
@@ -9753,23 +9769,52 @@ _CACHE_LAYER = {  # cached wrapper -> the builder it must forward to
     "cached_chart_png": "build_chart_png",
     "cached_chart_js": "make_chart",
 }
-# The column/policy arguments: same-typed, positionally interchangeable, and the whole
-# reason this test exists. The leading ones (df/chart_type/x_col/y_cols/height/title/dark)
-# are transformed in flight (`list(y_cols)`) or differ per wrapper, so they are not pinned
-# by name here.
-_FORWARDED = (
-    "size_col",
-    "target_col",
-    "parent_col",
-    "end_col",
-    "high_col",
-    "title_col",
-    "goal_col",
-    "width_col",
-    "after_col",
-    "agg",
-    "dial",
-)
+
+
+def _keyword_only(fn) -> set[str]:
+    """The names of ``fn``'s keyword-only parameters."""
+    return {
+        name
+        for name, param in inspect.signature(fn).parameters.items()
+        if param.kind is param.KEYWORD_ONLY
+    }
+
+
+def _forwarded_arguments() -> tuple[str, ...]:
+    """The column/policy kwargs every cached wrapper must forward, read off the BUILDERS.
+
+    DERIVED rather than hand-listed, because a hand-listed tuple is a fact with no second
+    home — the one property that let `version` go stale for five chart types. A tenth
+    extra-column kwarg added to the builders and to the wrappers but omitted here would
+    leave that column unchecked while both tests below kept passing: a test that grows
+    blind spots as the code grows is worse than one that fails. Deriving it means adding
+    a kwarg to the three builders extends the check for free, on the day it is added.
+
+    The intersection drops each render mode's OWN parameters, which are not
+    interchangeable with anything (`container_id`, `height`, `scale`, `width`,
+    `timeout`). `title` and `dark` survive it and are excluded by name: they are
+    forwarded verbatim inside the wrappers, but the call SITES pass them positionally, so
+    including them would fail the call-site test for a transposition that cannot happen —
+    a `str` title and a `bool` dark are not silently interchangeable with a column name.
+    """
+    shared = (
+        _keyword_only(build_chart_html)
+        & _keyword_only(build_chart_png)
+        & _keyword_only(make_chart)
+    )
+    return tuple(sorted(shared - {"title", "dark"}))
+
+
+# Same-typed, positionally interchangeable, and the whole reason these tests exist. The
+# leading arguments (df/chart_type/x_col/y_cols/height/title/dark) are transformed in
+# flight (`list(y_cols)`) or differ per wrapper, so they are not pinned by name here.
+_FORWARDED = _forwarded_arguments()
+
+# The subset that names a COLUMN. `agg` (a reduction) and `dial` (a scale) are forwarded
+# identically but are not columns, and the docs count only the columns — which is why
+# CLAUDE.md's two numbers differ. Hoisted rather than re-filtered per test so the one
+# place that encodes "these two are not columns" cannot drift between its readers.
+_EXTRA_COLUMN_KWARGS = tuple(n for n in _FORWARDED if n not in ("agg", "dial"))
 
 
 def _app_functions() -> dict[str, ast.FunctionDef]:
@@ -9840,3 +9885,252 @@ def test_app_calls_its_cached_renderers_with_named_column_arguments():
             f"{name} is called with {missing} passed POSITIONALLY — same-typed "
             f"arguments in a list this long transpose silently"
         )
+
+
+def test_forwarded_arguments_derivation_is_not_vacuous():
+    """The derivation must not silently collapse — an empty tuple passes both tests below.
+
+    `_FORWARDED` is computed from three signatures, so a refactor that made the column
+    kwargs positional, or renamed one in only two of the three builders, would shrink the
+    intersection instead of raising. Both tests below loop over it, so a shrunk tuple
+    checks less and stays GREEN — the vacuous pass this project treats as worse than no
+    test at all.
+
+    A FLOOR (`>=`), not an equality, and the distinction is the point: an equality here
+    would be a tally on a type-scaled set, so adding a tenth column kwarg would fail this
+    test even though the derivation had worked perfectly — contradicting the promise in
+    `_forwarded_arguments` that a new kwarg extends the check for free, and teaching the
+    next person to bump a number rather than read the failure. Growth is the expected
+    direction and needs no assertion; only SHRINKAGE is the bug, and `>=` catches exactly
+    that. The named members below carry the rest: they cannot be satisfied by an
+    unrelated tuple that merely happens to be long enough.
+    """
+    assert len(_FORWARDED) >= 11, (
+        f"the derivation SHRANK — it found {len(_FORWARDED)} shared keyword-only "
+        f"arguments where at least 11 (9 extra-column kwargs + agg + dial) exist, so a "
+        f"kwarg is positional or renamed in one builder only: {_FORWARDED}"
+    )
+    # The two that are NOT column names, and the extremes of the column set.
+    for name in ("size_col", "after_col", "agg", "dial"):
+        assert name in _FORWARDED
+
+
+# A real 1x1 PNG: `st.image` decodes its bytes through PIL, so a `b"not-a-png"` stand-in
+# fails the render rather than the assertion, blaming the test for the app's behaviour.
+_ONE_PIXEL_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?"
+    b"\x00\x05\xfe\x02\xfe\r\xefF\xb8\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+@pytest.fixture
+def cleared_chart_caches():
+    """Clear the `@st.cache_data` caches around a test that installs a STAND-IN builder.
+
+    SYMMETRIC on purpose, and the asymmetry was a real bug: clearing only on the way IN
+    protects this test from a cached real render, but leaves its fake behind for everyone
+    else. `monkeypatch` restores the patched FUNCTION at teardown; it knows nothing about
+    the cached VALUE that function produced, which stays keyed by the real arguments for
+    the rest of the session. A later test rendering Static PNG with those same arguments
+    would be handed the 1x1 stand-in, call no builder, contact no network, and PASS —
+    vacuously, and in the one section of this file whose whole subject is coverage that
+    silently isn't there.
+
+    Applies to the `load_csv` cache too, since `st.cache_data.clear()` is global; that is
+    harmless here (it only re-reads a sample frame) and is the reason this is a fixture
+    rather than a bare call — the teardown runs even when the test fails mid-way.
+    """
+    import streamlit as st
+
+    st.cache_data.clear()
+    yield
+    st.cache_data.clear()
+
+
+@pytest.mark.usefixtures("cleared_chart_caches")
+def test_app_static_png_mode_executes_the_cached_png_wrapper(app, monkeypatch):
+    """Run the Static PNG path for real, with the builder swapped for a recorder.
+
+    The `ast` tests above read the source; this one EXECUTES `cached_chart_png` — the
+    wrapper nothing else in the suite runs — so its forwarding is observed as values
+    rather than as AST names, and a wrapper that raised or failed to hash its arguments
+    would fail here rather than in production.
+
+    The patch targets `highcharts_builder.build_chart_png` (the module attribute), not the
+    app's own binding: `streamlit_app` does `from highcharts_builder import ...`, and
+    AppTest re-executes the whole script on every `run()`, so the from-import re-reads the
+    patched attribute each time. Patching by string keeps the module out of this file's
+    imports. No export server is contacted, so the suite stays network-free.
+
+    Takes the shared `app` fixture like every other control-switching test here rather
+    than building its own AppTest. The fixture's initial `.run()` renders the INTERACTIVE
+    mode, which never calls `build_chart_png` — so patching in the body, before the
+    `.run()` that switches to Static PNG, still covers every call the builder receives.
+
+    The `cleared_chart_caches` fixture empties the renderer caches on BOTH sides: a hit on
+    the way in would skip the recorder and read as "the app never called the builder", and
+    an entry left on the way out would hand this test's stand-in PNG to the next one.
+    """
+    seen: dict[str, object] = {}
+
+    # The four leading arguments are passed POSITIONALLY by the wrapper, so they are
+    # accepted and ignored here; only the keyword tail is what this test observes.
+    def _recorder(_df, _chart_type, _x_col, _y_cols, **kwargs):
+        seen.update(kwargs)
+        return _ONE_PIXEL_PNG
+
+    monkeypatch.setattr("highcharts_builder.build_chart_png", _recorder)
+
+    app.segmented_control[1].set_value("Static PNG").run()  # Render mode -> Static PNG
+
+    assert not app.exception
+    assert seen, "selecting Static PNG did not reach build_chart_png"
+    missing = [name for name in _FORWARDED if name not in seen]
+    assert not missing, (
+        f"cached_chart_png did not forward {missing} to build_chart_png — the Static PNG "
+        f"path would silently ignore those columns"
+    )
+    # The bytes reached the PAGE, not merely the wrapper's return. `st.image` decodes
+    # through PIL, so a rendered `imgs` element is itself proof that valid image bytes
+    # arrived — a truncated or corrupted payload raises "cannot identify image file" and
+    # surfaces as `app.exception` above. (That is not hypothetical: this test was first
+    # written with a `b"not-a-png"` stand-in and failed exactly that way, which is why
+    # `_ONE_PIXEL_PNG` is a real PNG.) The caption alone would prove nothing — the Static
+    # PNG branch emits it unconditionally, before and regardless of what st.image got.
+    #
+    # Byte-EQUALITY is deliberately NOT asserted: Streamlit serves both sinks as media
+    # URLs whose hash is salted with filename and mimetype rather than being a digest of
+    # the content, and `st.image` re-encodes to .jpg besides — so matching bytes would
+    # mean reaching into private media-manager API for no guarantee this does not give.
+    assert len(app.get("imgs")) == 1, "the PNG never reached st.image"
+    downloads = app.get("download_button")
+    assert len(downloads) == 1 and downloads[0].proto.url.endswith(".png"), (
+        "the Static PNG branch did not offer its bytes as a .png download"
+    )
+    assert any("export server" in caption.value for caption in app.caption)
+
+
+# --------------------------------------------------------------------------- #
+# The DOCS' counts — the tallies that scale with chart types
+# --------------------------------------------------------------------------- #
+# CLAUDE.md and docs/chart-types.md are dense with numbers that are really facts about
+# the CODE ("29 supported types", "Nine exist"), and a number in prose is the classic
+# fact with no second home: nothing recomputes it, so adding a chart type silently
+# falsifies it. That is not hypothetical here — "the four type-specific extra column
+# selectors" sat in docs/chart-types.md while there were nine, and the same claim had
+# drifted independently in this file's own AppTest preamble.
+#
+# The grep sweeps in CLAUDE.md's conventions cannot close this. They match uniqueness
+# claims ("the one X") and ORDINALS ("the third"), and a bare cardinal is neither; a
+# sweep widened to cardinals turns up ~59 hits across the docs and the source, almost
+# all of them structurally fixed ("the two ends of a bar", "the three builders") — a
+# signal rate too low to survive being run by hand on every added type.
+#
+# So the counts that scale get pinned mechanically instead, the same idea as
+# test_theme_colors_stay_in_sync_with_config and test_packaging.py's README guards.
+# Prose that does NOT scale keeps its numbers; prose that does should prefer a rule to a
+# tally (both drifted sentences have been rewritten that way).
+_NUMBER_WORDS = {
+    1: "One",
+    2: "Two",
+    3: "Three",
+    4: "Four",
+    5: "Five",
+    6: "Six",
+    7: "Seven",
+    8: "Eight",
+    9: "Nine",
+    10: "Ten",
+    11: "Eleven",
+    12: "Twelve",
+}
+
+
+def _claude_md() -> str:
+    return (ROOT / "CLAUDE.md").read_text()
+
+
+def _chart_types_md() -> str:
+    return (ROOT / "docs" / "chart-types.md").read_text()
+
+
+_KWARG_TABLE_HEADER = "| Kwarg | Control label | Types |"
+
+
+def _kwarg_table_names(text: str) -> set[str]:
+    r"""The kwarg names in CLAUDE.md's extra-column table, and ONLY that table.
+
+    Scoped to the table rather than run over the whole file. An unanchored
+    ``^\| `([a-z_]+)` \|`` matches any row whose first cell is a backticked lowercase
+    identifier, which today is only this table — the MARK_METRICS table one section down
+    happens to lead with capitalised nouns. That is luck, not a guarantee: a future table
+    keyed by helper, constant, or module name (all plausible in this doc) would have its
+    rows read as kwargs and fail this test with "stale rows" pointing at rows that are
+    neither stale nor kwargs.
+
+    Asserting the header also keeps the slice honest — a renamed or moved table would
+    otherwise yield an empty set, and an empty set is a vacuous pass waiting for the day
+    `expected` is empty too.
+    """
+    assert _KWARG_TABLE_HEADER in text, (
+        f"CLAUDE.md's kwarg table header {_KWARG_TABLE_HEADER!r} is gone — this test "
+        f"can no longer find the table it pins"
+    )
+    # The table runs from its header to the first blank line (Markdown ends it there).
+    table = text.split(_KWARG_TABLE_HEADER, 1)[1].split("\n\n", 1)[0]
+    return set(re.findall(r"^\| `([a-z_]+)` \|", table, flags=re.MULTILINE))
+
+
+def test_docs_state_the_real_number_of_supported_types():
+    """Both docs open by counting the supported types; adding one falsifies both."""
+    count = len(SUPPORTED_TYPES)
+    assert f"{count} supported types" in _claude_md(), (
+        f"CLAUDE.md's chart-types heading no longer says '{count} supported types' — "
+        f"there are now {count}"
+    )
+    assert f"the {count} supported" in _chart_types_md(), (
+        f"docs/chart-types.md's preamble no longer says 'the {count} supported' types"
+    )
+
+
+def test_claude_md_states_the_real_extra_column_kwarg_count():
+    """ "Nine exist" is a claim about `_FORWARDED`, so derive it from `_FORWARDED`.
+
+    The extra COLUMN kwargs are the forwarded set minus the gauge family's two that name
+    a policy and a scale rather than a column — the same distinction the docstring of
+    `_forwarded_arguments` draws, and the reason CLAUDE.md's two counts differ.
+    """
+    columns = _EXTRA_COLUMN_KWARGS
+    # `.get`, not `[...]`: past the words this map spells, a subscript would raise a bare
+    # KeyError at LOOKUP time — before any assertion — so the failure would name neither
+    # CLAUDE.md nor the count that drifted, and would read as a broken test rather than as
+    # stale prose. The whole point of these tests is a legible failure on the day a type
+    # or kwarg is added; dying in the setup line defeats it.
+    word = _NUMBER_WORDS.get(len(columns))
+    assert word is not None, (
+        f"{len(columns)} extra column kwargs — more than this test spells in words. "
+        f"Extend _NUMBER_WORDS, or better, switch CLAUDE.md's count to a digit and "
+        f"delete the map: a word is only harder to keep in sync than the number it spells"
+    )
+    assert f"{word} exist" in _claude_md(), (
+        f"CLAUDE.md says a different number of extra column kwargs exist — there are "
+        f"now {len(columns)} ({word}): {columns}"
+    )
+
+
+def test_claude_md_kwarg_table_names_every_extra_column_kwarg():
+    """The table is the count's real second home: it must list each kwarg BY NAME.
+
+    Stronger than the count above, and the check that actually pays off — a tenth kwarg
+    added to the builders without a table row is undocumented, and a row left behind for
+    a kwarg that no longer exists is worse than no row. Pinning names rather than a
+    length also means a rename cannot pass by keeping the total the same.
+    """
+    documented = _kwarg_table_names(_claude_md())
+    expected = set(_EXTRA_COLUMN_KWARGS)
+    assert documented == expected, (
+        f"CLAUDE.md's kwarg table is out of sync with the builders — "
+        f"undocumented: {sorted(expected - documented)}; "
+        f"stale rows: {sorted(documented - expected)}"
+    )
