@@ -161,7 +161,7 @@ All three take an optional `dark=` flag (default `False`) theming the chart chro
 the app derives it from `st.context.theme.type` and threads it through the cached
 renderers, so it is part of their cache key.
 
-Beyond `x_col`/`y_cols`, a type may take **extra column kwargs**. Nine exist, and
+Beyond `x_col`/`y_cols`, a type may take one of **9 extra column kwargs**, and
 which types share one is a deliberate claim — *a link is a link, but a goal is not a
 high*. Reusing a kwarg leaves the cache layer untouched; a new one costs three
 wrappers and three call sites, and that cost is paid whenever the **role** differs even

@@ -10031,22 +10031,6 @@ def test_app_static_png_mode_executes_the_cached_png_wrapper(app, monkeypatch):
 # test_theme_colors_stay_in_sync_with_config and test_packaging.py's README guards.
 # Prose that does NOT scale keeps its numbers; prose that does should prefer a rule to a
 # tally (both drifted sentences have been rewritten that way).
-_NUMBER_WORDS = {
-    1: "One",
-    2: "Two",
-    3: "Three",
-    4: "Four",
-    5: "Five",
-    6: "Six",
-    7: "Seven",
-    8: "Eight",
-    9: "Nine",
-    10: "Ten",
-    11: "Eleven",
-    12: "Twelve",
-}
-
-
 def _claude_md() -> str:
     return (ROOT / "CLAUDE.md").read_text()
 
@@ -10095,27 +10079,23 @@ def test_docs_state_the_real_number_of_supported_types():
 
 
 def test_claude_md_states_the_real_extra_column_kwarg_count():
-    """ "Nine exist" is a claim about `_FORWARDED`, so derive it from `_FORWARDED`.
+    """CLAUDE.md's "9 extra column kwargs" is a claim about `_EXTRA_COLUMN_KWARGS`.
 
     The extra COLUMN kwargs are the forwarded set minus the gauge family's two that name
     a policy and a scale rather than a column — the same distinction the docstring of
     `_forwarded_arguments` draws, and the reason CLAUDE.md's two counts differ.
+
+    A DIGIT, matching `test_docs_state_the_real_number_of_supported_types` above. CLAUDE.md
+    used to spell this one as a word, which cost a 12-entry int-to-word map here purely to
+    rebuild the substring — a second thing to keep in sync, capped at an arbitrary 12, in
+    service of a number the code already has as an `int`. Spelling the count as a digit in
+    the prose deleted the map and this test's whole lookup layer: a word is only harder to
+    keep in sync than the number it spells.
     """
-    columns = _EXTRA_COLUMN_KWARGS
-    # `.get`, not `[...]`: past the words this map spells, a subscript would raise a bare
-    # KeyError at LOOKUP time — before any assertion — so the failure would name neither
-    # CLAUDE.md nor the count that drifted, and would read as a broken test rather than as
-    # stale prose. The whole point of these tests is a legible failure on the day a type
-    # or kwarg is added; dying in the setup line defeats it.
-    word = _NUMBER_WORDS.get(len(columns))
-    assert word is not None, (
-        f"{len(columns)} extra column kwargs — more than this test spells in words. "
-        f"Extend _NUMBER_WORDS, or better, switch CLAUDE.md's count to a digit and "
-        f"delete the map: a word is only harder to keep in sync than the number it spells"
-    )
-    assert f"{word} exist" in _claude_md(), (
-        f"CLAUDE.md says a different number of extra column kwargs exist — there are "
-        f"now {len(columns)} ({word}): {columns}"
+    count = len(_EXTRA_COLUMN_KWARGS)
+    assert f"{count} extra column kwargs" in _claude_md(), (
+        f"CLAUDE.md states a different number of extra column kwargs — there are now "
+        f"{count}: {list(_EXTRA_COLUMN_KWARGS)}"
     )
 
 
