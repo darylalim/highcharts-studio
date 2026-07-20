@@ -75,6 +75,26 @@ Dates are the last commit at that version — the point it stopped being current
   track the first slot or the smaller value, so the falls are what make the sample demonstrate the
   type rather than merely exercise it.
 
+- **Runtime cover for the PNG cache wrapper.** `cached_chart_png` was executed by **nothing**: the
+  AppTests stay on the network-free interactive path, so a bad forward in that wrapper shipped
+  silently and surfaced only as a wrong Static PNG in production. It is now driven for real with
+  `highcharts_builder.build_chart_png` monkeypatched to a recorder, so the forwarding is observed
+  as **values** rather than as AST names and no export server is contacted. The fixture empties the
+  `@st.cache_data` caches on **both** sides: `monkeypatch` restores the function but not the cached
+  *value*, so a stand-in PNG left behind would be served to the next Static PNG render, which would
+  then pass without calling the builder at all.
+- **`_FORWARDED` is now derived from the three builders' signatures** rather than hand-listed. A
+  hand-listed tuple was the one fact in those tests with no second home — the property that let
+  `version` go stale for five chart types — so a tenth kwarg added to the builders and the wrappers
+  but omitted there would have left that column unchecked while both tests kept passing. Its floor
+  test uses `>=`, not `==`: growth is the expected direction and needs no assertion, only shrinkage
+  is the bug.
+- **The docs' type-scaled counts are pinned mechanically**, the supported-type count in both homes
+  and the extra-column kwarg table checked **by name** — so a rename cannot pass by keeping the
+  total the same. "The four type-specific extra column selectors" had sat in `docs/chart-types.md`
+  while there were nine, and neither `grep` sweep in `CLAUDE.md` could catch it: a bare cardinal is
+  not an ordinal and not a uniqueness claim.
+
 ### Fixed
 
 - **`build_options`' own docstring was a per-type inventory that had gone stale**, and unlike
@@ -99,11 +119,27 @@ Dates are the last commit at that version — the point it stopped being current
   which cannot drift, and says why it is put that way. A count of types on each side of a rule is
   prose only a reader can check; the rule itself is checkable against any type at all.
 
+- **The `ty` gate was being OOM-killed, not failing a check.** From this version's own commit
+  onward, `Type check (ty)` failed on every push while emitting **no diagnostics at all** — SIGKILL
+  after ~5 minutes. On `ty` 0.0.49 the checker's memory grows super-linearly in the branch count of
+  `streamlit_app.py`'s chart-type label chain, and `dumbbell`'s branch — the **14th of 18** —
+  crossed the cliff: removing that one `elif` takes the same tree from OOM back to a 15s pass, and
+  removing any *other* single branch does the same, so it is the count and not the branch. Fixed
+  upstream; the pin moves 0.0.49 → **0.0.61**, which checks the same tree in ~1s. Two
+  plausible-looking fixes were tested and **rejected by measurement** first — disabling the four
+  `@st.cache_data` decorators, and declaring the chain's tuple types ahead of it — either of which
+  would have shipped as a convincing no-op.
+
 ### Changed
 
 - `CLAUDE.md`'s ordinal grep gained `ninth`, and now says outright that the regex is **itself a
   tally that goes stale** — each new type can push an ordinal past the end of the alternation, so
   the sweep silently stops covering the top of its own range. `dumbbell` made `ninth` reachable.
+
+- **The per-type design record moved out of `CLAUDE.md`** into `docs/chart-types.md` — why each
+  type is built the way it is, what the library silently drops, and which calls were settled by
+  rendering. `CLAUDE.md` keeps the commands, the file map, and the rules that apply to every type
+  at once, and points at the record rather than restating it.
 
 ## [0.16.0] - 2026-07-18
 
