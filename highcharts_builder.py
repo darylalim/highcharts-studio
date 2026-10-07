@@ -19,6 +19,7 @@ import itertools
 import math
 import re
 import warnings
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -2766,6 +2767,187 @@ def _in_mark_labels(fmt: str, **extra: object) -> dict[str, object]:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Style controls (plan #5): one ChartStyle object, applied after the per-type build
+# --------------------------------------------------------------------------- #
+# The legend positions and stacking modes the sidebar offers, named once so the widgets and
+# ChartStyle's validation read the same tuples.
+LEGEND_POSITIONS = ("bottom", "top", "right", "hidden")
+STACKING_MODES = ("normal", "percent")
+
+
+@dataclass(frozen=True)
+class ChartStyle:
+    """The style controls, as ONE frozen, hashable value (docs/decisions.md, "Style: one object,
+    not one kwarg per control").
+
+    Hashable because it is part of the app's cache key; frozen so nothing can change it after it
+    is hashed. Every default reproduces the chart as it was before the controls existed, so
+    ``ChartStyle()`` and ``style=None`` build identical options.
+    """
+
+    x_title: str = ""  # blank = the column names, as before
+    y_title: str = ""
+    legend: str = (
+        "bottom"  # one of LEGEND_POSITIONS; "bottom" is Highcharts' own default
+    )
+    data_labels: bool = False
+    stacking: str | None = None  # None, or one of STACKING_MODES
+    log_y: bool = False
+    reference_line: float | None = None  # a fixed Y value; None draws no line
+
+    def __post_init__(self) -> None:
+        if self.legend not in LEGEND_POSITIONS:
+            raise ValueError(
+                f"legend must be one of {LEGEND_POSITIONS}, not {self.legend!r}"
+            )
+        if self.stacking is not None and self.stacking not in STACKING_MODES:
+            raise ValueError(
+                f"stacking must be None or one of {STACKING_MODES}, not {self.stacking!r}"
+            )
+
+
+# Which controls each type takes. Tier 1 only (docs/plan.md, "Chart tiers"); every other type takes
+# none, and pie takes none either: it has no axes, and it always labels its slices. A type gains a
+# control here only where the control means something for it — stacking for the four types whose
+# marks have a baseline to stack on, log Y for the eight with a value axis.
+_CARTESIAN_STYLE_TYPES = (
+    "line",
+    "spline",
+    "area",
+    "areaspline",
+    "column",
+    "bar",
+    "scatter",
+    "bubble",
+)
+_STACKABLE_TYPES = ("area", "areaspline", "column", "bar")
+_STYLE_CONTROLS: dict[str, frozenset[str]] = {
+    **{
+        t: frozenset(
+            {"x_title", "y_title", "legend", "data_labels", "log_y", "reference_line"}
+            | ({"stacking"} if t in _STACKABLE_TYPES else set())
+        )
+        for t in _CARTESIAN_STYLE_TYPES
+    },
+    # Radar is polar: no axis titles to set, and a log radial axis is not offered.
+    "radar": frozenset({"legend", "data_labels", "reference_line"}),
+}
+
+# The reference line's look. Its colour is the chrome's `text` colour, an alias rather than a new
+# colour (CLAUDE.md: invent no new colours), and NOT a palette colour, which would read as one more
+# series. Dashed, so it reads as a guide rather than data.
+_REFERENCE_LINE_COLOR = _DARK_CHROME["text"]
+
+
+def style_controls_for(chart_type: str) -> frozenset[str]:
+    """The ``ChartStyle`` fields ``chart_type`` takes; empty for a type with no style controls.
+
+    The sidebar draws exactly these, and ``build_options`` ignores every other field, so a control
+    the app hides (and keeps the value of) can never reach a chart it does not belong to.
+    """
+    return _STYLE_CONTROLS.get(chart_type, frozenset())
+
+
+def log_scale_ok(df: pd.DataFrame, y_cols: list[str]) -> bool:
+    """Whether a logarithmic Y axis can show every value in ``y_cols`` — all of them > 0.
+
+    A log axis has no place for zero or a negative number, and Highcharts drops such points
+    silently, so the app disables the toggle (saying why) and ``build_options`` ignores
+    ``log_y`` whenever this is False. Missing and non-finite values are not counted: every type
+    drops them anyway, so they cannot be misdrawn. No values at all is True: nothing is lost.
+    """
+    for col in y_cols:
+        if col not in df.columns:
+            continue
+        values = pd.to_numeric(df[col], errors="coerce")
+        values = values[values.map(_plottable).astype(bool)]
+        if (values <= 0).any():
+            return False
+    return True
+
+
+def _apply_style(
+    options: dict,
+    chart_type: str,
+    style: ChartStyle | None,
+    df: pd.DataFrame,
+    y_cols: list[str],
+) -> dict:
+    """Apply ``style`` to a built options dict, touching only the controls the type takes.
+
+    Runs after the per-type build and its ``_themed`` chrome, so it edits TEXT and settings and
+    never a colour ``_themed`` set (an axis title keeps its themed style; only its text changes).
+    """
+    if style is None or style == ChartStyle():
+        return options
+    allowed = style_controls_for(chart_type)
+    x_axis = options.get("xAxis")
+    y_axis = options.setdefault("yAxis", {}) if allowed else None
+    for field, axis in (("x_title", x_axis), ("y_title", y_axis)):
+        text = getattr(style, field).strip()
+        if field in allowed and text and isinstance(axis, dict):
+            axis["title"] = {**axis.get("title", {}), "text": text}
+    if "legend" in allowed and style.legend != "bottom":
+        legend = options.setdefault("legend", {})
+        if style.legend == "hidden":
+            legend["enabled"] = False
+        elif style.legend == "top":
+            legend.update(enabled=True, verticalAlign="top")
+        else:  # right
+            legend.update(
+                enabled=True, align="right", verticalAlign="middle", layout="vertical"
+            )
+    series_options = {}
+    if "data_labels" in allowed and style.data_labels:
+        series_options["dataLabels"] = {"enabled": True}
+    if "stacking" in allowed and style.stacking:
+        series_options["stacking"] = style.stacking
+    if series_options:
+        plot = options.setdefault("plotOptions", {})
+        plot["series"] = {**plot.get("series", {}), **series_options}
+    if series_options.get("stacking") == "percent" and isinstance(y_axis, dict):
+        # Percent stacking puts every stack on a 0–100 scale, and unlabelled those read as the
+        # data's own units (seen by rendering: "100" on a revenue chart). The format opens with
+        # `{` but does not END with `}`, so the serializer cannot mistake it for a JS object
+        # (CLAUDE.md, the strings emitted unquoted).
+        y_axis["labels"] = {**y_axis.get("labels", {}), "format": "{value}%"}
+    log = (
+        "log_y" in allowed
+        and style.log_y
+        and not ("stacking" in allowed and style.stacking)
+        and log_scale_ok(df, y_cols)
+    )
+    if log and isinstance(y_axis, dict):
+        y_axis["type"] = "logarithmic"
+    line = style.reference_line
+    if (
+        "reference_line" in allowed
+        and line is not None
+        and _plottable(line)
+        and not (log and line <= 0)  # a log axis has nowhere to put it
+        and isinstance(y_axis, dict)
+    ):
+        y_axis["plotLines"] = [
+            {
+                "value": float(line),
+                "color": _REFERENCE_LINE_COLOR,
+                "dashStyle": "Dash",
+                "width": 2,
+                "zIndex": 5,
+                # Right-aligned at the plot's edge, nudged 6px inward: with no offset the label
+                # overhangs the plot area and its last digit clips (seen by rendering a log axis).
+                "label": {
+                    "text": f"{line:g}",
+                    "align": "right",
+                    "x": -6,
+                    "style": {"color": _REFERENCE_LINE_COLOR},
+                },
+            }
+        ]
+    return options
+
+
 def build_options(
     df: pd.DataFrame,
     chart_type: str,
@@ -2787,6 +2969,7 @@ def build_options(
     after_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
+    style: ChartStyle | None = None,
 ) -> dict:
     """Return a Highcharts options ``dict`` for the given DataFrame and columns.
 
@@ -3020,6 +3203,58 @@ def build_options(
     CLAIM-FABRICATING one between two REQUIRED columns raises here. Each of these four would draw
     a perfect chart asserting something nobody claimed — every bullet bar on its own crossbar,
     every variwide area the value squared, every dumbbell reporting no change at all.
+
+    ``style`` applies the sidebar's style controls (``ChartStyle``) after the per-type build,
+    for the controls ``style_controls_for(chart_type)`` lists; every other field is ignored.
+    """
+    options = _build_options(
+        df,
+        chart_type,
+        x_col,
+        y_cols,
+        title=title,
+        colors=colors,
+        size_col=size_col,
+        target_col=target_col,
+        parent_col=parent_col,
+        end_col=end_col,
+        high_col=high_col,
+        title_col=title_col,
+        goal_col=goal_col,
+        width_col=width_col,
+        after_col=after_col,
+        agg=agg,
+        dial=dial,
+    )
+    return _apply_style(options, chart_type, style, df, y_cols)
+
+
+def _build_options(
+    df: pd.DataFrame,
+    chart_type: str,
+    # `None` for gauge alone — the one type with no label channel, so the column role that
+    # every other type takes for granted stops being universal. Guarded below.
+    x_col: str | None,
+    y_cols: list[str],
+    *,
+    title: str | None = None,
+    colors: list[str] | None = None,
+    size_col: str | None = None,
+    target_col: str | None = None,
+    parent_col: str | None = None,
+    end_col: str | None = None,
+    high_col: str | None = None,
+    title_col: str | None = None,
+    goal_col: str | None = None,
+    width_col: str | None = None,
+    after_col: str | None = None,
+    agg: str = _GAUGE_DEFAULT_AGG,
+    dial: tuple[float, float] | None = None,
+) -> dict:
+    """``build_options`` without the style step: every type's own options, themed.
+
+    The per-type shapes are documented on ``build_options``, which calls this and then
+    applies ``style`` in one place (``_apply_style``), so no type branch knows style exists.
     """
     if chart_type not in SUPPORTED_TYPES:
         raise ValueError(
@@ -5603,6 +5838,7 @@ def make_chart(
     after_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
+    style: ChartStyle | None = None,
 ) -> Chart:
     """Build and return a highcharts-core ``Chart`` for the given columns."""
     options = build_options(
@@ -5622,6 +5858,7 @@ def make_chart(
         after_col=after_col,
         agg=agg,
         dial=dial,
+        style=style,
     )
     chart = Chart.from_options(options)
     chart.container = container_id
@@ -5760,6 +5997,7 @@ def build_chart_html(
     after_col: str | None = None,
     agg: str = _GAUGE_DEFAULT_AGG,
     dial: tuple[float, float] | None = None,
+    style: ChartStyle | None = None,
 ) -> str:
     """Build a full, self-contained HTML document that renders the chart.
 
@@ -5790,6 +6028,7 @@ def build_chart_html(
         after_col=after_col,
         agg=agg,
         dial=dial,
+        style=style,
     )
 
     # For a SOLID gauge this resolves highcharts-more as well as modules/solid-gauge — and it does

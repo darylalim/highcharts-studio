@@ -33,6 +33,27 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.23.0] - 2026-10-07
+
+New controls, so a minor.
+
+### Added
+
+- **Style controls**, in a new Style section of the sidebar, for the core chart types (line,
+  spline, area, areaspline, column, bar, scatter, bubble, radar): X- and Y-axis titles, legend
+  position (bottom, top, right) or none, data labels, stacking (normal or percent) for column,
+  bar, area and areaspline, a log Y axis, and a dashed reference line at a typed value. Pie and
+  the other types get none yet. A control a type hides keeps its value for when you switch back.
+- **Log scale is disabled, with the reason,** when the Y data has a value ≤ 0 or the chart is
+  stacked; the builder ignores it in both cases too.
+- **Builder API:** `ChartStyle`, passed as `style=` to `build_options`, `make_chart` and
+  `build_chart_html`; `style_controls_for(chart_type)`; `log_scale_ok(df, y_cols)`;
+  `LEGEND_POSITIONS` and `STACKING_MODES`. `ChartStyle()` builds exactly the chart the app drew
+  before, for every type.
+
+Why one object rather than a kwarg per control, and the other calls:
+[`docs/decisions.md`](docs/decisions.md#style-one-object-not-one-kwarg-per-control).
+
 ## [0.22.0] - 2026-10-07
 
 A new sample dataset in the picker, so a minor.

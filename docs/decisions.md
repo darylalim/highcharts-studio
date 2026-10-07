@@ -30,7 +30,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [Large data: the turboThreshold bug that was not there](#large-data-the-turbothreshold-bug-that-was-not-there) ·
 [Highcharts JS: one pinned release](#highcharts-js-one-pinned-release) ·
 [Static PNG mode, and its retirement](#static-png-mode-and-its-retirement) ·
-[Hosting: a public demo on Community Cloud](#hosting-a-public-demo-on-community-cloud)
+[Hosting: a public demo on Community Cloud](#hosting-a-public-demo-on-community-cloud) ·
+[Style: one object, not one kwarg per control](#style-one-object-not-one-kwarg-per-control)
 
 ## Packaging: the fact with no second home
 
@@ -895,3 +896,48 @@ a private app as for a public one, so only a signed-out browser can tell them ap
 
 **Known limit:** free apps sleep after a period without visitors, so the first visit after a quiet
 spell waits for a cold start. The README says so rather than working around it.
+
+## Style: one object, not one kwarg per control
+
+Written before the code (plan #5), because every style control after the first inherits it.
+
+**The decision.** The style controls (axis titles, legend, data labels, stacking, log Y, a
+reference line) reach the builder as **one** frozen, hashable `ChartStyle` dataclass under a
+single `style=` kwarg, not as one kwarg each. A kwarg is the expensive unit in this codebase: each
+new one is a parameter on every renderer, a forward in each `@st.cache_data` wrapper, a keyword at
+each call site, and a place for a transposition (`goal_col=high_col`) that type-checks, caches and
+renders the wrong thing. As one object, the wrappers change **once**, `_FORWARDED` derives the new
+name on its own, and every later control is one field plus one widget. Frozen and hashable because
+it is part of the cache key.
+
+**`style` is a setting, not a column.** Like the gauge family's `agg` and `dial`, it names no
+column, so it has no row in `CLAUDE.md`'s kwarg table and is excluded from the column-kwarg count
+by name.
+
+**Defaults reproduce today's chart.** `ChartStyle()` and `style=None` both build the exact options
+the app built before the controls existed, so no existing chart, test or sample changed when they
+arrived.
+
+**The builder owns the rules, the sidebar reads them.** `style_controls_for(chart_type)` answers
+which controls a type takes, and the sidebar draws exactly those, so the two cannot disagree. The
+builder **ignores** a field the type does not take rather than raising: a hidden control keeps its
+value (below), and a kept value must never reach a chart it does not belong to. The first pass
+covers the Tier 1 types and no others; pie, which has no axes and always labels its slices, gets
+none. Other types gain controls one at a time, where a control means something for that type.
+
+**A hidden control keeps its value.** Streamlit discards the stored value of a keyed widget a run
+does not draw, so a Y-axis title set on a line chart would be gone after a visit to pie. That breaks
+the rule that a value may be dropped when it stops being **valid**, never when it merely stops being
+**drawn**. The controls a type hides are re-assigned to themselves each run, the documented opt-out
+the X and Y pickers already use.
+
+**Log Y is disabled, with the reason, when it cannot be honest.** A log axis cannot show zero or
+negative values, and a stacked chart fills down to zero (percent stacking also fixes the axis at
+0–100%). So the toggle stays visible but disabled, saying why, when the selected Y data has a value
+≤ 0 or stacking is on, and the builder ignores `log_y` in both cases so a stale `True` never draws.
+Rejected: hiding it (the user is not told why), and allowing it with a warning (Highcharts drops the
+points it cannot place, quietly misrepresenting the data).
+
+**The reference line is a fixed value.** One number, drawn as a horizontal line on the Y axis.
+Rejected: a computed mean or median, because "the mean of which series" has no single answer once
+two Y columns are selected. Its colour aliases an existing chrome colour; no new colour is invented.

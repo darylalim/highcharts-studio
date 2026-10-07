@@ -108,7 +108,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | done (0.21.0) |
 | 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | done (0.21.1) |
 | 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | done (0.22.0) |
-| 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
+| 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | done (0.23.0) |
 | 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
 | 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
 | 12th | 2 | [Export as Python](#2-export-as-python) | S | planned |
@@ -191,52 +191,13 @@ stacked total means something. Its rationale is in
 
 ### 5. Style controls
 
-- **What & why:** This is the feature that makes the app an editor. Controls for: Y-axis
-  title, X-axis title, legend on/off and position, data labels on/off, stacking
-  (`normal`/`percent`) for column/bar/area, a logarithmic Y, and a reference line (from #6).
-- **Step zero, a decision:** pass all of these as **one** frozen, hashable `ChartStyle`
-  dataclass under a single `style=` kwarg, not one kwarg each. As separate kwargs, every
-  control costs a change to each renderer cache wrapper and its call site (two since
-  [#13](#13-client-side-export) retired the PNG one; the kwarg rule in `CLAUDE.md`);
-  as one object, the wrappers change once, `_FORWARDED` derives the new name on its own,
-  and each later control is one field plus one widget. Write this up in `decisions.md`
-  *before* the code, since every future control inherits it.
-- **Scope: Tier 1 first.** The controls ship for the [Tier 1](#chart-tiers) types and are
-  **hidden** for every other type; Tier 2 types gain them one control at a time, where the
-  control means something for that type. A pure `style_controls_for(chart_type)` in the
-  builder answers which controls a type takes, so the sidebar and the tests read one table.
-- **Requirement: hiding a control must not lose its value.** Streamlit drops the stored
-  value of any keyed widget a run does not draw. So: set a Y-axis title on a line chart,
-  switch to pie (the control is hidden), switch back, and the title is **gone**. That breaks
-  `CLAUDE.md`'s rule that a value may be dropped when it stops being *valid*, never when it
-  merely stops being *drawn*. Add the style controls' keys to `_KEYED_PICKERS` so
-  `keep_picker_state()` keeps them, and add an AppTest that sets a style, switches to a type
-  that hides it and back, and asserts it survived. Verify by breaking it (drop the keys from
-  `_KEYED_PICKERS`).
-- **Touches:** `highcharts_builder.py` (`ChartStyle`, applied in or beside `_themed`, plus
-  `style_controls_for`), the sidebar's Chart section, `_KEYED_PICKERS`, the renderer
-  wrappers (once; two of them since [#13](#13-client-side-export) retired the PNG one), the
-  kwarg docs in `CLAUDE.md`, and `README.md`'s description of the controls.
-- **Decided:**
-  - **`style` is not a column kwarg.** It is a setting, like the gauge family's `agg` and
-    `dial`, so it gets no row in `CLAUDE.md`'s kwarg table. The tests settle this
-    mechanically: they define the column kwargs as `_FORWARDED` minus `("agg", "dial")`, so
-    an unexcluded `style` would be counted as a **tenth column kwarg** and fail the docs-count
-    tests. Add it to that exclusion, and update `CLAUDE.md`'s line about the gauge family
-    taking "the two that are **not** column names" (it becomes three, and no longer
-    gauge-only).
-  - **Style values go into the exports** ([#15](#15-embeddable-outputs-html-js-json),
-    [#2](#2-export-as-python)), since they are part of the chart.
-  - **Log scale with values ≤ 0: disable, with the reason.** A log axis cannot show zero or
-    negative values, so when the selected Y data has any, the log toggle stays visible but
-    **disabled**, with help text saying why ("Y has values ≤ 0"), and re-enables when the
-    data allows. Settled 2026-10-07. Rejected: hiding it (the user is not told why, and the
-    value needs `_KEYED_PICKERS` to survive) and allowing it with a warning (the chart drops
-    the points it cannot show, quietly misrepresenting the data). A disabled widget is still
-    drawn, so it keeps its value with no extra code; the builder must still refuse a log
-    axis on such data, so a stale `True` can never reach the chart. Test both: the AppTest
-    sees the toggle disabled, and the builder ignores or rejects `log=True` on data ≤ 0.
-- **Size:** M · **Status:** planned
+Done in 0.23.0: `ChartStyle` and `style_controls_for` in `highcharts_builder.py`, and the sidebar's
+Style section, for the Tier 1 types. Settled with the user before the code: log scale is disabled
+while stacked as well as for Y ≤ 0, the reference line is a fixed value, and pie gets no controls
+this pass. Found by rendering and fixed: percent stacking now labels its axis with `%`, and the
+reference line's label is nudged inside the plot. The design and its reasons:
+[`decisions.md`](decisions.md#style-one-object-not-one-kwarg-per-control). Still open, for Tier 2:
+which controls each type should gain, one at a time.
 
 ### 17. Group the chart-type picker by family
 
@@ -450,10 +411,9 @@ Settled on 2026-10-07:
 
 ### 6. Reference line
 
-Folded into [#5](#5-style-controls) as one more `ChartStyle` field: a horizontal line at a
-typed value via `yAxis.plotLines`, for cartesian and polar types. Its colour must alias an
-existing palette or chrome colour (no new colours). The open question carries over: should
-it be a fixed value, or computed (mean/median)? A fixed value is the lightweight answer.
+Folded into [#5](#5-style-controls) and shipped with it in 0.23.0 as `ChartStyle.reference_line`:
+a fixed typed value (decided over mean/median, since "the mean of which series" has no single
+answer once two Y columns are selected), drawn dashed in the chrome's text colour.
 
 ### 1. Download the chart as HTML
 

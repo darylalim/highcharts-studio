@@ -250,9 +250,16 @@ so a tenth kwarg would fail them; all three stayed green through that change, **
 | `width_col` | Width | variwide (the mark's **other dimension**) |
 | `after_col` | After | dumbbell (the same quantity **later** — the one ORDERED pair) |
 
-The gauge family (`solidgauge`, `gauge`) takes the two that are **not** column names:
-`agg=` (one of `GAUGE_AGGREGATIONS`) and `dial=` an explicit `(min, max)`, derived from
-the **readings** by `gauge_dial` when `None`. It is why `x_col` is `str | None` on every
+Three kwargs are **settings**, not column names, so none has a row in the table above (the
+tests exclude them by name, in `_SETTING_KWARGS`). The gauge family (`solidgauge`, `gauge`)
+takes two of them: `agg=` (one of `GAUGE_AGGREGATIONS`) and `dial=` an explicit `(min, max)`,
+derived from the **readings** by `gauge_dial` when `None`. The third is `style=`, one frozen
+`ChartStyle` carrying the sidebar's style controls (axis titles, legend, data labels, stacking,
+log Y, a reference line); a type takes only the fields `style_controls_for` lists, and the
+builder ignores the rest. One object rather than one kwarg per control, so a new control is a
+field and a widget, not a new kwarg
+([why](docs/decisions.md#style-one-object-not-one-kwarg-per-control)). The gauge family is why
+`x_col` is `str | None` on every
 builder signature — the family has no label channel, so every *other* type raises when
 `x_col` is omitted. The two **unweighted node-link types** (`networkgraph`,
 `organization`) are its mirror, taking an **empty** `y_cols`.
@@ -397,13 +404,14 @@ Why static, and why that test clears the caches on the way *out*:
 **Widget identity** is pinned the same way, and for the same reason — nothing else would
 notice its removal. Streamlit folds every command kwarg into a *keyless* widget's element id,
 the **label included**, so the X and Y pickers (whose labels vary by chart type while their
-options do not) carry a `key=` and would silently reset without one. Five AppTests hold that
+options do not) carry a `key=` and would silently reset without one. Five picker AppTests hold that
 down, over **three distinct failure modes**: two that a selection survives a label-only
 chart-type switch (X, and Y) — re-minting; one that a Dataset switch **reconciles** a stale Y
 instead of landing on the empty-Y guard — filtering; and **two** that a stop *above* the pickers
 does not forget them — **garbage collection**, which a `key=` alone cannot fix, since Streamlit
 drops the stored value of any keyed widget a run never instantiates.
-`keep_picker_state()` (naming the three keys in `_KEYED_PICKERS`) re-assigns each entry to
+`keep_picker_state()` (naming the keys in `_KEYED_PICKERS`: the X and Y pickers' and the
+style controls') re-assigns each entry to
 itself in front of such a stop, which is the documented opt-out; it reads like a no-op and is
 not one. The fifth test adds **no fourth mode** — it is garbage collection again, reached through
 the *other* early stop (backing out of an upload that was never made), because the mode belongs to
@@ -415,6 +423,15 @@ separates a correct loss from a bug: a selection may be dropped when it stopped 
 (the widget reconciles it), never when it merely stopped being **rendered**. Verify any change
 here by breaking it; all five mutations are one-liners (the last two: delete either
 `keep_picker_state()` call).
+
+The **style controls** meet garbage collection twice, and each has its own AppTest. A stop above
+them is the pickers' case, closed by listing their keys in `_KEYED_PICKERS`. The new one is a
+control the chart type simply **hides** (pie draws none): no stop is involved, so
+`keep_hidden_style_state()` re-assigns only the hidden keys on every run. Only the hidden ones,
+because re-assigning a key whose widget is drawn later in the same run counts as setting it
+through the Session State API. The widgets use their natural defaults (empty, off, the first
+option) for the same reason: Streamlit only objects to an explicit default on a widget whose
+value was set through the API, and those defaults never count as explicit.
 
 ## Lint & format
 
