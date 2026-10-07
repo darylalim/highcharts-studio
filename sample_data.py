@@ -80,7 +80,13 @@ def _country_economics() -> pd.DataFrame:
     Gapminder-style bubble where the marker area carries a third dimension.
     Tailored to bubble: a numeric GDP (X) and life-expectancy (Y) pair plus a
     population column whose wide range (tens to ~1,400 millions) makes the size
-    encoding legible."""
+    encoding legible.
+
+    The countries are real and the figures are ILLUSTRATIVE: roughly 2022–23, mixed across
+    years and sources rather than one dataset (US and Japan GDP per capita sit near the World
+    Bank's 2022 values; India's 1,428 million is the UN's 2023 population estimate). Hence the
+    "~2023" in its ``SAMPLES`` label: once a chart can be copied onto another page, its numbers
+    travel with it, and undated they read as current."""
     return pd.DataFrame(
         {
             "country": [
@@ -147,7 +153,13 @@ def _company_market_cap() -> pd.DataFrame:
     ~10-way split stays readable where a 10-slice pie would be a cluttered ring.
     Tailored to treemap: a single label column (company) + one numeric value
     column (market_cap_b) whose wide range makes the nested-rectangle sizing
-    legible."""
+    legible.
+
+    The companies are real and the figures are ILLUSTRATIVE, in $ billions: they match the
+    market caps of about October 2024 (Apple ~3.5T, Microsoft and Nvidia ~3.1T, Alphabet ~2.1T),
+    rounded and not tracked since. Hence the "~2024" in its ``SAMPLES`` label, placed OUTSIDE
+    the parentheses: every label ends with its ``(type)``, and the tests' ``_pick_sample`` finds a
+    sample by that exact substring. No helper picks this one today, but one added later would."""
     return pd.DataFrame(
         {
             "company": [
@@ -1086,10 +1098,10 @@ SAMPLES = {
     "Fruit sales (pie/bar/column)": _fruit_sales,
     "Height vs weight (scatter)": _height_vs_weight,
     "Daily temperature (areaspline)": _daily_temperature,
-    "Country economics (bubble)": _country_economics,
+    "Country economics, ~2023 (bubble)": _country_economics,
     "Product ratings (radar)": _product_ratings,
     "Website activity by weekday (heatmap)": _weekly_activity,
-    "Company market cap (treemap)": _company_market_cap,
+    "Company market cap, ~2024 (treemap)": _company_market_cap,
     "Marketing conversion funnel (funnel)": _conversion_funnel,
     "Customer loyalty pyramid (pyramid)": _loyalty_pyramid,
     "Energy flow (sankey)": _energy_flow,

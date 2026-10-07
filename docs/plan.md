@@ -104,7 +104,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 2nd | 22 | [Large datasets (re-scoped: the networkgraph freeze)](#22-large-datasets) | S | done (0.20.3) |
 | 3rd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | done (0.20.4) |
 | 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | done (0.20.5) |
-| 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
+| 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | done (0.20.6) |
 | 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
 | 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | planned |
 | 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
@@ -242,26 +242,11 @@ The reasoning and the upgrade procedure:
 
 ### 19. Date the real-world samples
 
-- **What & why:** 24 of the 26 samples are plainly invented. Two carry **real names with
-  undated figures**:
-  - *Company market cap (treemap)*: Apple 3400, Microsoft 3100, Nvidia 2900… in $ billions;
-  - *Country economics (bubble)*: GDP per capita, life expectancy and population for real
-    countries (they look like 2022–23 figures).
-
-  Inside the app that is harmless, but once a chart can be copied onto another page
-  ([#15](#15-embeddable-outputs-html-js-json)), its numbers travel with it and can be
-  published as if current. Keep the familiar names (they are what makes the two charts
-  readable) and say what the figures are: illustrative, and roughly when.
-- **Touches:** `sample_data.py` (the two `SAMPLES` labels and docstrings), and any doc that
-  names them.
-- **Constraint:** the date goes **outside** the parentheses, e.g.
-  *Company market cap, ~2024 (treemap)*. The test helper `_pick_sample` finds a type's
-  sample by the exact substring `"(treemap)"`, so *(treemap, illustrative ~2024)* would
-  break every test that uses it.
-- **Check when building:** which year to state for each. Read the figures against a source
-  once and write the year they match. "Illustrative" goes in the docstring rather than the
-  label, which is narrow.
-- **Size:** S · **Status:** planned
+Done in 0.20.6: *Company market cap, ~2024 (treemap)* and *Country economics, ~2023 (bubble)*,
+with what the figures are (illustrative, and when) in each docstring in `sample_data.py`. Checked
+against sources: the market caps match about October 2024; the country figures are a 2022–23
+mix. The parentheses constraint turned out to protect nothing yet (no `_pick_*` helper picks
+either sample), but the format keeps every label ending in its `(type)` for the day one does.
 
 ### 18. A stackable sample
 
