@@ -5552,6 +5552,23 @@ def _order_script_tags(script_tags: str) -> str:
     return "\n".join(lines)
 
 
+def _escape_for_script_element(js: str) -> str:
+    """Make ``js`` safe to place inside a ``<script>`` element without changing what it means.
+
+    The HTML parser ends a script element at the first ``</script`` it sees (case-insensitive),
+    **even inside a JS string**, and a ``<!--`` can switch it into a mode where a later
+    ``<script`` hides the real close. Both arrive in user text — a CSV label, a column name, the
+    chart title — so ``</script><b>x</b>`` in a label used to cut the chart's script short.
+
+    Replaces every ``</`` with ``<\\/`` and every ``<!--`` with ``<\\!--``. Inside a JS string
+    ``\\/`` IS ``/`` and ``\\!`` IS ``!``, so the text the chart draws is byte-for-byte what the
+    user typed: this is an encoding of it, not an edit. It is safe only because every ``</`` and
+    ``<!--`` in ``to_js_literal`` output sits inside a string — the builder emits data, never a
+    JS function — and matching on ``</`` alone covers ``</SCRIPT`` and every other case for free.
+    """
+    return js.replace("</", "<\\/").replace("<!--", "<\\!--")
+
+
 def build_chart_html(
     df: pd.DataFrame,
     chart_type: str,
@@ -5623,7 +5640,12 @@ def build_chart_html(
     script_tags = _order_script_tags(
         chart.get_script_tags(as_str=True)  # ty: ignore[invalid-argument-type]
     )
-    chart_js = chart.to_js_literal()
+    # Escaped because user text (labels, column names, the title) sits inside JS strings here, and
+    # a `</script>` in any of them would end the element early. to_js_literal is stubbed
+    # `str | None`; the chart always has options, so it is a str (the module's ty notes).
+    chart_js = _escape_for_script_element(
+        chart.to_js_literal()  # ty: ignore[invalid-argument-type]
+    )
     # Match the iframe body to the chart's own background so there's no light
     # flash at the edges (or during load) when the app is in dark mode.
     body_bg = _DARK_CHROME["bg"]

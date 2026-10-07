@@ -33,6 +33,21 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.20.2] - 2026-10-07
+
+A fix with no new behaviour, so a patch.
+
+### Fixed
+
+- **User text could close the chart's `<script>` element.** A label, column name or title
+  containing `</script>` ended the interactive chart's script early, so the chart did not draw.
+  `build_chart_html` now writes every `</` as `<\/` and every `<!--` as `<\!--` before embedding
+  the JS. Inside a JS string these mean the same characters, so the text the chart receives is
+  unchanged. Swept over every supported type by
+  `test_user_text_cannot_close_the_charts_script_element`. Why the escape is safe, and what
+  rendering showed about how Highcharts displays markup in labels:
+  [`docs/decisions.md`](docs/decisions.md#script-in-user-text-an-encoding-not-an-edit).
+
 ## [0.20.1] - 2026-10-07
 
 Dependency upgrade, no change to the app's behaviour, so a patch. The floors in
