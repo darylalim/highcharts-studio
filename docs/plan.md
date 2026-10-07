@@ -43,6 +43,30 @@ the PNG into the browser ([#13](#13-client-side-export)) is small and planned. R
 whole app in the browser with no server ([#14](#14-spike-run-the-app-in-the-browser-stlite))
 is large and waits on a spike, because its first-load download clashes with "lightweight".
 
+### Chart tiers
+
+How well each of the 30 types fits the three directions above: whether the style controls
+in [#5](#5-style-controls) do something to it (editor), how many extra Highcharts modules it
+loads (embeddable, client side; resolved from `get_script_tags` on 2026-10-07), and whether
+an ordinary "category + numbers" CSV drives it. **No type is removed**: every one works and
+is tested, and the freeze in [#10](#10-new-chart-types) already stops growth. The tiers decide
+**where effort goes first**.
+
+| Tier | Types | Extra modules | Why |
+|---|---|---|---|
+| **1 · Core** | line, spline, area, areaspline, column, bar, pie, scatter | 0 | Every style control applies (pie: those without axes). The simplest embed. Any category + numbers CSV. |
+| | bubble, radar | 1 (`highcharts-more`) | Still plain CSV columns; most controls apply. |
+| **2 · Good fit** | heatmap, treemap, funnel, pyramid, boxplot, waterfall, columnrange, arearange, bullet, dumbbell | 1 each (dumbbell 2) | Common in business use and CSV-friendly, but each answers one question (a profit bridge, a distribution, actual vs target), so only some controls apply. |
+| **3 · Weak fit** | sankey, dependencywheel, networkgraph, organization | 1–2 | Node-link data (source → target name columns); layout is automatic, so almost no control applies. |
+| | sunburst | 1 | Needs parent/child data, which few CSVs carry. |
+| | xrange, timeline | 1 | Need date-coordinate columns: planning charts, outside the typical editor use. |
+| | variwide | 1 | Niche: bar width is a second value. |
+| | gauge, solidgauge | 1 | A single-number widget rather than a chart, with controls (aggregation, dial) no other type uses. |
+
+The tiers line up with the extra-column kwargs: most Tier 3 types are the ones that needed a
+target, parent, end, title or width column, or the gauge's own controls. A type that needs
+extra column roles is a type whose data does not come in an ordinary CSV shape.
+
 ## Legend
 
 **Status:** `idea` → `planned` → `in progress` → `done`; or `deferred` (fine, not now),
@@ -63,9 +87,10 @@ In build order. Numbers are stable IDs, not priorities.
 | 1st | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
 | 2nd | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
 | 3rd | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
-| 4th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
-| 5th | 2 | [Export as Python](#2-export-as-python) | S | planned |
-| 6th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
+| 4th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
+| 5th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
+| 6th | 2 | [Export as Python](#2-export-as-python) | S | planned |
+| 7th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
@@ -148,19 +173,82 @@ In build order. Numbers are stable IDs, not priorities.
   as one object, the wrappers change once, `_FORWARDED` derives the new name on its own,
   and each later control is one field plus one widget. Write this up in `decisions.md`
   *before* the code, since every future control inherits it.
-- **Touches:** `highcharts_builder.py` (`ChartStyle`, applied in or beside `_themed`), the
-  sidebar's Chart section, the three renderer wrappers (once), the kwarg docs in
+- **Scope: Tier 1 first.** The controls ship for the [Tier 1](#chart-tiers) types and are
+  **hidden** for every other type; Tier 2 types gain them one control at a time, where the
+  control means something for that type. A pure `style_controls_for(chart_type)` in the
+  builder answers which controls a type takes, so the sidebar and the tests read one table.
+- **Touches:** `highcharts_builder.py` (`ChartStyle`, applied in or beside `_themed`, plus
+  `style_controls_for`), the sidebar's Chart section, the renderer wrappers (once; two of
+  them after [#13](#13-client-side-export) retires the PNG one), the kwarg docs in
   `CLAUDE.md`.
 - **Open questions:**
-  - Which types each control applies to. Stacking means nothing to a pie, and log scale
-    cannot show zero or negative values. Should an inapplicable control be hidden, or shown
-    disabled?
+  - Per control within Tier 1: stacking means nothing to a pie or scatter, and log scale
+    cannot show zero or negative values (hide the control, or warn when the data has them?).
   - Does `ChartStyle` count as a tenth row in the kwarg table, or as the gauge family's kind
     of non-column kwarg? The docs-count tests read the builders' signatures, so they will
     ask.
-  - Do the style values go into the generated config/export (#2)? They should, since they
-    are part of the chart.
+  - Do the style values go into the exports ([#15](#15-embeddable-outputs-html-js-json),
+    [#2](#2-export-as-python))? They should, since they are part of the chart.
 - **Size:** M · **Status:** planned
+
+### 17. Group the chart-type picker by family
+
+- **What & why:** A selectbox of 30 types makes the app look heavier than it is. A
+  two-step picker (a **family**, then the **type** within it) shows the common charts first
+  without removing any. Six families, every type in exactly one, each family's most common
+  type first:
+
+  | Family | Types |
+  |---|---|
+  | Basic | line, spline, area, areaspline, column, bar, scatter, bubble, radar |
+  | Part of whole | pie, treemap, funnel, pyramid |
+  | Comparison | waterfall, bullet, dumbbell, columnrange, arearange, heatmap, boxplot, variwide |
+  | Flow & hierarchy | sankey, dependencywheel, networkgraph, organization, sunburst |
+  | Time | xrange, timeline |
+  | Gauge | gauge, solidgauge |
+
+  The app opens on Basic → line, as today.
+- **Why after #5:** both need a per-type table in the builder (`style_controls_for`, and
+  the family map here), so the second one copies the pattern the first one set.
+- **Touches:** `highcharts_builder.py` (a `CHART_FAMILIES` map, pure), `streamlit_app.py`
+  (the family pills above the chart-type selectbox, and its help text), the AppTests that
+  switch chart type, and `CLAUDE.md`'s description of the selector.
+- **Tests:**
+  - Every supported type is in **exactly one** family, so a future type cannot be left
+    unreachable (the same safeguard as the docs-count tests).
+  - One `_select_chart_type(app, chart_type)` helper sets the family and then the type, and
+    every AppTest that switches type uses it (the `_pick_sample` pattern), so the family step
+    is one change rather than one per test.
+  - The keyed-picker AppTests must still pass: a family change is a type change, and the X
+    and Y pickers must keep their values through it (the widget-identity rules in
+    `CLAUDE.md`'s Test section). Verify by breaking it.
+- **Decisions:** see [below](#decisions-for-17).
+- **Size:** M · **Status:** planned
+
+#### Decisions for #17
+
+Settled on 2026-10-07:
+
+- **Family control: `st.pills`, single select.** One click, it wraps in the narrow sidebar,
+  and the app already uses pills for the Y picker. Not `st.segmented_control` (the app uses
+  it for two-option choices; six segments crowd the sidebar), and not a selectbox (two
+  dropdowns in a row, and a new selectbox above the type selector would shift the 39
+  positional `app.selectbox[n]` lookups in the tests). **Check when building:** whether
+  `st.pills` takes `required=True` as `segmented_control` does here; if not, handle the
+  deselected (`None`) case so the control can never show empty while a chart renders.
+- **On a family change, select the family's first type.** This needs no code: the
+  chart-type selectbox has no `key=`, so when its options change Streamlit gives it a new
+  identity and it resets to the first option. Remembering the last pick per family was
+  rejected: it needs new session state that `keep_picker_state()` would also have to cover,
+  against the lightweight direction. That is why each family lists its most common type
+  first.
+- **Six families, not seven.** Heatmap colours a grid of categories by value, which is a
+  comparison rather than a distribution; moving it would leave a *Distribution* family with
+  only boxplot, so the two merge into *Comparison*. If the freeze in
+  [#10](#10-new-chart-types) lifts and `histogram` arrives, *Distribution* can return with
+  two members.
+- **Help text per family.** The chart-type selectbox's help is one tooltip with 30 bullets
+  today; it shows only the selected family's entries instead.
 
 ### 15. Embeddable outputs: HTML, JS, JSON
 
