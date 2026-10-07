@@ -54,7 +54,7 @@ is tested, and the freeze in [#10](#10-new-chart-types) already stops growth. Th
 
 | Tier | Types | Extra modules | Why |
 |---|---|---|---|
-| **1 · Core** | line, spline, area, areaspline, column, bar, pie, scatter | 0 | Every style control applies (pie: those without axes). The simplest embed. Any category + numbers CSV. |
+| **1 · Core** | line, spline, area, areaspline, column, bar, pie, scatter | 0 | Where the style controls apply most (each control still applies per type: no stacking for pie or scatter, no axes for pie). The simplest embed. Any category + numbers CSV. |
 | | bubble, radar | 1 (`highcharts-more`) | Still plain CSV columns; most controls apply. |
 | **2 · Good fit** | heatmap, treemap, funnel, pyramid, boxplot, waterfall, columnrange, arearange, bullet, dumbbell | 1 each (dumbbell 2) | Common in business use and CSV-friendly, but each answers one question (a profit bridge, a distribution, actual vs target), so only some controls apply. |
 | **3 · Weak fit** | sankey, dependencywheel, networkgraph, organization | 1–2 | Node-link data (source → target name columns); layout is automatic, so almost no control applies. |
@@ -78,21 +78,32 @@ the entry here to one line pointing there.
 **Size:** S = an afternoon, no new builder kwarg · M = a new kwarg or a new module ·
 L = changes how the app is structured.
 
+**Shipping.** Each planned item is one branch and one release: bump `version` in
+`pyproject.toml`, add the `CHANGELOG.md` section, and commit the `uv.lock` line uv rewrites
+(step 9 of [Adding a chart type](../CLAUDE.md#adding-a-chart-type) applies to every item, not
+only new types). A fix with no new behaviour is a **patch** bump; a feature is a **minor**
+bump. While the version is below 1.0, a change that removes public API is also a minor bump,
+but its changelog section says **Removed** and names what went, since the builder is
+importable on its own ([#13](#13-client-side-export) is the one planned item that does
+this). Items may share a release only when they cannot be shipped usefully apart, and the
+entry says so.
+
 ## Contents
 
 In build order. Numbers are stable IDs, not priorities.
 
 | Order | # | Feature | Size | Status |
 |---|---|---|---|---|
-| 1st | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
-| 2nd | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
-| 3rd | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
-| 4th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
-| 5th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
-| 6th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
-| 7th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
-| 8th | 2 | [Export as Python](#2-export-as-python) | S | planned |
-| 9th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
+| 1st | 20 | [Escape `</script>` in the chart's JS](#20-escape-script-in-the-charts-js) | S | planned |
+| 2nd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
+| 3rd | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
+| 4th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
+| 5th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
+| 6th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
+| 7th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
+| 8th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
+| 9th | 2 | [Export as Python](#2-export-as-python) | S | planned |
+| 10th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
@@ -107,6 +118,36 @@ In build order. Numbers are stable IDs, not priorities.
 ---
 
 ## Planned
+
+### 20. Escape `</script>` in the chart's JS
+
+- **What & why:** A **bug today**. `build_chart_html` puts the chart's JS inside a
+  `<script>` element, and the HTML parser ends that element at the first `</script>` it
+  sees, **even inside a JS string**. So a CSV label such as `</script><b>x</b>` closes the
+  chart's script early: checked on 2026-10-07, the page came out with 3 `</script>` tags
+  where 2 belong. Inside the app's sandboxed iframe that breaks the chart, and the only
+  person who can be targeted is the one who uploaded the CSV. Once
+  [#15](#15-embeddable-outputs-html-js-json) puts the same output on other people's pages,
+  it is a script-injection hole on those pages, so it is fixed **first**.
+- **Fix:** before the JS goes into the `<script>` element, replace every `</` with `<\/`
+  and every `<!--` with `<\!--`. Inside a JS string, `\/` *is* `/` and `\!` *is* `!`, so the
+  text the chart draws is unchanged: this is an encoding of what the user typed, not an edit
+  of it. Every `</` the builder emits is inside a string (the `<b>…</b>` tooltip formats
+  included), so the replacement cannot touch code. It covers `</SCRIPT` and other cases
+  for free, because it matches on `</` alone.
+- **Touches:** `build_chart_html` (one helper applied to the JS before it is embedded),
+  tests, `docs/decisions.md` (one entry: why the escape is safe, and why it is not "editing
+  what the user typed").
+- **Tests:** a sweep over every supported type with a `</script>` label (and an
+  `<!--` one) asserting the document has exactly as many `</script>` tags as `<script>`
+  elements, plus one `esprima.parseScript` check that the escaped JS still parses (`esprima`
+  is already installed with `highcharts-core`). Verify by breaking it: remove the helper
+  and confirm the sweep fails. **Verify by rendering:** the label shows as literal text.
+- **Known limit:** a label that also starts with `Date` hits the library's
+  [unquoted-string bug](decisions.md#the-strings-highcharts-core-emits-unquoted) first; it
+  is emitted as code, not as a string, and is broken before this fix applies. #15's
+  JSON-built JS has neither problem.
+- **Size:** S · **Status:** planned
 
 ### 12. Pin the runtime dependency set
 
@@ -162,6 +203,8 @@ In build order. Numbers are stable IDs, not priorities.
     remote service quietly comes back.
   - Keep a server-side PNG option for users who can't run JS? No: the lightweight answer is
     to retire it entirely.
+- **Shipping:** removes public API (`build_chart_png`, `explain_export_failure`), so its
+  changelog section has a **Removed** heading naming both (see Shipping in the Legend).
 - **Size:** S–M (mostly deletion, plus a render check) · **Status:** planned
 
 ### 19. Date the real-world samples
@@ -220,7 +263,8 @@ In build order. Numbers are stable IDs, not priorities.
   (`normal`/`percent`) for column/bar/area, a logarithmic Y, and a reference line (from #6).
 - **Step zero, a decision:** pass all of these as **one** frozen, hashable `ChartStyle`
   dataclass under a single `style=` kwarg, not one kwarg each. As separate kwargs, every
-  control costs three cache wrappers and three call sites (the kwarg rule in `CLAUDE.md`);
+  control costs a change to each renderer cache wrapper and its call site (three today, two
+  after [#13](#13-client-side-export); the kwarg rule in `CLAUDE.md`);
   as one object, the wrappers change once, `_FORWARDED` derives the new name on its own,
   and each later control is one field plus one widget. Write this up in `decisions.md`
   *before* the code, since every future control inherits it.
@@ -228,10 +272,18 @@ In build order. Numbers are stable IDs, not priorities.
   **hidden** for every other type; Tier 2 types gain them one control at a time, where the
   control means something for that type. A pure `style_controls_for(chart_type)` in the
   builder answers which controls a type takes, so the sidebar and the tests read one table.
+- **Requirement: hiding a control must not lose its value.** Streamlit drops the stored
+  value of any keyed widget a run does not draw. So: set a Y-axis title on a line chart,
+  switch to pie (the control is hidden), switch back, and the title is **gone**. That breaks
+  `CLAUDE.md`'s rule that a value may be dropped when it stops being *valid*, never when it
+  merely stops being *drawn*. Add the style controls' keys to `_KEYED_PICKERS` so
+  `keep_picker_state()` keeps them, and add an AppTest that sets a style, switches to a type
+  that hides it and back, and asserts it survived. Verify by breaking it (drop the keys from
+  `_KEYED_PICKERS`).
 - **Touches:** `highcharts_builder.py` (`ChartStyle`, applied in or beside `_themed`, plus
-  `style_controls_for`), the sidebar's Chart section, the renderer wrappers (once; two of
-  them after [#13](#13-client-side-export) retires the PNG one), the kwarg docs in
-  `CLAUDE.md`.
+  `style_controls_for`), the sidebar's Chart section, `_KEYED_PICKERS`, the renderer
+  wrappers (once; two of them after [#13](#13-client-side-export) retires the PNG one), the
+  kwarg docs in `CLAUDE.md`, and `README.md`'s description of the controls.
 - **Open questions:**
   - Per control within Tier 1: stacking means nothing to a pie or scatter, and log scale
     cannot show zero or negative values (hide the control, or warn when the data has them?).
@@ -263,7 +315,7 @@ In build order. Numbers are stable IDs, not priorities.
   the family map here), so the second one copies the pattern the first one set.
 - **Touches:** `highcharts_builder.py` (a `CHART_FAMILIES` map, pure), `streamlit_app.py`
   (the family pills above the chart-type selectbox, and its help text), the AppTests that
-  switch chart type, and `CLAUDE.md`'s description of the selector.
+  switch chart type, `CLAUDE.md`'s description of the selector, and `README.md`'s.
 - **Tests:**
   - Every supported type is in **exactly one** family, so a future type cannot be left
     unreachable (the same safeguard as the docs-count tests).
@@ -325,7 +377,10 @@ Settled on 2026-10-07:
 - **Design:**
   1. **JSON is the canonical output.** A pure `build_chart_json(...)` serializes the
      options with `EnforcedNull` written as `null` and `allow_nan=False`, so a bare `inf` or
-     `NaN` raises instead of shipping.
+     `NaN` raises instead of shipping. It also writes `<`, `>` and `&` as `\u003c`,
+     `\u003e` and `\u0026`: still valid JSON with the same values, and it can never close a
+     `<script>` element on the page it is pasted into (the embed form of
+     [#20](#20-escape-script-in-the-charts-js)).
   2. **JS is built from the JSON**, not from `to_js_literal`: `Highcharts.chart(el, <json>)`.
      JSON is valid JavaScript, so this output cannot hit either of the
      [unquoted-string bugs](decisions.md#the-strings-highcharts-core-emits-unquoted). It
@@ -342,14 +397,25 @@ Settled on 2026-10-07:
      toggle: tabs for HTML / JS / JSON / Python ([#2](#2-export-as-python)), each an
      `st.code` block (it has a copy button) plus an `st.download_button`. The panel stays
      behind a toggle so nothing is built until asked, the reason the current toggle exists.
+     It also carries:
+     - a one-line **licence note**: Highcharts is free for non-commercial use, and a
+       commercial site needs its own Highcharts licence. `NOTICE` covers this app, not a
+       user's page;
+     - a **size warning** when the export is large, since the snippet carries every row of
+       data inline (a 50,000-row CSV makes a multi-MB paste).
 - **Touches:** `highcharts_builder.py` (`build_chart_json`, the snippet builder, and
   `build_chart_html` rebuilt on top of them), `streamlit_app.py` (the Export panel and its
   cached wrappers, forwarded by keyword like the renderer wrappers), tests, `CLAUDE.md`
-  (the public API block and the flow diagram).
+  (the public API block and the flow diagram), and `README.md` (the Export panel).
 - **Tests:**
   - A **sweep** over every supported type: the JSON output passes `json.loads`, and the
     row-less and non-finite frames still serialize. Extend the existing sweeps rather than
     writing per-type tests.
+  - The JS output **parses**, for every type: `esprima.parseScript()` (already installed with
+    `highcharts-core`, so no new dependency) proves structure rather than matching text, and
+    catches the whole unquoted-string class by construction.
+  - A `</script>` label stays inside the JSON for every type (the #20 sweep, run on the
+    embed outputs).
   - The unquoted-string sweep's two cases, run against the new JS output, must come out
     **quoted**. The test pinning the library bug in `to_js_literal` stays as it is: the bug
     is still there, only this output no longer goes through it.
@@ -376,6 +442,23 @@ Settled on 2026-10-07:
   options (e.g. `hc-3f9a`), so the same chart always gets the same id; an optional text box
   sets your own to match an existing `<div>`. Two *identical* charts on one page would share
   an id, which is the case the override is for.
+
+Still open:
+
+- **CDN version.** The app loads `https://code.highcharts.com/highcharts.js`, with no
+  version in the URL, so it always gets the latest release (checked 2026-10-07). That is
+  tolerable inside the app, which is redeployed with its tests, but a pasted snippet stays on
+  someone else's page indefinitely, and a new major can change how it looks (Highcharts 13's
+  `light-dark()` defaults already did once). Pin a version in the export URLs
+  (`code.highcharts.com/<version>/…`)? Which one, and the app's own URLs too?
+- **Background colour.** Every chart is drawn on `#0f172a` (dark), because 0.18.0 made dark
+  the only theme. Most host pages are light. Export dark as-is, add an export-only light
+  theme (partly reversing [the light-mode removal](decisions.md#light-mode-and-its-removal)),
+  or export a transparent background?
+- **Accessibility module.** Highcharts recommends `modules/accessibility` (screen-reader
+  support) for public pages and warns in the console without it. Include it in embeds, at
+  the cost of one more module per snippet?
+- **Size warning threshold.** At what size does the Export panel warn?
 
 ### 2. Export as Python
 
