@@ -33,6 +33,26 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.20.3] - 2026-10-07
+
+A fix with no new capability, so a patch.
+
+### Fixed
+
+- **A large networkgraph froze the browser tab.** Its layout runs synchronously at a cost near the
+  square of the node count, so an uploaded edge list of about 1,200 rows hung the page. Past
+  150 distinct nodes the builder now refuses, and the app shows why instead of drawing
+  (`explain_networkgraph_error`, the message `build_options` raises). The limit was measured:
+  0.8s of layout at 140 nodes, 7.4s at 440, and labels already unreadable by 240.
+
+### Notes
+
+- Plan #22 expected the pie, treemap, funnel and pyramid charts to draw **blank** past 1,000 rows
+  (Highcharts' `turboThreshold`). Rendering disproved it: since Highcharts 11.4.4 a series of point
+  objects past the threshold falls back to the slower path and draws. Why, and what that means for
+  pinning the Highcharts version:
+  [`docs/decisions.md`](docs/decisions.md#large-data-the-turbothreshold-bug-that-was-not-there).
+
 ## [0.20.2] - 2026-10-07
 
 A fix with no new behaviour, so a patch.

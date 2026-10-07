@@ -270,6 +270,15 @@ box** on every node hover (verified by rendering). The node-specific `nodeFormat
 is silently dropped (sankey's `nodeFormat` trap, one type over), so the node format cannot be set
 explicitly at all — and Highcharts' OWN default is correct (it prints the node name), the one and
 only way to get it. So the tooltip is left default (`_themed` still paints its box for dark mode).
+It has a **large-data policy**, the only type that refuses on size: past
+`_NETWORKGRAPH_MAX_NODES` (150) distinct drawable nodes `build_options` raises and the app warns
+(through `explain_networkgraph_error`). Measured, not chosen: with the simulation off the layout
+runs synchronously at a cost near the square of the node count (0.8s at 140 nodes, 7.4s at 440),
+so a 1,200-row edge list froze the browser tab, and the labels overprint into a mesh by ~240
+nodes. Highcharts' `barnes-hut` approximation halves the time without changing the curve and
+packs nodes along the edges, so it was rejected. The limit counts **nodes**, not rows, and only
+drawable ones, since a dropped row names no node
+([why the other types need no policy](decisions.md#large-data-the-turbothreshold-bug-that-was-not-there)).
 Pulls in `modules/networkgraph` from `chart.type` alone, and — correcting the common lore —
 *not* `highcharts-more`),
 `organization` (a titled org chart — a reporting hierarchy, and the **fourth** node-link type. Its
@@ -1772,8 +1781,7 @@ not merely the format string that used to hide the absurd number.
   counterpart — the builder owns the hierarchy, so it owns the diagnosis — which returns
   the very message `build_options` raises for a malformed tree, so the app's warning and
   the exception it stands in for cannot drift apart (needed because the interactive path
-  does *not* catch builder errors, and a cyclic CSV is the one such error a user can reach
-  just by uploading a file), `explain_xrange_error()`, the same contract for a *column
+  does *not* catch builder errors, and a cyclic CSV reaches one just by uploading a file), `explain_xrange_error()`, the same contract for a *column
   pair* rather than a tree. It reports two contradictions — a start/end column that can place a
   bar on no axis, and two that disagree about *which* axis — of which only the **second** is
   reachable from the app, since `coordinate_columns` keeps a column of task names out of the
@@ -1782,7 +1790,7 @@ not merely the format string that used to hide the absurd number.
   Then `explain_gauge_error()`, the third of that family and the first that reads **no frame
   at all** — a dial whose maximum does not sit above its minimum is a contradiction about two
   numbers the user typed, not about a column or a tree, and it is reachable from the app because
-  the two number inputs accept any two numbers. `bullet` adds **no fourth**, and its absence is
+  the two number inputs accept any two numbers. `bullet` adds **none**, and its absence is
   worth stating rather than noticing: the family exists for contradictions that have *no right
   drawing*, and a bullet has none. A row missing its goal, one missing its measure, one missing
   both, and one whose measure falls far under its goal all have a correct picture (a bare bar, a
@@ -1791,13 +1799,18 @@ not merely the format string that used to hide the absurd number.
   whole-axis lie. So nothing is dropped, nothing raises, and there is no `explain_bullet_error` to
   write. Its one guard (`measure == goal`) is a *column*-level collision, not a contradiction the
   data states.
-  `timeline` adds no fourth either, and its route there is the **opposite** of bullet's, which is
+  `timeline` adds none either, and its route there is the **opposite** of bullet's, which is
   what makes the pair worth reading together: bullet has no contradiction to explain, while a
   timeline **has** one (`_TIMELINE_NOT_A_DATE`, which `build_options` really does raise) and has
   made it **unreachable** from the app instead, by narrowing the picker that feeds it. Two ways to
   not need an `explain_*`, and the second is the better one wherever it is available: a
   contradiction the UI cannot express costs no message, no warning, no test of the message, and
   cannot drift from the error it stands in for — because there is nothing to drift.
+  `explain_networkgraph_error()` is the fourth, and it widens what the family is for: the
+  other three explain a **contradiction** with no right drawing, while this one explains a
+  **size** — an edge list past `_NETWORKGRAPH_MAX_NODES` has a right drawing in principle, but
+  not one the viewer's browser can lay out without freezing. Same contract, reached by an
+  ordinary uploaded CSV, so the app must warn and stop rather than hang.
   Then `coordinate_columns()`, the
   builder's own answer to "which columns can place a bar on an axis" — the can't-drift rule
   applied to *which options appear in a widget*, so a picker cannot offer a column the builder
@@ -2380,10 +2393,11 @@ single-select Y —
 revealing the generated config behind its toggle,
 the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the render-mode selector's two modes, and asserting
-the guard messages — including a *cyclic uploaded CSV*, the one builder error a user
+the guard messages — including a *cyclic uploaded CSV*, a builder error a user
 can reach just by uploading a file, which must warn and stop rather than render a
-traceback, its xrange counterpart, a date start beside a numeric end, and its gauge
-counterpart, a dial with no span; and bullet's **Measure == Goal**, which is a different
+traceback, its xrange counterpart, a date start beside a numeric end, its gauge
+counterpart, a dial with no span, and its networkgraph counterpart, an edge list past the
+node limit; and bullet's **Measure == Goal**, which is a different
 animal from those three — not a contradiction the *data* states but a collision of two required
 columns, warned in front of the builder's own `ValueError` (columnrange's double) because the
 interactive path does not catch, and worth a test because it fabricates the chart's central

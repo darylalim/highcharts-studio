@@ -24,6 +24,7 @@ from highcharts_builder import (
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
     MAGNITUDE_RANGE_TYPES,
+    NETWORKGRAPH_TYPES,
     NODE_LINK_TYPES,
     ORGANIZATION_TYPES,
     SUPPORTED_TYPES,
@@ -38,6 +39,7 @@ from highcharts_builder import (
     count_marks,
     explain_export_failure,
     explain_gauge_error,
+    explain_networkgraph_error,
     explain_tree_error,
     explain_xrange_error,
     gauge_dial,
@@ -1286,8 +1288,8 @@ with left.container(border=True, height="stretch"):
         st.stop()
     # And the tree's own contradictions: a cycle, or a parent label naming more than one node.
     # Neither is missing data (that is dropped, silently and correctly) and neither has any
-    # right drawing, so build_options RAISES on them — and this is the one builder error a user
-    # can reach just by uploading a CSV. The interactive path doesn't catch, so it has to be
+    # right drawing, so build_options RAISES on them — and a user can reach them just by
+    # uploading a CSV. The interactive path doesn't catch, so it has to be
     # stopped here. The message comes from the builder (explain_tree_error), so this warning
     # cannot drift from the exception it stands in for.
     # (`x_col is not None` is true by construction here — the gauge family are the only types
@@ -1406,6 +1408,19 @@ with left.container(border=True, height="stretch"):
     # from the exception it stands in for.
     if chart_type in GAUGE_TYPES:
         problem = explain_gauge_error(dial)
+        if problem:
+            st.warning(problem, icon=":material/warning:")
+            st.stop()
+    # And a networkgraph past its node limit: the fourth reachable builder error, and the first
+    # that is not a contradiction but a SIZE the layout cannot take (it would freeze the viewer's
+    # tab), reached by an ordinary uploaded edge list. Stopped for the tree's reason; the message
+    # is the builder's own (explain_networkgraph_error), so it cannot drift from the exception.
+    if (
+        chart_type in NETWORKGRAPH_TYPES
+        and target_col is not None
+        and x_col is not None
+    ):
+        problem = explain_networkgraph_error(df, x_col, target_col)
         if problem:
             st.warning(problem, icon=":material/warning:")
             st.stop()

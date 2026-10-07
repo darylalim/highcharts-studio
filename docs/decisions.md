@@ -26,7 +26,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [Palette: the scale that was a palette by accident](#palette-the-scale-that-was-a-palette-by-accident) ·
 [The strings highcharts-core emits unquoted](#the-strings-highcharts-core-emits-unquoted) ·
 [Tooltip precision: when a channel is a value's only home](#tooltip-precision-when-a-channel-is-a-values-only-home) ·
-[`</script>` in user text: an encoding, not an edit](#script-in-user-text-an-encoding-not-an-edit)
+[`</script>` in user text: an encoding, not an edit](#script-in-user-text-an-encoding-not-an-edit) ·
+[Large data: the turboThreshold bug that was not there](#large-data-the-turbothreshold-bug-that-was-not-there)
 
 ## Packaging: the fact with no second home
 
@@ -715,3 +716,42 @@ not changed here, because changing it means rewriting what the user typed; it ma
 **Known limit:** a label that also *starts* with `Date` hits the library's
 [unquoted-string bug](#the-strings-highcharts-core-emits-unquoted) first: it is emitted as code,
 not as a string, and is broken before this escape applies.
+
+## Large data: the turboThreshold bug that was not there
+
+Plan item #22 started from a reading of Highcharts' `turboThreshold` (default 1,000): past that
+many points a series may hold only numbers or arrays, and a series of point **objects** is
+refused with error #12 and drawn blank. The builder never sets it, and built from a 1,200-row
+frame **11** types emit point objects past the limit: pie, treemap, funnel, pyramid, sankey,
+dependencywheel, networkgraph, organization, sunburst, xrange and timeline. So every one of them
+looked like a silent blank chart waiting for the first big CSV.
+
+**Rendering said otherwise** (2026-10-07, Highcharts 13.1.1 from the CDN). All of them drew every
+point, with no console error, and so did the export server's PNG. The library's own source
+explains it: past the threshold, data that is not numbers or arrays now sets `runTurbo = false`
+and falls back to the ordinary per-point path, and its docs say the refuse-and-blank behaviour
+ended after **11.4.3**. So the premise was true once and is not now. Two consequences:
+
+- **No sweep pins "no series carries more than 1,000 point objects".** It was the plan's test,
+  and it would have pinned a rule nothing enforces: it would have gone green after a fix to a
+  problem that does not exist.
+- **The version decides whether the bug exists,** which is why plan item #21 (pin the Highcharts
+  JS version) must pin **11.4.4 or later**. An older pin would bring the blank charts back for
+  all 11 types at once.
+
+**What rendering found instead** was two real problems, neither of them `turboThreshold`:
+
+- **A networkgraph freezes the tab.** At 1,240 nodes the layout hung the browser outright. The
+  type now refuses past `_NETWORKGRAPH_MAX_NODES` with a message; the measurements and the limit
+  are in [its entry](chart-types.md). It is a **size** limit, which makes
+  `explain_networkgraph_error` the first of the `explain_*` family that explains something other
+  than a contradiction.
+- **A big pie draws but cannot be read.** At 1,200 slices it is a dark disc: the slices are so
+  thin that their borders, painted the background colour, cover most of the fill. That is
+  readability, not breakage, so it was split out as an idea (plan #24, group the tail into
+  "Other") rather than fixed as a bug.
+
+One practical note for the next person who reads Highcharts' source: `code.highcharts.com` answers
+`403 Missing Referer` to a request without a `Referer` header, which is why scripted fetches of it
+fail. The same files are published on npm, so
+`https://cdn.jsdelivr.net/npm/highcharts@<version>/highcharts.src.js` serves the source.
