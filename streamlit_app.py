@@ -46,6 +46,7 @@ from highcharts_builder import (
     gauge_dial,
     log_scale_ok,
     picker_columns,
+    python_snippet,
     style_controls_for,
 )
 from sample_data import SAMPLES
@@ -555,9 +556,14 @@ with st.sidebar:
         required=True,
     )
 
+    # Where the data came from, for the Export panel's Python tab (plan #2): it loads the same
+    # data the same way — a sample by its label, an upload by its file name.
+    data_sample: str | None = None
+    data_csv: str | None = None
     if source == "Sample dataset":
         name = st.selectbox("Dataset", list(SAMPLES))
         df = SAMPLES[name]()
+        data_sample = name
     else:
         uploaded = st.file_uploader("CSV file", type="csv")
         if uploaded is None:
@@ -576,6 +582,7 @@ with st.sidebar:
             )
             st.stop()
         df = load_csv(uploaded)
+        data_csv = uploaded.name
 
     numeric_cols = df.select_dtypes("number").columns.tolist()
     # The columns that can place an xrange bar on an axis: numbers OR dates. A superset of
@@ -1627,8 +1634,8 @@ with left.container(border=True, height="stretch"):
             "Highcharts is free for personal and non-commercial use; a commercial site needs "
             "its own Highcharts licence. This app's licence covers the app, not your page."
         )
-        snippet_tab, page_tab, js_tab, json_tab = st.tabs(
-            ["HTML snippet", "HTML page", "JS", "JSON"]
+        snippet_tab, page_tab, js_tab, json_tab, python_tab = st.tabs(
+            ["HTML snippet", "HTML page", "JS", "JSON", "Python"]
         )
         with snippet_tab:
             st.caption(
@@ -1678,5 +1685,41 @@ with left.container(border=True, height="stretch"):
                 exports.json,
                 file_name=f"{chart_type}-chart.json",
                 mime="application/json",
+                icon=":material/download:",
+            )
+        with python_tab:
+            # Plan #2: the make_chart(...) call that rebuilds this chart, so the app doubles as a
+            # way to learn the API. Built directly, not cached: it needs only the column NAMES,
+            # so there is no frame to hash.
+            snippet = python_snippet(
+                chart_type,
+                x_col,
+                list(y_cols),
+                sample=data_sample,
+                csv_name=data_csv,
+                title=title,
+                size_col=size_col,
+                target_col=target_col,
+                parent_col=parent_col,
+                end_col=end_col,
+                high_col=high_col,
+                title_col=title_col,
+                goal_col=goal_col,
+                width_col=width_col,
+                after_col=after_col,
+                agg=agg,
+                dial=dial,
+                style=style,
+            )
+            st.caption(
+                "The Python that rebuilds this chart with this project's API "
+                "(`highcharts_builder.make_chart`), loading the same data."
+            )
+            st.code(snippet, language="python")
+            st.download_button(
+                "Download Python",
+                snippet,
+                file_name=f"{chart_type}_chart.py",
+                mime="text/x-python",
                 icon=":material/download:",
             )

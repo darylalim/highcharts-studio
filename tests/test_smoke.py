@@ -1757,6 +1757,107 @@ def test_export_page_title_is_escaped():
     assert "<title>R&amp;D &lt;2026&gt;</title>" in page
 
 
+# --------------------------------------------------------------------------- #
+# Export as Python (plan #2): the make_chart(...) call that rebuilds the chart
+# --------------------------------------------------------------------------- #
+def _run_snippet(snippet: str, frame: pd.DataFrame, monkeypatch) -> str:
+    """Execute a Python snippet with ``pd.read_csv`` returning ``frame``; its chart's JS."""
+    monkeypatch.setattr(pd, "read_csv", lambda *_args, **_kwargs: frame)
+    namespace: dict = {}
+    exec(compile(snippet, "<snippet>", "exec"), namespace)
+    return namespace["chart"].to_js_literal()
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_python_snippet_rebuilds_the_same_chart_for_every_type(
+    labeled_frame, chart_type, monkeypatch
+):
+    # The snippet is only worth having if running it gives the SAME chart: executed against the
+    # frame (fed in place of the CSV it reads), it must emit exactly the JS a direct make_chart
+    # call emits, for every type, with a title and the type's own style controls set.
+    from highcharts_builder import ChartStyle, python_snippet, style_controls_for
+
+    controls = style_controls_for(chart_type)
+    style = ChartStyle(
+        y_title="Y" if "y_title" in controls else "",
+        legend="top" if "legend" in controls else "bottom",
+        stacking="normal" if "stacking" in controls else None,
+    )
+    x = None if chart_type in GAUGE_TYPES else "label"
+
+    def build(fn, *leading, **extra):
+        return fn(
+            *leading,
+            chart_type,
+            x,
+            _y_for(chart_type),
+            title="A title",
+            size_col=_size_for(chart_type),
+            target_col=_target_for(chart_type),
+            parent_col=_parent_for(chart_type),
+            end_col=_end_for(chart_type),
+            high_col=_high_for(chart_type),
+            goal_col=_goal_for(chart_type),
+            width_col=_width_for(chart_type),
+            after_col=_after_for(chart_type),
+            style=style,
+            **extra,
+        )
+
+    snippet = build(python_snippet, csv_name="data.csv")
+    direct = build(make_chart, labeled_frame)
+    assert _run_snippet(snippet, labeled_frame, monkeypatch) == direct.to_js_literal()
+    assert 'pd.read_csv("data.csv")' in snippet
+    # Ruff's default line length, so the snippet pastes into a Ruff project unchanged.
+    assert max(len(line) for line in snippet.splitlines()) <= 88, snippet
+
+
+def test_python_snippet_for_a_sample_loads_it_by_name(monkeypatch):
+    # For one of the app's samples there is no file to read, so the snippet loads the sample by
+    # its label (which names it, and runs as is in this repo). The gauge settings travel too.
+    from highcharts_builder import ChartStyle, python_snippet
+    from sample_data import SAMPLES
+
+    label = "Monthly revenue by channel (stacked column/area)"
+    parts = ["online", "retail", "wholesale", "partner"]
+    style = ChartStyle(stacking="percent", reference_line=50.0)
+    snippet = python_snippet("column", "month", parts, sample=label, style=style)
+    assert f'df = SAMPLES["{label}"]()' in snippet
+    code_lines = [line for line in snippet.splitlines() if not line.startswith("#")]
+    assert not any("read_csv" in line for line in code_lines)  # only named in a comment
+    direct = make_chart(SAMPLES[label](), "column", "month", parts, style=style)
+    assert (
+        _run_snippet(snippet, SAMPLES[label](), monkeypatch) == direct.to_js_literal()
+    )
+
+    gauge = python_snippet(
+        "solidgauge", None, ["a"], csv_name="kpi.csv", agg="mean", dial=(0, 100)
+    )
+    assert 'agg="mean"' in gauge and "dial=(0.0, 100.0)" in gauge
+
+
+def test_python_snippet_writes_only_what_differs_from_the_defaults():
+    # The smallest call that builds the chart: no default keyword, no ChartStyle when nothing is
+    # styled, and no style field the type does not take (a hidden control keeps its value in the
+    # app, and that kept value must not leak into the code either).
+    from highcharts_builder import ChartStyle, python_snippet
+
+    plain = python_snippet(
+        "line", "month", ["revenue"], csv_name="d.csv", style=ChartStyle()
+    )
+    assert "ChartStyle" not in plain and "agg=" not in plain and "title=" not in plain
+    hidden = python_snippet(
+        "pie",
+        "fruit",
+        ["units"],
+        csv_name="d.csv",
+        style=ChartStyle(y_title="kept, hidden"),
+    )
+    assert "ChartStyle" not in hidden and "kept, hidden" not in hidden
+    quoted = python_snippet("line", "month", ['a "quoted" col'], csv_name="d.csv")
+    compile(quoted, "<snippet>", "exec")  # a quote in a column name stays valid Python
+
+
 def _relative_luminance(hex_color):
     """WCAG 2.x relative luminance of a #rrggbb string."""
     raw = hex_color.lstrip("#")
@@ -11057,11 +11158,32 @@ def test_app_export_panel_offers_four_forms_with_downloads(app):
         "html",
         "javascript",
         "json",
+        "python",
     ]
     names = [d.proto.url.rsplit("/", 1)[-1] for d in app.get("download_button")]
-    assert len(names) == 4
+    assert len(names) == 5
     assert any("non-commercial" in caption.value for caption in app.caption)
     json.loads(app.code[3].value)  # the JSON tab is real JSON
+
+
+def test_app_export_panel_has_a_python_tab(app):
+    # Plan #2: the fifth tab is the make_chart(...) call. On a sample it loads the sample by name;
+    # on an upload it reads the uploaded file's name.
+    _reveal_config(app)
+    python = next(code for code in app.code if code.language == "python").value
+    assert 'df = SAMPLES["Monthly revenue vs cost (line/area/column)"]()' in python
+    assert "chart = make_chart(" in python
+
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        ("my sales.csv", b"month,revenue\nJan,1\nFeb,2\n", "text/csv")
+    ).run()
+    assert not app.exception
+    # The no-file stop on the way to the upload discards the (keyless) panel toggle, so the
+    # panel is closed again; that is a view preference resetting, not lost work.
+    _reveal_config(app)
+    python = next(code for code in app.code if code.language == "python").value
+    assert 'pd.read_csv("my sales.csv")' in python
 
 
 def test_app_export_container_id_flows_and_a_bad_one_warns(app):

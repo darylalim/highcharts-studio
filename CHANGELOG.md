@@ -33,6 +33,18 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.26.0] - 2026-10-07
+
+A new export, so a minor.
+
+### Added
+
+- **A Python tab in the Export panel:** the `make_chart(...)` call that rebuilds the chart,
+  loading the same data (`pd.read_csv("<your file>")`, or the sample by its label) rather than
+  carrying it inline. Only the arguments that differ from their defaults are written, including
+  the style. A test runs the snippet for every chart type and requires the same chart.
+- **Builder API:** `python_snippet(...)`.
+
 ## [0.25.0] - 2026-10-07
 
 New exports, so a minor.

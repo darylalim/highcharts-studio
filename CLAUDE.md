@@ -64,7 +64,8 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
   [Chart types](#chart-types)), the chart embed (its ☰ menu downloads PNG/JPEG/SVG, drawn in
   the browser; there is no render-mode selector since the Static PNG mode was retired, see
   [Conventions](#conventions)), and the **Export** panel behind a toggle (HTML snippet, HTML
-  page, JS and JSON tabs, each with a download, from `build_chart_exports`). The
+  page, JS and JSON tabs from `build_chart_exports`, and a Python tab from `python_snippet`,
+  each with a download). The
   **no-plottable-columns gate** runs *below* the chart-type selectbox and is
   **type-aware**: xrange's start/end are coordinates and may be dates, and a date column
   is object dtype, so a canonical Gantt CSV has no numeric columns at all and a
@@ -224,6 +225,9 @@ html = build_chart_html(df, chart_type, x_col, y_cols, height=height, title=titl
 # embeds: the chart for other pages, all four forms from one build_options call
 exports = build_chart_exports(df, chart_type, x_col, y_cols, container_id=None)
 exports.json, exports.js, exports.html_snippet, exports.html_page
+
+# the Python that rebuilds it: a make_chart(...) call, loading the data rather than inlining it
+code = python_snippet(chart_type, x_col, y_cols, csv_name="data.csv", style=style)
 ```
 
 The exports are serialized by the standard library's `json`, not `to_js_literal`, so they are
