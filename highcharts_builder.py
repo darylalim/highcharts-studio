@@ -6354,3 +6354,122 @@ def build_chart_exports(
         container_id=container_id,
         modules=modules,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Export as Python (plan #2): the make_chart(...) call that reproduces the chart
+# --------------------------------------------------------------------------- #
+_SNIPPET_LINE_WIDTH = (
+    88  # Ruff's default, so a snippet pasted into a Ruff project stays as is
+)
+
+
+def _py(value: object) -> str:
+    """``value`` as Python source. Strings via ``json.dumps``, whose escapes are valid Python and
+    whose double quotes match Ruff's style; containers element by element."""
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list):
+        return "[" + ", ".join(_py(v) for v in value) + "]"
+    if isinstance(value, tuple):
+        return "(" + ", ".join(_py(v) for v in value) + ")"
+    return repr(value)
+
+
+def python_snippet(
+    chart_type: str,
+    x_col: str | None,
+    y_cols: list[str],
+    *,
+    sample: str | None = None,
+    csv_name: str | None = None,
+    title: str | None = None,
+    size_col: str | None = None,
+    target_col: str | None = None,
+    parent_col: str | None = None,
+    end_col: str | None = None,
+    high_col: str | None = None,
+    title_col: str | None = None,
+    goal_col: str | None = None,
+    width_col: str | None = None,
+    after_col: str | None = None,
+    agg: str = _GAUGE_DEFAULT_AGG,
+    dial: tuple[float, float] | None = None,
+    style: ChartStyle | None = None,
+) -> str:
+    """The Python that rebuilds this chart with the public API: a ``make_chart(...)`` call.
+
+    The data is LOADED, not inlined (plan #2): ``SAMPLES[sample]()`` for one of the app's samples,
+    which names it and runs as is in this repo, or ``pd.read_csv(csv_name)`` for an upload (the
+    user has the file). One shape at any data size. Every keyword is written only when it differs
+    from its default, and the style only with the fields this type takes (``style_controls_for``)
+    and set away from their defaults, so the snippet is the smallest call that builds the chart.
+    """
+    kwargs: dict[str, object] = {
+        name: value
+        for name, value in (
+            ("title", title),
+            ("size_col", size_col),
+            ("target_col", target_col),
+            ("parent_col", parent_col),
+            ("end_col", end_col),
+            ("high_col", high_col),
+            ("title_col", title_col),
+            ("goal_col", goal_col),
+            ("width_col", width_col),
+            ("after_col", after_col),
+        )
+        if value
+    }
+    if agg != _GAUGE_DEFAULT_AGG:
+        kwargs["agg"] = agg
+    if dial is not None:
+        kwargs["dial"] = (float(dial[0]), float(dial[1]))
+    style_fields = {}
+    if style is not None:
+        default = ChartStyle()
+        style_fields = {
+            field: getattr(style, field)
+            for field in ChartStyle.__dataclass_fields__
+            if field in style_controls_for(chart_type)
+            and getattr(style, field) != getattr(default, field)
+        }
+
+    if sample is not None:
+        imports = ["from sample_data import SAMPLES"]
+        load = (
+            "# The app's built-in sample. For your own data: df = pd.read_csv(...)\n"
+            f"df = SAMPLES[{_py(sample)}]()"
+        )
+    else:
+        imports = ["import pandas as pd"]
+        load = f"df = pd.read_csv({_py(csv_name or 'your-file.csv')})"
+    names = ["ChartStyle", "make_chart"] if style_fields else ["make_chart"]
+    imports.append(f"from highcharts_builder import {', '.join(names)}")
+
+    args = ["df", _py(chart_type), _py(x_col), _py(list(y_cols))]
+    args += [f"{name}={_py(value)}" for name, value in kwargs.items()]
+    if style_fields:
+        inline = (
+            "ChartStyle("
+            + ", ".join(f"{k}={_py(v)}" for k, v in style_fields.items())
+            + ")"
+        )
+        if len(f"    style={inline},") <= _SNIPPET_LINE_WIDTH:
+            args.append(f"style={inline}")
+        else:
+            inner = "".join(f"        {k}={_py(v)},\n" for k, v in style_fields.items())
+            args.append(f"style=ChartStyle(\n{inner}    )")
+    call = "chart = make_chart(\n" + "".join(f"    {arg},\n" for arg in args) + ")\n"
+    return (
+        # Ruff's isort order: plain imports first, then from-imports alphabetically.
+        "\n".join(
+            sorted(imports, key=lambda line: (not line.startswith("import"), line))
+        )
+        + "\n\n"
+        + load
+        + "\n\n"
+        + call
+        + "\n# `chart` is a highcharts_core Chart: chart.to_js_literal() is its JavaScript, and\n"
+        + "# build_chart_exports(...) with the same arguments gives the HTML, JS and JSON.\n"
+    )

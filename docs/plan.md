@@ -111,7 +111,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | done (0.23.0) |
 | 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | done (0.24.0) |
 | 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | done (0.25.0) |
-| 12th | 2 | [Export as Python](#2-export-as-python) | S | planned |
+| 12th | 2 | [Export as Python](#2-export-as-python) | S | done (0.26.0) |
 | 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
 | — | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | idea |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
@@ -219,20 +219,9 @@ what rendering verified:
 
 ### 2. Export as Python
 
-- **What & why:** Add a copyable `make_chart(...)` call that reproduces the current chart
-  with the public API, as the Python tab of [#15](#15-embeddable-outputs-html-js-json)'s
-  Export panel. This turns the app into a way to *learn* `highcharts-core`, not only to use
-  it. (The JSON half of this item moved to #15.)
-- **Touches:** a pure `python_snippet(...)` helper in `highcharts_builder.py` (testable:
-  `exec` the snippet against the sample frame and compare the options it produces).
-- **Decided:** the snippet starts with `df = pd.read_csv("your-file.csv")` rather than
-  carrying the data: one shape, short at any data size, and the user has their own CSV. For
-  a sample dataset (no file to read), a comment names the sample instead. Settled
-  2026-10-07; rejected: inlining samples only (two snippet shapes to build and test) and
-  always inlining (long snippets for large uploads, #15's size problem again). Built after
-  #5, so the snippet includes `style=ChartStyle(...)` from the start. The `exec` test feeds
-  the snippet a `df` rather than a file.
-- **Size:** S · **Status:** planned
+Done in 0.26.0: `python_snippet` and the Export panel's Python tab. The snippet loads the data (an
+upload by its file name, a sample by its label) rather than carrying it. The reasons and how it is
+tested: [`decisions.md`](decisions.md#export-as-python-load-dont-inline).
 
 ### 8. Edit data in place
 

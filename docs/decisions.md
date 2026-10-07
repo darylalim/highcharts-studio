@@ -33,7 +33,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [Hosting: a public demo on Community Cloud](#hosting-a-public-demo-on-community-cloud) ·
 [Style: one object, not one kwarg per control](#style-one-object-not-one-kwarg-per-control) ·
 [Chart-type picker: families, then types](#chart-type-picker-families-then-types) ·
-[Embeddable exports: JSON first](#embeddable-exports-json-first)
+[Embeddable exports: JSON first](#embeddable-exports-json-first) ·
+[Export as Python: load, don't inline](#export-as-python-load-dont-inline)
 
 ## Packaging: the fact with no second home
 
@@ -1049,3 +1050,26 @@ every type, failing on any new dropped key until it is fixed or listed with a re
   the host page's console.
 - **Size warning at 1 MB** of export text. Well past every sample, and around where a pasted
   snippet starts to slow a page or hit a CMS field limit.
+
+## Export as Python: load, don't inline
+
+Plan #2 gives the Export panel a fifth tab: the `make_chart(...)` call that rebuilds the chart, so
+the app doubles as a way to learn the API. `python_snippet` builds it from the column NAMES alone,
+so it needs no data and no cache.
+
+**The data is loaded, not inlined** (settled 2026-10-07): `pd.read_csv("<the uploaded file's
+name>")`, or, for one of the app's samples, `SAMPLES["<label>"]()`, which names the sample and runs
+as is in this repo. One shape, short at any data size; the user already has their file. Rejected:
+inlining the samples only (two shapes to build and test) and always inlining (a large upload makes
+a long snippet, #15's size problem again). The plan said a comment would name a sample; loading it
+by its label does that and also runs, so the snippet keeps one comment, pointing at `read_csv` for
+the user's own data.
+
+**The smallest call.** A keyword is written only when it differs from its default, and the style
+only with the fields the type takes (`style_controls_for`) set away from their defaults, so a
+hidden control's kept value never leaks into the code. Strings are written with `json.dumps`,
+whose escapes are valid Python and whose double quotes match Ruff; lines stay within Ruff's 88.
+
+**Pinned by running it.** For every type, the snippet is executed with `pd.read_csv` returning the
+test frame, and must emit exactly the JS a direct `make_chart` call emits, with a title and that
+type's style set. That is the only test that can tell the snippet from a plausible-looking one.
