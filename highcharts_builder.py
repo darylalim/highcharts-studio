@@ -5581,8 +5581,8 @@ def build_chart_html(
     Pass the result to ``st.iframe(html, height=...)``.
 
     The document also pins the chart's color scheme (``_LIGHT_COLOR_SCHEME_CSS``) so
-    Highcharts' own ``light-dark()`` defaults can't follow the viewer's browser instead
-    of the ``dark`` flag.
+    Highcharts' own ``light-dark()`` defaults can't follow the viewer's browser, which
+    leaves ``_themed`` the single source of the dark chrome.
     """
     chart = make_chart(
         df,
