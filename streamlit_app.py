@@ -17,6 +17,7 @@ import streamlit as st
 
 from highcharts_builder import (
     BULLET_TYPES,
+    CHART_FAMILIES,
     DUMBBELL_TYPES,
     FUNNEL_TYPES,
     GAUGE_AGGREGATIONS,
@@ -27,7 +28,6 @@ from highcharts_builder import (
     NODE_LINK_TYPES,
     ORGANIZATION_TYPES,
     STACKING_MODES,
-    SUPPORTED_TYPES,
     TIMELINE_TYPES,
     UNWEIGHTED_NODE_LINK_TYPES,
     VARIWIDE_TYPES,
@@ -69,6 +69,170 @@ _STYLE_KEYS = {
     "reference_line": "style_reference_line",
 }
 _KEYED_PICKERS = ("x_col", "y_pills", "y_multiselect", *_STYLE_KEYS.values())
+
+
+# The chart-type picker's help, one bullet per type or group of types. The selectbox shows only
+# the bullets for the chosen FAMILY's types (plan #17), so its tooltip lists what is on offer
+# rather than all 30. Each bullet keeps the type name(s) it covers, bold, at its start.
+_TYPE_HELP: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("pie",),
+        "- **pie** — one label column + one value column",
+    ),
+    (
+        ("treemap",),
+        "- **treemap** — one label column + one value column; each tile's area shows "
+        "the value (scales to more categories than a pie)",
+    ),
+    (
+        ("funnel", "pyramid"),
+        "- **funnel / pyramid** — one **stage-label** column + one value column; each "
+        "stage is a band sized by its value, drawn in row order (a `funnel` puts the "
+        "first row at the top and narrows down; a `pyramid` puts it at the base and "
+        "narrows up to an apex)",
+    ),
+    (
+        ("scatter",),
+        "- **scatter** — an X column paired with one or more numeric Y series",
+    ),
+    (
+        ("bubble",),
+        "- **bubble** — scatter plus a numeric Size (Z) column driving each marker's "
+        "area",
+    ),
+    (
+        ("radar",),
+        "- **radar** — a category X axis with one or more numeric Y series, drawn on "
+        "polar (spider/web) axes",
+    ),
+    (
+        ("sankey",),
+        "- **sankey** — a Source and a Target column of node names plus a numeric flow "
+        "value; each link's width shows how much moves from one node to the next",
+    ),
+    (
+        ("dependencywheel",),
+        "- **dependencywheel** — the same Source, Target and flow value as sankey, "
+        "drawn as a circle: nodes sit on a ring and each curved ribbon's width shows "
+        "the flow between them (best when nodes are both sources and targets)",
+    ),
+    (
+        ("networkgraph",),
+        "- **networkgraph** — a Source and a Target column of node names (no value "
+        "column); each row is one edge, laid out as a force-directed graph of who "
+        "connects to whom",
+    ),
+    (
+        ("organization",),
+        "- **organization** — an org chart, one row per person: an **Employee** column,"
+        " a **Manager** column (blank = the top of the chart, e.g. the CEO), and a "
+        "**Title** column drawn inside each box (no value column). The boxes are laid "
+        "out top-down as a reporting hierarchy",
+    ),
+    (
+        ("heatmap",),
+        "- **heatmap** — a category X axis and one or more numeric Y columns form a "
+        "grid (each selected column becomes a row); each cell's color shows its value",
+    ),
+    (
+        ("boxplot",),
+        "- **boxplot** — a category X column whose values *repeat* (one row per "
+        "observation) + one numeric column of raw measurements; each category's "
+        "distribution becomes a box, with outliers drawn as separate dots",
+    ),
+    (
+        ("waterfall",),
+        "- **waterfall** — a step-label column + one numeric column of signed *deltas* "
+        "(not levels); each bar floats where the last one ended, showing how a starting"
+        " value becomes an ending one, and a closing **Total** bar is added for you",
+    ),
+    (
+        ("sunburst",),
+        "- **sunburst** — a hierarchy, one row per node: a Node column, a **Parent** "
+        "column naming that node's parent (blank = a top-level branch), and one numeric"
+        " column of *leaf* values. Each ring is a level, and a parent's arc is the "
+        "**sum** of its children — so a node with children needs no value of its own. "
+        "Every node needs its own row, and click a sector to zoom into it",
+    ),
+    (
+        ("xrange",),
+        "- **xrange** — a Gantt-style timeline, one row per bar: a **Lane** column "
+        "naming the task (it may repeat — a lane can hold several bars), plus a "
+        "**Start** and an **End** column. Those two are *coordinates*, so they may be "
+        "dates (ISO-8601, e.g. `2026-01-05`) or plain numbers (sprint 12 → 18) — but "
+        "both the same kind. A zero-length bar is a **milestone** and still draws; a "
+        "backwards one is dropped",
+    ),
+    (
+        ("columnrange",),
+        "- **columnrange** — a category X axis + a **Low** and a **High** numeric "
+        "column; each category gets a bar floating from its low to its high (a min–max "
+        "range). A row missing either end draws no bar but keeps its slot; an inverted "
+        "range (high < low) still draws, spanning both values",
+    ),
+    (
+        ("arearange",),
+        "- **arearange** — the same **Low** and **High** columns as columnrange, but "
+        "drawn as one continuous **filled band** between a low line and a high line "
+        "(best when the X axis is an ordered progression, e.g. a forecast band over "
+        "time). A row missing either end breaks the band there; an inverted range still"
+        " draws",
+    ),
+    (
+        ("bullet",),
+        "- **bullet** — a KPI strip: a category X axis + a **Measure** column drawn as "
+        "a bar and a **Goal** column drawn as a **crossbar** over it, one pair per "
+        "category ('actual against target'). Either column may be blank on a row — the "
+        "bar and the crossbar draw independently — and a measure below its goal is an "
+        "ordinary reading",
+    ),
+    (
+        ("variwide",),
+        "- **variwide** — a category X axis + a **Height** column and a **Width** "
+        "column, so each bar's **area** is the two multiplied ('margin, weighted by the"
+        " revenue it earns'). Widths are shares of the width total, so the bars "
+        "**touch**: it reads as a band of the axis divided up, not as separate columns",
+    ),
+    (
+        ("dumbbell",),
+        "- **dumbbell** — a category X axis + a **Before** column and an **After** "
+        "column, drawn as two markers joined by a connector, one pair per category "
+        "('where each region started and where it ended up'). The two columns are the "
+        "**same measurement at two times**, so what you read is the **connector** — its"
+        " length is the change and its direction is the sign. A row missing either "
+        "reading draws neither marker",
+    ),
+    (
+        ("timeline",),
+        "- **timeline** — a sequence of dated **events**: an **Event** column naming "
+        "each one and a **Date (when)** column saying when it happened. Every event is "
+        "one instant on a shared spine, labelled in its own colour and staggered above "
+        "and below so the labels don't collide. The dates must be real dates (ISO-8601,"
+        " e.g. `2026-01-05`) — unlike xrange's Start/End a plain number won't do, "
+        "because a timeline places its marks on a **time** axis, so the spacing on the "
+        "page is the spacing in time. A row missing either its name or its date is "
+        "dropped",
+    ),
+    (
+        ("solidgauge", "gauge"),
+        "- **solidgauge / gauge** — one mark per **numeric column**, each collapsed to "
+        "a single number by the aggregation you choose (sum / mean / …), all read "
+        "against one shared dial. There is **no X column**: a gauge has no labels, only"
+        " readings. `solidgauge` sweeps an **arc** per column; `gauge` points a "
+        "**needle** per column at a scale it actually draws",
+    ),
+    (
+        ("line", "spline", "area", "areaspline", "column", "bar"),
+        "- **line / spline / area / areaspline / column / bar** — a category X axis "
+        "with one or more numeric Y series",
+    ),
+)
+
+
+def chart_type_help(family_types: tuple[str, ...]) -> str:
+    """The help text for a family: the bullets for the types it offers, in table order."""
+    shown = [text for types, text in _TYPE_HELP if set(types) & set(family_types)]
+    return "\n".join(["How the type reshapes the controls below:", *shown])
 
 
 def keep_picker_state() -> None:
@@ -429,94 +593,22 @@ with st.sidebar:
     coord_cols, date_cols = picker_columns(df)
 
     st.header(":material/bar_chart: 2 · Chart")
+    # Two steps (plan #17): a FAMILY, then a type within it, so the common charts come first
+    # without hiding any. Pills because it is one click and wraps in the narrow sidebar;
+    # `required=True` for the Source control's reason, so the family can never render empty.
+    # Neither widget has a key, and that is the design: when the family changes, the type
+    # selectbox's OPTIONS change, Streamlit gives it a new identity, and it resets to the family's
+    # first type, which is why CHART_FAMILIES lists each family's most common type first.
+    family = st.pills(
+        "Chart family",
+        list(CHART_FAMILIES),
+        default=next(iter(CHART_FAMILIES)),
+        required=True,
+    )
     chart_type = st.selectbox(
         "Chart type",
-        SUPPORTED_TYPES,
-        help=(
-            "How the type reshapes the controls below:\n"
-            "- **pie** — one label column + one value column\n"
-            "- **treemap** — one label column + one value column; each tile's "
-            "area shows the value (scales to more categories than a pie)\n"
-            "- **funnel / pyramid** — one **stage-label** column + one value column; "
-            "each stage is a band sized by its value, drawn in row order (a `funnel` "
-            "puts the first row at the top and narrows down; a `pyramid` puts it at the "
-            "base and narrows up to an apex)\n"
-            "- **scatter** — an X column paired with one or more numeric Y series\n"
-            "- **bubble** — scatter plus a numeric Size (Z) column driving each "
-            "marker's area\n"
-            "- **radar** — a category X axis with one or more numeric Y series, "
-            "drawn on polar (spider/web) axes\n"
-            "- **sankey** — a Source and a Target column of node names plus a "
-            "numeric flow value; each link's width shows how much moves from one "
-            "node to the next\n"
-            "- **dependencywheel** — the same Source, Target and flow value as sankey, "
-            "drawn as a circle: nodes sit on a ring and each curved ribbon's width shows "
-            "the flow between them (best when nodes are both sources and targets)\n"
-            "- **networkgraph** — a Source and a Target column of node names (no value "
-            "column); each row is one edge, laid out as a force-directed graph of who "
-            "connects to whom\n"
-            "- **organization** — an org chart, one row per person: an **Employee** column, "
-            "a **Manager** column (blank = the top of the chart, e.g. the CEO), and a **Title** "
-            "column drawn inside each box (no value column). The boxes are laid out top-down as a "
-            "reporting hierarchy\n"
-            "- **heatmap** — a category X axis and one or more numeric Y columns "
-            "form a grid (each selected column becomes a row); each cell's color "
-            "shows its value\n"
-            "- **boxplot** — a category X column whose values *repeat* (one row per "
-            "observation) + one numeric column of raw measurements; each category's "
-            "distribution becomes a box, with outliers drawn as separate dots\n"
-            "- **waterfall** — a step-label column + one numeric column of signed "
-            "*deltas* (not levels); each bar floats where the last one ended, showing "
-            "how a starting value becomes an ending one, and a closing **Total** bar is "
-            "added for you\n"
-            "- **sunburst** — a hierarchy, one row per node: a Node column, a **Parent** "
-            "column naming that node's parent (blank = a top-level branch), and one "
-            "numeric column of *leaf* values. Each ring is a level, and a parent's arc is "
-            "the **sum** of its children — so a node with children needs no value of its "
-            "own. Every node needs its own row, and click a sector to zoom into it\n"
-            "- **xrange** — a Gantt-style timeline, one row per bar: a **Lane** column "
-            "naming the task (it may repeat — a lane can hold several bars), plus a "
-            "**Start** and an **End** column. Those two are *coordinates*, so they may be "
-            "dates (ISO-8601, e.g. `2026-01-05`) or plain numbers (sprint 12 → 18) — but "
-            "both the same kind. A zero-length bar is a **milestone** and still draws; a "
-            "backwards one is dropped\n"
-            "- **columnrange** — a category X axis + a **Low** and a **High** numeric column; "
-            "each category gets a bar floating from its low to its high (a min–max range). A "
-            "row missing either end draws no bar but keeps its slot; an inverted range "
-            "(high < low) still draws, spanning both values\n"
-            "- **arearange** — the same **Low** and **High** columns as columnrange, but drawn as "
-            "one continuous **filled band** between a low line and a high line (best when the X "
-            "axis is an ordered progression, e.g. a forecast band over time). A row missing either "
-            "end breaks the band there; an inverted range still draws\n"
-            "- **bullet** — a KPI strip: a category X axis + a **Measure** column drawn as a bar "
-            "and a **Goal** column drawn as a **crossbar** over it, one pair per category "
-            "('actual against target'). Either column may be blank on a row — the bar and the "
-            "crossbar draw independently — and a measure below its goal is an ordinary reading\n"
-            "- **variwide** — a category X axis + a **Height** column and a **Width** column, so "
-            "each bar's **area** is the two multiplied ('margin, weighted by the revenue it "
-            "earns'). Widths are shares of the width total, so the bars **touch**: it reads as a "
-            "band of the axis divided up, not as separate columns\n"
-            "- **dumbbell** — a category X axis + a **Before** column and an **After** "
-            "column, drawn as two markers joined by a connector, one pair per category "
-            "('where each region started and where it ended up'). The two columns are the "
-            "**same measurement at two times**, so what you read is the **connector** — its "
-            "length is the change and its direction is the sign. A row missing either "
-            "reading draws neither marker\n"
-            "- **timeline** — a sequence of dated **events**: an **Event** column naming each "
-            "one and a **Date (when)** column saying when it happened. Every event is one "
-            "instant on a shared spine, labelled in its own colour and staggered above and "
-            "below so the labels don't collide. The dates must be real dates (ISO-8601, e.g. "
-            "`2026-01-05`) — unlike xrange's Start/End a plain number won't do, because a "
-            "timeline places its marks on a **time** axis, so the spacing on the page is the "
-            "spacing in time. A row missing either its name or its date is dropped\n"
-            "- **solidgauge / gauge** — one mark per **numeric column**, each collapsed to a "
-            "single number by the aggregation you choose (sum / mean / …), all read against one "
-            "shared dial. There is **no X column**: a gauge has no labels, only readings. "
-            "`solidgauge` sweeps an **arc** per column; `gauge` points a **needle** per column "
-            "at a scale it actually draws\n"
-            "- **line / spline / area / areaspline / column / bar** — a category X axis with "
-            "one or more numeric Y series"
-        ),
+        CHART_FAMILIES[family],
+        help=chart_type_help(CHART_FAMILIES[family]),
     )
 
     # The no-plottable-columns gate. It runs HERE, below the chart-type picker, because the

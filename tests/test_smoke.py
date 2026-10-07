@@ -1589,6 +1589,42 @@ def test_chart_style_is_hashable_and_validates_its_choices():
         ChartStyle(stacking="stream")
 
 
+def test_chart_families_partition_the_supported_types():
+    # The picker reaches a type only through its family, so a type in NO family is unreachable
+    # from the app and a type in two is listed twice. Every supported type in exactly one family,
+    # and nothing else — the same safeguard the docs-count tests give the docs.
+    from highcharts_builder import CHART_FAMILIES, chart_family
+
+    listed = [t for types in CHART_FAMILIES.values() for t in types]
+    assert sorted(listed) == sorted(SUPPORTED_TYPES)
+    assert len(listed) == len(set(listed))
+    # The app opens on Basic -> line, as it did before the families.
+    assert next(iter(CHART_FAMILIES)) == "Basic"
+    assert CHART_FAMILIES["Basic"][0] == SUPPORTED_TYPES[0] == "line"
+    assert chart_family("sankey") == "Flow & hierarchy"
+    with pytest.raises(ValueError, match="no chart family"):
+        chart_family("histogram")
+
+
+def test_samples_are_listed_in_the_pickers_family_order():
+    # The Dataset dropdown reads in the same groups as the chart-type picker (plan #17), and the
+    # landing dataset stays first. A sample's family is the earliest family among the types its
+    # label names, so "Fruit sales (pie/bar/column)" counts as Basic.
+    from highcharts_builder import CHART_FAMILIES, chart_family
+    from sample_data import SAMPLES
+
+    order = list(CHART_FAMILIES)
+    ranks = []
+    for label in SAMPLES:
+        match = re.search(r"\(([^)]*)\)$", label)
+        assert match, f"{label!r} does not end with its (type)"
+        named = match.group(1)
+        types = [t.strip().removeprefix("stacked ") for t in named.split("/")]
+        ranks.append(min(order.index(chart_family(t)) for t in types))
+    assert ranks == sorted(ranks), list(zip(SAMPLES, ranks, strict=True))
+    assert next(iter(SAMPLES)) == "Monthly revenue vs cost (line/area/column)"
+
+
 def _relative_luminance(hex_color):
     """WCAG 2.x relative luminance of a #rrggbb string."""
     raw = hex_color.lstrip("#")
@@ -9656,7 +9692,7 @@ def test_app_config_hidden_by_default_then_revealed_by_toggle(app):
 
 
 def test_app_switch_to_pie_regenerates_config(app):
-    app.selectbox[1].set_value("pie")  # Chart type -> pie
+    _select_chart_type(app, "pie")  # Chart type -> pie
     _reveal_config(app)
     assert not app.exception
     assert "type: 'pie'" in app.code[0].value
@@ -9666,7 +9702,7 @@ def test_app_switch_to_bubble_shows_size_control_and_regenerates_config(app):
     # Bubble adds a "Size (Z)" selectbox that no other type shows, and drives the
     # config through the size_col plumbing. Stays on the network-free config path.
     assert not any(sb.label == "Size (Z)" for sb in app.selectbox)  # absent by default
-    app.selectbox[1].set_value("bubble").run()  # Chart type -> bubble
+    _select_chart_type(app, "bubble")  # Chart type -> bubble
     assert not app.exception
     assert any(sb.label == "Size (Z)" for sb in app.selectbox)  # now present
     _reveal_config(app)
@@ -9678,7 +9714,7 @@ def test_app_switch_to_radar_regenerates_config(app):
     # Radar renders as a polar line chart; switching to it drives the config
     # through the shared category-x path. `polar: true` (absent from a plain line)
     # proves the radar branch — not the cartesian one — produced it. Network-free.
-    app.selectbox[1].set_value("radar").run()  # Chart type -> radar
+    _select_chart_type(app, "radar")  # Chart type -> radar
     assert not app.exception
     _reveal_config(app)
     assert not app.exception
@@ -9690,7 +9726,7 @@ def test_app_switch_to_heatmap_regenerates_config(app):
     # colorAxis; switching to it drives the config through the heatmap branch.
     # `type: 'heatmap'` + the colorAxis prove it — heatmap adds no extra sidebar
     # control, so the positional widget indices are unchanged. Network-free.
-    app.selectbox[1].set_value("heatmap").run()  # Chart type -> heatmap
+    _select_chart_type(app, "heatmap")  # Chart type -> heatmap
     assert not app.exception
     _reveal_config(app)
     assert not app.exception
@@ -9704,7 +9740,7 @@ def test_app_switch_to_treemap_regenerates_config(app):
     # config through the treemap branch. `type: 'treemap'` proves that branch
     # produced it. Modeled on the pie test (widgets addressed by index [1]) — NOT
     # heatmap, whose multi=True pills leave the widget indices unchanged. Network-free.
-    app.selectbox[1].set_value("treemap").run()  # Chart type -> treemap
+    _select_chart_type(app, "treemap")  # Chart type -> treemap
     assert not app.exception
     _reveal_config(app)
     assert not app.exception
@@ -9718,7 +9754,7 @@ def test_app_switch_to_funnel_family_regenerates_config(app, chart_type):
     # funnel branch, adding NO extra control before Chart type (so the index-[1] addressing other
     # app tests rely on still holds). `type: '<chart_type>'` proves that branch produced it — and
     # that a pyramid emits its OWN type name, not a funnel. Network-free.
-    app.selectbox[1].set_value(chart_type).run()  # Chart type -> funnel / pyramid
+    _select_chart_type(app, chart_type)  # Chart type -> funnel / pyramid
     assert not app.exception
     _reveal_config(app)
     assert not app.exception
@@ -9732,12 +9768,12 @@ def test_app_switch_to_sankey_shows_target_control_and_regenerates_config(app):
     # bubble's Size (Z), the Target control sits between the X and the single-select
     # Y widgets, so the positional indices past [2] shift. Stays network-free.
     assert not any(sb.label == "Target (to)" for sb in app.selectbox)  # absent
-    app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    _select_chart_type(app, "sankey")  # Chart type -> sankey
     assert not app.exception
     assert any(sb.label == "Target (to)" for sb in app.selectbox)  # now present
     # Single-select Y (the weight), like pie/treemap — not the multi-select pills.
     assert any(sb.label == "Flow value (weight)" for sb in app.selectbox)
-    assert not app.pills
+    assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
     assert "type: 'sankey'" in app.code[0].value
@@ -9750,7 +9786,7 @@ def test_app_sankey_target_survives_a_source_change(app):
     # widget whenever Source changed, silently discarding the user's Target. Pick a
     # Target, change Source, and assert the Target survives. A dynamic index makes
     # this fail — nothing else in the suite would notice.
-    app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    _select_chart_type(app, "sankey")  # Chart type -> sankey
     target = next(sb for sb in app.selectbox if sb.label == "Target (to)")
     target.set_value("cost").run()  # the third column, not the default
     assert not app.exception
@@ -9765,7 +9801,7 @@ def test_app_sankey_source_equals_target_shows_guard_warning(app):
     # can't trip — it's never among the Y series): naming one column as both ends of
     # a link would make every link a self-loop. The default Source is the first
     # column, so pointing Target at it collides.
-    app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    _select_chart_type(app, "sankey")  # Chart type -> sankey
     target = next(sb for sb in app.selectbox if sb.label == "Target (to)")
     target.set_value("month").run()  # == the default Source column
     assert not app.exception
@@ -9780,7 +9816,7 @@ def test_app_sankey_kpi_shows_flows(app):
     # every row is a flow.
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("sankey").run()  # Chart type -> sankey
+    _select_chart_type(app, "sankey")  # Chart type -> sankey
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -9798,11 +9834,11 @@ def test_app_switch_to_dependencywheel_shows_target_control_and_regenerates_conf
     assert not any(
         sb.label == "Target (to)" for sb in app.selectbox
     )  # absent by default
-    app.selectbox[1].set_value("dependencywheel").run()  # Chart type -> dependencywheel
+    _select_chart_type(app, "dependencywheel")  # Chart type -> dependencywheel
     assert not app.exception
     assert any(sb.label == "Target (to)" for sb in app.selectbox)  # now present
     assert any(sb.label == "Flow value (weight)" for sb in app.selectbox)
-    assert not app.pills  # single-select Y (the weight), not the multi-select pills
+    assert not _y_pills(app)  # single-select Y (the weight), not the multi-select pills
     _reveal_config(app)
     assert not app.exception
     assert "type: 'dependencywheel'" in app.code[0].value
@@ -9815,7 +9851,7 @@ def test_app_dependencywheel_kpi_shows_flows(app):
     # becomes a flow.
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("dependencywheel").run()  # Chart type -> dependencywheel
+    _select_chart_type(app, "dependencywheel")  # Chart type -> dependencywheel
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -9830,10 +9866,10 @@ def test_app_switch_to_networkgraph_shows_target_hides_y_and_regenerates_config(
     # the multi-select pills nor a single-select Y selectbox. The only selectboxes left are
     # Dataset, Chart type, Source (from) and Target (to). The config still generates without a Y,
     # which is the whole point: an empty y_cols is valid input here. Network-free.
-    assert app.pills  # the default `line` type shows multi-select Y pills...
-    app.selectbox[1].set_value("networkgraph").run()  # Chart type -> networkgraph
+    assert _y_pills(app)  # the default `line` type shows multi-select Y pills...
+    _select_chart_type(app, "networkgraph")  # Chart type -> networkgraph
     assert not app.exception
-    assert not app.pills  # ...which are gone, and NOT replaced by a Y selectbox
+    assert not _y_pills(app)  # ...which are gone, and NOT replaced by a Y selectbox
     labels = {sb.label for sb in app.selectbox}
     assert labels == {"Dataset", "Chart type", "Source (from)", "Target (to)"}
     _reveal_config(app)
@@ -9844,7 +9880,7 @@ def test_app_switch_to_networkgraph_shows_target_hides_y_and_regenerates_config(
 def test_app_networkgraph_source_equals_target_shows_guard_warning(app):
     # Networkgraph shares sankey's source-vs-target guard: one column can't be both ends of an
     # edge. The default Source is the first column, so pointing Target at it collides.
-    app.selectbox[1].set_value("networkgraph").run()  # Chart type -> networkgraph
+    _select_chart_type(app, "networkgraph")  # Chart type -> networkgraph
     target = next(sb for sb in app.selectbox if sb.label == "Target (to)")
     target.set_value("month").run()  # == the default Source column
     assert not app.exception
@@ -9865,8 +9901,7 @@ def test_app_networkgraph_plots_a_csv_with_no_numeric_columns_at_all(app):
     # (it reads its two columns as node labels), so the file plots.
     app.segmented_control[0].set_value("Upload CSV").run()  # Source
     app.file_uploader[0].set_value(("edges.csv", _EDGE_LIST_CSV, "text/csv")).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("networkgraph").run()
+    _select_chart_type(app, "networkgraph")
     assert not app.exception
     assert not app.error  # NOT "this dataset has no numeric columns to plot"
     metrics = _metrics(app)
@@ -9875,8 +9910,7 @@ def test_app_networkgraph_plots_a_csv_with_no_numeric_columns_at_all(app):
 
     # The gate stays honest in the other direction: the same file on a type that really does need
     # a number must still be refused.
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("line").run()
+    _select_chart_type(app, "line")
     assert app.error
     assert "no numeric columns" in app.error[0].value
 
@@ -9892,8 +9926,7 @@ def test_app_networkgraph_past_its_node_limit_warns_instead_of_freezing(app):
     csv = f"src,dst\n{rows}\n".encode()
     app.segmented_control[0].set_value("Upload CSV").run()  # Source
     app.file_uploader[0].set_value(("big.csv", csv, "text/csv")).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("networkgraph").run()
+    _select_chart_type(app, "networkgraph")
     assert not app.exception  # NOT a traceback
     assert app.warning
     assert f"limited to {_NETWORKGRAPH_MAX_NODES}" in app.warning[0].value
@@ -9908,7 +9941,7 @@ def test_app_networkgraph_kpi_shows_links(app):
     # exempts networkgraph: the KPI (and the chart) render with no Y selected.
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("networkgraph").run()  # Chart type -> networkgraph
+    _select_chart_type(app, "networkgraph")  # Chart type -> networkgraph
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -9921,10 +9954,10 @@ def test_app_switch_to_organization_shows_manager_title_hides_y(app):
     # after switching it shows Employee/Manager/Title selectboxes and NO Y widget (neither pills nor
     # a Y selectbox). The Target control is relabelled "Manager (to)". The config still generates
     # without a Y, an empty y_cols being valid here. Network-free.
-    assert app.pills  # the default `line` type shows multi-select Y pills...
-    app.selectbox[1].set_value("organization").run()  # Chart type -> organization
+    assert _y_pills(app)  # the default `line` type shows multi-select Y pills...
+    _select_chart_type(app, "organization")  # Chart type -> organization
     assert not app.exception
-    assert not app.pills  # ...gone, and NOT replaced by a Y selectbox
+    assert not _y_pills(app)  # ...gone, and NOT replaced by a Y selectbox
     labels = {sb.label for sb in app.selectbox}
     assert labels == {
         "Dataset",
@@ -9945,7 +9978,7 @@ def test_app_organization_kpi_shows_reports(app):
     # organization: the KPI and chart render with no Y selected.
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("organization").run()  # Chart type -> organization
+    _select_chart_type(app, "organization")  # Chart type -> organization
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -9956,7 +9989,7 @@ def test_app_organization_kpi_shows_reports(app):
 def test_app_organization_source_equals_manager_shows_guard_warning(app):
     # Organization shares the node-link source-vs-target guard: an employee can't be their own
     # manager. The default Employee is the first column, so pointing Manager at it collides.
-    app.selectbox[1].set_value("organization").run()  # Chart type -> organization
+    _select_chart_type(app, "organization")  # Chart type -> organization
     manager = next(sb for sb in app.selectbox if sb.label == "Manager (to)")
     manager.set_value("month").run()  # == the default Employee column
     assert not app.exception
@@ -9975,8 +10008,7 @@ def test_app_organization_plots_a_csv_with_no_numeric_columns(app):
     # Reports. The Title control defaults to the third column ("title"), so the cards show at once.
     app.segmented_control[0].set_value("Upload CSV").run()  # Source
     app.file_uploader[0].set_value(("roster.csv", _ROSTER_CSV, "text/csv")).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("organization").run()
+    _select_chart_type(app, "organization")
     assert not app.exception
     assert not app.error  # NOT "this dataset has no numeric columns to plot"
     metrics = _metrics(app)
@@ -9987,8 +10019,7 @@ def test_app_organization_plots_a_csv_with_no_numeric_columns(app):
 
     # The gate stays honest in the other direction: the same file on a type that really does need a
     # number must still be refused.
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("line").run()
+    _select_chart_type(app, "line")
     assert app.error
     assert "no numeric columns" in app.error[0].value
 
@@ -10004,8 +10035,7 @@ def test_app_organization_two_column_csv_draws_name_only(app):
     # and no collision warning fires.
     app.segmented_control[0].set_value("Upload CSV").run()  # Source
     app.file_uploader[0].set_value(("roster2.csv", _ROSTER_2COL_CSV, "text/csv")).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("organization").run()
+    _select_chart_type(app, "organization")
     assert not app.exception
     assert not app.error  # gate exempt (no numeric columns needed)
     assert not app.warning  # no collision: Title defaulted to "(no titles)"
@@ -10026,7 +10056,7 @@ def test_app_organization_title_equals_manager_shows_guard_warning(app):
     # with its own or its manager's name), so the app warns and stops. Unlike the source-vs-target
     # guard it is app-only (the pure build tolerates it, being drawable). The default sample's
     # Manager is its second column ("revenue"); setting Title to it collides.
-    app.selectbox[1].set_value("organization").run()  # Chart type -> organization
+    _select_chart_type(app, "organization")  # Chart type -> organization
     title = next(sb for sb in app.selectbox if sb.label == "Title")
     title.set_value("revenue").run()  # == the default Manager column
     assert not app.exception
@@ -10040,9 +10070,9 @@ def test_app_switch_to_boxplot_shows_single_select_y_and_regenerates_config(app)
     # column selector (unlike bubble's Size and sankey's Target), so it adds exactly one
     # widget. Modeled on the pie/treemap tests, not heatmap's (whose multi=True pills
     # leave the widget indices unchanged). Network-free.
-    app.selectbox[1].set_value("boxplot").run()  # Chart type -> boxplot
+    _select_chart_type(app, "boxplot")  # Chart type -> boxplot
     assert not app.exception
-    assert not app.pills  # single-select Y, so the pills are gone
+    assert not _y_pills(app)  # single-select Y, so the pills are gone
     assert any(sb.label == "Observations (Y)" for sb in app.selectbox)
     assert not any(sb.label == "Size (Z)" for sb in app.selectbox)  # no extra selector
     assert not any(sb.label == "Target (to)" for sb in app.selectbox)
@@ -10059,7 +10089,7 @@ def test_app_boxplot_kpi_shows_boxes(app):
     # so each month is a (degenerate, single-observation) box.
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("boxplot").run()  # Chart type -> boxplot
+    _select_chart_type(app, "boxplot")  # Chart type -> boxplot
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -10074,9 +10104,9 @@ def test_app_switch_to_waterfall_shows_single_select_y_and_regenerates_config(ap
     # boxplot — it swaps the multi-select Y pills for a single selectbox. It needs no EXTRA
     # column selector (unlike bubble's Size and sankey's Target), so the widget indices are
     # unchanged. Network-free.
-    app.selectbox[1].set_value("waterfall").run()  # Chart type -> waterfall
+    _select_chart_type(app, "waterfall")  # Chart type -> waterfall
     assert not app.exception
-    assert not app.pills  # single-select Y, so the pills are gone
+    assert not _y_pills(app)  # single-select Y, so the pills are gone
     assert any(sb.label == "Step values (signed delta)" for sb in app.selectbox)
     assert not any(sb.label == "Size (Z)" for sb in app.selectbox)  # no extra selector
     assert not any(sb.label == "Target (to)" for sb in app.selectbox)
@@ -10097,7 +10127,7 @@ def test_app_waterfall_kpi_shows_steps_including_the_appended_total(app):
     from highcharts_builder import count_marks
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("waterfall").run()  # Chart type -> waterfall
+    _select_chart_type(app, "waterfall")  # Chart type -> waterfall
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -10126,9 +10156,7 @@ def _pick_sample(app, chart_type: str):
 
     label = next(key for key in SAMPLES if f"({chart_type})" in key)
     next(sb for sb in app.selectbox if sb.label == "Dataset").set_value(label).run()
-    next(sb for sb in app.selectbox if sb.label == "Chart type").set_value(
-        chart_type
-    ).run()
+    _select_chart_type(app, chart_type)
     return SAMPLES[label]()
 
 
@@ -10155,7 +10183,7 @@ def test_app_switch_to_sunburst_shows_parent_control_and_regenerates_config(app)
     assert len(parent) == 1  # now present
     # Single-select Y (the leaf values), like pie/treemap/sankey/boxplot/waterfall.
     assert any(sb.label == "Leaf values" for sb in app.selectbox)
-    assert not app.pills
+    assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
     js = app.code[0].value
@@ -10209,8 +10237,7 @@ def test_app_sunburst_a_contradictory_tree_reads_zero_sectors(app):
     app.file_uploader[0].set_value(
         ("cycle.csv", b"node,parent,value\na,b,1\nb,a,2\n", "text/csv")
     ).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("sunburst").run()
+    _select_chart_type(app, "sunburst")
     assert not app.exception
     assert _metrics(app)["Sectors"] == "0"
 
@@ -10226,8 +10253,7 @@ def test_app_sunburst_a_cyclic_csv_warns_instead_of_crashing(app):
     ).run()
     # By LABEL, not index: the Upload CSV path has no Dataset selectbox, so every positional
     # index shifts by one against the sample-dataset path the other app tests use.
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("sunburst").run()
+    _select_chart_type(app, "sunburst")
     assert not app.exception  # NOT a traceback
     assert app.warning
     assert "is a cycle" in app.warning[0].value
@@ -10287,7 +10313,7 @@ def test_app_switch_to_xrange_shows_end_control_and_regenerates_config(app):
     # Single-select Y — and it is labelled as a COORDINATE ("Start"), not a value, because it
     # says WHEN rather than HOW MUCH.
     assert any(sb.label == "Start" for sb in app.selectbox)
-    assert not app.pills
+    assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
     js = app.code[0].value
@@ -10355,8 +10381,7 @@ def test_app_xrange_a_date_start_beside_a_numeric_end_warns_instead_of_crashing(
             "text/csv",
         )
     ).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("xrange").run()
+    _select_chart_type(app, "xrange")
     end = next(sb for sb in app.selectbox if sb.label == "End")
     end.set_value("sprint").run()  # a NUMBER beside a DATE start
     assert not app.exception  # NOT a traceback
@@ -10376,8 +10401,7 @@ def test_app_xrange_plots_a_csv_with_no_numeric_columns_at_all(app):
     # chosen. The gate now runs BELOW the picker and asks the question the type actually has.
     app.segmented_control[0].set_value("Upload CSV").run()  # Source
     app.file_uploader[0].set_value(("gantt.csv", _GANTT_CSV, "text/csv")).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("xrange").run()
+    _select_chart_type(app, "xrange")
     assert not app.exception
     assert not app.error  # NOT "this dataset has no numeric columns to plot"
     metrics = _metrics(app)
@@ -10386,8 +10410,7 @@ def test_app_xrange_plots_a_csv_with_no_numeric_columns_at_all(app):
 
     # The gate stays honest in the other direction: the same file on a type that really does
     # need a number must still be refused.
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("line").run()
+    _select_chart_type(app, "line")
     assert app.error
     assert "no numeric columns" in app.error[0].value
 
@@ -10431,7 +10454,7 @@ def test_app_switch_to_columnrange_shows_high_control_and_regenerates_config(app
     # Single-select Y, labelled as a MAGNITUDE ("Low (bottom)") — one end of the range, not a
     # coordinate like xrange's "Start". No pills.
     assert any(sb.label == "Low (bottom)" for sb in app.selectbox)
-    assert not app.pills
+    assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
     assert "type: 'columnrange'" in app.code[0].value
@@ -10458,8 +10481,7 @@ def test_app_columnrange_high_survives_a_low_change(app):
     app.file_uploader[0].set_value(
         ("ranges.csv", b"category,a,b,c\nX,1,5,9\nY,2,6,10\n", "text/csv")
     ).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("columnrange").run()
+    _select_chart_type(app, "columnrange")
     high = next(sb for sb in app.selectbox if sb.label == "High (top)")
     high.set_value("c").run()  # not the default (which is the 2nd numeric, "b")
     assert not app.exception
@@ -10519,7 +10541,7 @@ def test_app_switch_to_arearange_shows_high_control_and_regenerates_config(app):
     assert any(
         sb.label == "Low (bottom)" for sb in app.selectbox
     )  # single-select magnitude
-    assert not app.pills
+    assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
     assert "type: 'arearange'" in app.code[0].value
@@ -10543,8 +10565,7 @@ def test_app_arearange_high_survives_a_low_change(app):
     app.file_uploader[0].set_value(
         ("bands.csv", b"category,a,b,c\nX,1,5,9\nY,2,6,10\n", "text/csv")
     ).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("arearange").run()
+    _select_chart_type(app, "arearange")
     high = next(sb for sb in app.selectbox if sb.label == "High (top)")
     high.set_value("c").run()  # not the default (the 2nd numeric, "b")
     assert not app.exception
@@ -10587,7 +10608,7 @@ def test_app_heatmap_kpi_shows_cells_from_count_marks(app):
     from highcharts_builder import count_marks
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("heatmap").run()  # Chart type -> heatmap
+    _select_chart_type(app, "heatmap")  # Chart type -> heatmap
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -10603,7 +10624,7 @@ def test_app_treemap_kpi_shows_tiles_from_count_marks(app):
     from highcharts_builder import count_marks
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("treemap").run()  # Chart type -> treemap
+    _select_chart_type(app, "treemap")  # Chart type -> treemap
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -10621,7 +10642,7 @@ def test_app_funnel_family_kpi_shows_stages_from_count_marks(app, chart_type):
     from highcharts_builder import count_marks
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value(chart_type).run()  # Chart type -> funnel / pyramid
+    _select_chart_type(app, chart_type)  # Chart type -> funnel / pyramid
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -10632,13 +10653,24 @@ def test_app_funnel_family_kpi_shows_stages_from_count_marks(app, chart_type):
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):
-    # Contract test: the chart-type selectbox offers exactly SUPPORTED_TYPES (so a new builder
-    # type shows up in the UI, and a removed/renamed one fails here) and defaults
-    # to the first. Also pins the positional index [1] other app tests rely on.
+    # Contract test, two steps since plan #17: the family pills offer every family (opening on
+    # Basic), and each family's selectbox offers exactly its types (opening on its first). With
+    # test_chart_families_partition_the_supported_types, that means every supported type is
+    # reachable from the UI. Also pins the positional index [1] some app tests still use.
+    from highcharts_builder import CHART_FAMILIES
+
+    family = next(pl for pl in app.pills if pl.label == "Chart family")
+    assert list(family.options) == list(CHART_FAMILIES)
+    assert family.value == "Basic"
     selector = app.selectbox[1]
     assert selector.label == "Chart type"
-    assert list(selector.options) == list(SUPPORTED_TYPES)
-    assert selector.value == SUPPORTED_TYPES[0]
+    assert selector.value == SUPPORTED_TYPES[0] == "line"
+    for name, types in CHART_FAMILIES.items():
+        next(pl for pl in app.pills if pl.label == "Chart family").set_value(name).run()
+        assert not app.exception
+        assert list(_chart_type_selectbox(app).options) == list(types), name
+        # A family change re-mints the keyless selectbox, so it lands on the family's FIRST type.
+        assert _chart_type_selectbox(app).value == types[0], name
 
 
 def test_app_custom_title_flows_into_config(app):
@@ -10650,7 +10682,7 @@ def test_app_custom_title_flows_into_config(app):
 
 def test_app_multiple_series_selected(app):
     # The revenue-vs-cost sample has two numeric columns; select both via pills.
-    app.pills[0].set_value(["revenue", "cost"])
+    _y_pills(app)[0].set_value(["revenue", "cost"])
     _reveal_config(app)
     assert not app.exception
     js = app.code[0].value
@@ -10660,6 +10692,31 @@ def test_app_multiple_series_selected(app):
 def _chart_type_selectbox(app):
     """The Chart type selectbox, by LABEL — see `_pick_sample` on why not by position."""
     return next(sb for sb in app.selectbox if sb.label == "Chart type")
+
+
+def _select_chart_type(app, chart_type: str):
+    """Pick ``chart_type`` the way a user must since plan #17: its FAMILY, then the type.
+
+    The type selectbox only offers the selected family's types, so every AppTest that switches
+    type goes through here (the `_pick_sample` pattern): the family step is one function, not one
+    edit per test. Runs the app, and only touches the family when it has to change.
+    """
+    from highcharts_builder import chart_family
+
+    family = next(pl for pl in app.pills if pl.label == "Chart family")
+    if family.value != chart_family(chart_type):
+        family.set_value(chart_family(chart_type)).run()
+    _chart_type_selectbox(app).set_value(chart_type).run()
+    return app
+
+
+def _y_pills(app) -> list:
+    """The Y-series pills, i.e. every pills widget but the chart-family control.
+
+    Since plan #17 the family picker is a pills widget too, drawn ABOVE the Y pills, so
+    `app.pills[0]` would silently become the family control; every Y-pills assertion reads this.
+    """
+    return [pl for pl in app.pills if pl.label != "Chart family"]
 
 
 def test_app_y_selection_survives_a_label_only_chart_type_switch(app):
@@ -10673,15 +10730,15 @@ def test_app_y_selection_survives_a_label_only_chart_type_switch(app):
     # just the `index`/`default` the sidebar's other comments name — so without `key=` this
     # switch re-mints the pills and silently resets the selection. Deleting `key=y_key`
     # fails this test; that is the whole point of it.
-    _chart_type_selectbox(app).set_value("solidgauge").run()
+    _select_chart_type(app, "solidgauge")
     assert not app.exception
-    rings = next(p for p in app.pills if p.label.startswith("Rings"))
+    rings = next(p for p in _y_pills(app) if p.label.startswith("Rings"))
     rings.set_value(["revenue", "cost"]).run()
     assert not app.exception
 
-    _chart_type_selectbox(app).set_value("gauge").run()
+    _select_chart_type(app, "gauge")
     assert not app.exception
-    needles = next(p for p in app.pills if p.label.startswith("Needles"))
+    needles = next(p for p in _y_pills(app) if p.label.startswith("Needles"))
     assert list(needles.value) == ["revenue", "cost"], (
         "the Y selection was reset by a chart-type switch that changed only the label — "
         "the pills lost their key"
@@ -10693,7 +10750,7 @@ def test_app_style_section_shows_for_tier_one_and_hides_for_pie(app):
     # Style section, pie gets none of it.
     assert any(sh.value.endswith("Style") for sh in app.subheader)
     assert app.text_input(key="style_y_title")
-    _chart_type_selectbox(app).set_value("pie").run()
+    _select_chart_type(app, "pie")
     assert not app.exception
     assert not any(sh.value.endswith("Style") for sh in app.subheader)
 
@@ -10704,8 +10761,8 @@ def test_app_a_hidden_style_control_keeps_its_value(app):
     # pie, which draws no style controls. A value may be dropped when it stops being VALID, never
     # when it merely stops being DRAWN.
     app.text_input(key="style_y_title").set_value("Revenue ($k)").run()
-    _chart_type_selectbox(app).set_value("pie").run()
-    _chart_type_selectbox(app).set_value("line").run()
+    _select_chart_type(app, "pie")
+    _select_chart_type(app, "line")
     assert not app.exception
     assert app.text_input(key="style_y_title").value == "Revenue ($k)"
 
@@ -10715,8 +10772,8 @@ def test_app_a_gate_that_stops_does_not_forget_the_style_controls(app):
     # on the landing dataset (it has no date column), above every style widget, so the style
     # keys are in _KEYED_PICKERS and keep_picker_state() keeps them across that stop.
     app.text_input(key="style_x_title").set_value("Month").run()
-    _chart_type_selectbox(app).set_value("timeline").run()
-    _chart_type_selectbox(app).set_value("line").run()
+    _select_chart_type(app, "timeline")
+    _select_chart_type(app, "line")
     assert not app.exception
     assert app.text_input(key="style_x_title").value == "Month"
 
@@ -10724,7 +10781,7 @@ def test_app_a_gate_that_stops_does_not_forget_the_style_controls(app):
 def test_app_log_scale_is_disabled_with_the_reason(app):
     # Visible but disabled, saying why, so the user is told; a disabled widget is still drawn,
     # so it keeps its value. Two reasons: stacking, and Y data <= 0.
-    _chart_type_selectbox(app).set_value("column").run()
+    _select_chart_type(app, "column")
     assert not app.toggle(key="style_log_y").disabled  # landing data is all positive
     app.selectbox(key="style_stacking").set_value("normal").run()
     log = app.toggle(key="style_log_y")
@@ -10734,7 +10791,7 @@ def test_app_log_scale_is_disabled_with_the_reason(app):
     app.file_uploader[0].set_value(
         ("signed.csv", b"month,change\nJan,-3\nFeb,5\n", "text/csv")
     ).run()
-    _chart_type_selectbox(app).set_value("line").run()
+    _select_chart_type(app, "line")
     assert not app.exception
     log = app.toggle(key="style_log_y")
     assert log.disabled and "≤ 0" in log.help
@@ -10754,6 +10811,23 @@ def test_app_style_reaches_the_generated_config(app):
     assert "plotLines:[{" in js and "value:150.0" in js
 
 
+def test_app_x_selection_survives_a_family_switch(app):
+    # A family change is a chart-type change (plan #17), and the keyed X picker must keep a
+    # still-valid answer through it, as it does through any type switch. Basic -> Part of whole
+    # re-mints the type selectbox (its options change), which is exactly the kind of re-render a
+    # keyless picker would not survive.
+    next(sb for sb in app.selectbox if sb.label == "Category (X) axis").set_value(
+        "cost"
+    ).run()
+    _select_chart_type(app, "treemap")
+    _select_chart_type(app, "line")
+    assert not app.exception
+    assert (
+        next(sb for sb in app.selectbox if sb.label == "Category (X) axis").value
+        == "cost"
+    )
+
+
 def test_app_x_selection_survives_a_label_only_chart_type_switch(app):
     # The X selectbox's half of the same claim: line -> scatter relabels it
     # "Category (X) axis" -> "X axis" while the choices stay `df.columns`, so a keyless
@@ -10763,7 +10837,7 @@ def test_app_x_selection_survives_a_label_only_chart_type_switch(app):
     x_axis.set_value("cost").run()
     assert not app.exception
 
-    _chart_type_selectbox(app).set_value("scatter").run()
+    _select_chart_type(app, "scatter")
     assert not app.exception
     assert next(sb for sb in app.selectbox if sb.label == "X axis").value == "cost", (
         "the X selection was reset by a chart-type switch that changed only the label — "
@@ -10790,13 +10864,13 @@ def test_app_a_gate_that_stops_does_not_forget_the_keyed_pickers(app):
     x_axis.set_value("cost").run()
     assert not app.exception
 
-    _chart_type_selectbox(app).set_value("timeline").run()
+    _select_chart_type(app, "timeline")
     assert not app.exception
     assert any("no date columns" in error.value for error in app.error), (
         "the landing dataset has no date column, so timeline's gate should have stopped the run"
     )
 
-    _chart_type_selectbox(app).set_value("line").run()
+    _select_chart_type(app, "line")
     assert not app.exception
     assert (
         next(sb for sb in app.selectbox if sb.label == "Category (X) axis").value
@@ -10852,7 +10926,7 @@ def test_app_dataset_switch_reconciles_a_stale_y_selection(app):
     # undo. Narrowing it to `if stored is None:` (seed-only) fails this test with `Y is []`.
     from sample_data import SAMPLES
 
-    app.pills[0].set_value(["revenue", "cost"]).run()
+    _y_pills(app)[0].set_value(["revenue", "cost"]).run()
     assert not app.exception
 
     other = next(key for key in SAMPLES if "(pie/bar/column)" in key)
@@ -10860,7 +10934,7 @@ def test_app_dataset_switch_reconciles_a_stale_y_selection(app):
     assert not app.exception, (
         f"a stale Y selection survived into {other!r} and reached the builder"
     )
-    selected = list(app.pills[0].value)
+    selected = list(_y_pills(app)[0].value)
     available = list(SAMPLES[other]().select_dtypes("number").columns)
     assert selected and set(selected) <= set(available), (
         f"Y is {selected}, which is not a non-empty subset of {available}"
@@ -10872,7 +10946,7 @@ def test_app_x_equals_y_shows_guard_warning(app):
     # from the UI, exercised here via the default line/cartesian type: set the X
     # axis to a numeric column and pick that same column as the Y series.
     app.selectbox[2].set_value("revenue").run()  # Category (X) axis
-    app.pills[0].set_value(["revenue"]).run()  # Series (Y)
+    _y_pills(app)[0].set_value(["revenue"]).run()  # Series (Y)
     assert not app.exception
     assert app.warning
     assert "can't also be a Y series" in app.warning[0].value
@@ -10931,7 +11005,7 @@ def test_app_wide_csv_upload_swaps_pills_for_multiselect(app):
     app.segmented_control[0].set_value("Upload CSV").run()  # Source
     app.file_uploader[0].set_value(("wide.csv", _csv_bytes(7), "text/csv")).run()
     assert not app.exception
-    assert not app.pills  # the pills widget is gone
+    assert not _y_pills(app)  # the pills widget is gone
     assert len(app.multiselect) == 1
     assert list(app.multiselect[0].options) == [f"m{i}" for i in range(7)]
 
@@ -10942,7 +11016,7 @@ def test_app_narrow_csv_upload_keeps_pills(app):
     app.segmented_control[0].set_value("Upload CSV").run()  # Source
     app.file_uploader[0].set_value(("narrow.csv", _csv_bytes(2), "text/csv")).run()
     assert not app.exception
-    assert len(app.pills) == 1
+    assert len(_y_pills(app)) == 1
     assert not app.multiselect
 
 
@@ -10957,26 +11031,35 @@ def test_app_pills_multiselect_boundary(app, num_numeric, widget):
     ).run()
     assert not app.exception
     if widget == "pills":
-        assert len(app.pills) == 1 and not app.multiselect
+        assert len(_y_pills(app)) == 1 and not app.multiselect
     else:
-        assert len(app.multiselect) == 1 and not app.pills
+        assert len(app.multiselect) == 1 and not _y_pills(app)
 
 
 def test_app_chart_type_selector_has_help(app):
     # The chart-type selector silently reshapes the X/Y controls, so it carries a
-    # markdown help tooltip naming each type's data shape (mirrors the Mode help).
-    help_text = app.selectbox[1].help  # selectbox [1] is Chart type
-    assert help_text
-    assert "pie" in help_text and "scatter" in help_text and "bubble" in help_text
-    assert "radar" in help_text
-    assert "heatmap" in help_text
-    assert "treemap" in help_text
-    assert "sankey" in help_text
-    assert "boxplot" in help_text
-    # Every cartesian type is named in the prose; loop so a future addition to
-    # CARTESIAN_TYPES that's forgotten in the help text actually fails here.
-    for chart_type in CARTESIAN_TYPES:
-        assert chart_type in help_text
+    # markdown help tooltip naming each type's data shape.
+    # Since plan #17 it lists only the selected FAMILY's types, not all 30.
+    from highcharts_builder import CHART_FAMILIES
+
+    for name, types in CHART_FAMILIES.items():
+        next(pl for pl in app.pills if pl.label == "Chart family").set_value(name).run()
+        help_text = _chart_type_selectbox(app).help
+        assert help_text, name
+        # Every type the family offers is named in bold; loop so a future type forgotten in the
+        # help text fails here.
+        for chart_type in types:
+            assert re.search(rf"\*\*[a-z /]*\b{chart_type}\b", help_text), (
+                name,
+                chart_type,
+            )
+        # ...and no other family's types are.
+        others = {t for n, ts in CHART_FAMILIES.items() if n != name for t in ts}
+        # Only the bold name OPENING each bullet names types; prose bolds ordinary words too
+        # (variwide's "each bar's **area**"), which must not read as the area type.
+        named = set(re.findall(r"^- \*\*([a-z /]+)\*\*", help_text, re.MULTILINE))
+        named_types = {t.strip() for group in named for t in group.split("/")}
+        assert not (named_types & others), (name, named_types & others)
 
 
 def test_app_kpi_row_summarizes_active_data(app):
@@ -10996,10 +11079,10 @@ def test_app_kpi_row_summarizes_active_data(app):
 def test_app_kpi_series_count_tracks_selection_and_empty_state(app):
     # "Series plotted" follows the Y selection and reads 0 — a useful empty state,
     # not a blank — once cleared, since the KPI row sits above the empty-y guard.
-    app.pills[0].set_value(["revenue", "cost"]).run()
+    _y_pills(app)[0].set_value(["revenue", "cost"]).run()
     assert not app.exception
     assert _metrics(app)["Series plotted"] == "2"
-    app.pills[0].set_value([]).run()
+    _y_pills(app)[0].set_value([]).run()
     assert not app.exception
     assert _metrics(app)["Series plotted"] == "0"
 
@@ -11009,7 +11092,7 @@ def test_app_heatmap_kpi_shows_cells_not_series(app):
     # misreport len(y_cols)) for "Cells" = rows × columns.
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("heatmap").run()  # Chart type -> heatmap
+    _select_chart_type(app, "heatmap")  # Chart type -> heatmap
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -11024,7 +11107,7 @@ def test_app_treemap_kpi_shows_tiles(app):
     # rectangles — mirroring heatmap's "Cells".
     from sample_data import SAMPLES
 
-    app.selectbox[1].set_value("treemap").run()  # Chart type -> treemap
+    _select_chart_type(app, "treemap")  # Chart type -> treemap
     assert not app.exception
     metrics = _metrics(app)
     assert "Series plotted" not in metrics
@@ -11041,7 +11124,7 @@ def test_app_chart_type_badge_reflects_selection(app):
         return [m.value for m in a.markdown if "-badge[" in m.value]
 
     assert any("Line chart" in b for b in badge_texts(app))
-    app.selectbox[1].set_value("pie").run()  # Chart type -> pie
+    _select_chart_type(app, "pie")  # Chart type -> pie
     assert not app.exception
     assert any("Pie chart" in b for b in badge_texts(app))
 
@@ -11056,7 +11139,7 @@ def test_app_chart_type_badge_reflects_selection(app):
 def _gauge_app(app, chart_type: str):
     """Switch the app to one of the gauge types and return it. The default dataset works: its
     numerics are revenue/cost, which either gauge happily reduces."""
-    app.selectbox[1].set_value(chart_type).run()  # Chart type
+    _select_chart_type(app, chart_type)  # Chart type
     assert not app.exception
     return app
 
@@ -11075,7 +11158,7 @@ def test_app_switch_to_gauge_hides_the_x_control_and_shows_the_dial_controls(
     assert any(sb.label == "Reduce each column by" for sb in app.selectbox)
     assert [n.label for n in app.number_input] == ["Dial min", "Dial max"]
     # Multi-select Y: each column is one mark (a ring, or a needle).
-    assert app.pills
+    assert _y_pills(app)
     _reveal_config(app)
     assert not app.exception
     assert f"type: '{chart_type}'" in app.code[0].value
@@ -11107,7 +11190,7 @@ def test_app_gauge_dial_defaults_come_from_the_builder(app, chart_type):
 
     _gauge_app(app, chart_type)
     df = next(iter(SAMPLES.values()))()
-    y_cols = [p for p in app.pills[0].value]
+    y_cols = [p for p in _y_pills(app)[0].value]
     low, high = gauge_dial(df, y_cols, "sum")
     assert [n.value for n in app.number_input] == [low, high]
 
@@ -11165,7 +11248,7 @@ def test_app_gauge_kpi_counts_the_marks_as_series(app, chart_type):
     # count_marks rule that only restated len(y_cols) — the can't-drift rule run backwards.
     _gauge_app(app, chart_type)
     metrics = _metrics(app)
-    assert metrics["Series plotted"] == str(len(app.pills[0].value))
+    assert metrics["Series plotted"] == str(len(_y_pills(app)[0].value))
 
 
 def test_app_needle_gauge_y_control_names_the_mark_it_draws(app):
@@ -11173,9 +11256,9 @@ def test_app_needle_gauge_y_control_names_the_mark_it_draws(app):
     # reader picking columns should be told what each one will BECOME. Same widget, same
     # cardinality, different noun.
     _gauge_app(app, "solidgauge")
-    assert "Rings" in app.pills[0].label
+    assert "Rings" in _y_pills(app)[0].label
     _gauge_app(app, "gauge")
-    assert "Needles" in app.pills[0].label
+    assert "Needles" in _y_pills(app)[0].label
 
 
 # --------------------------------------------------------------------------- #
@@ -11216,7 +11299,7 @@ def test_app_switch_to_bullet_shows_goal_control_and_regenerates_config(app):
     assert not app.error  # the no-numeric-columns gate has nothing to say here
     assert len([sb for sb in app.selectbox if sb.label == "Goal (target)"]) == 1
     assert any(sb.label == "Measure (bar)" for sb in app.selectbox)
-    assert not app.pills
+    assert not _y_pills(app)
     assert not app.multiselect
     # The defaults land on DISTINCT columns, so no warning fires on a freshly picked sample —
     # `deals_closed` is carried third precisely so the Goal picker's constant second-numeric index
@@ -11273,8 +11356,7 @@ def test_app_bullet_goal_survives_a_measure_change(app):
     app.file_uploader[0].set_value(
         ("kpi.csv", b"team,a,b,c\nX,1,5,9\nY,2,6,10\n", "text/csv")
     ).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("bullet").run()
+    _select_chart_type(app, "bullet")
     goal = next(sb for sb in app.selectbox if sb.label == "Goal (target)")
     assert goal.value == "b"  # the constant index: the SECOND numeric column
     goal.set_value("c").run()  # a deliberate pick, away from the default
@@ -11306,8 +11388,7 @@ def test_app_bullet_single_numeric_column_clamps_goal_onto_measure_and_warns(app
     app.file_uploader[0].set_value(
         ("one.csv", b"region,actual\nNorth,420\nSouth,512\n", "text/csv")
     ).run()
-    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
-    chart_type.set_value("bullet").run()
+    _select_chart_type(app, "bullet")
 
     measure = next(sb for sb in app.selectbox if sb.label == "Measure (bar)")
     goal = next(sb for sb in app.selectbox if sb.label == "Goal (target)")
@@ -11372,7 +11453,7 @@ def test_app_leaving_bullet_retires_the_goal_control_and_the_measures_kpi(app):
     assert any(sb.label == "Goal (target)" for sb in app.selectbox)
     assert "Measures" in {m.label for m in app.metric}
 
-    app.selectbox[1].set_value("column").run()
+    _select_chart_type(app, "column")
     assert not app.exception
     assert not any(sb.label == "Goal (target)" for sb in app.selectbox)
     assert not any(sb.label == "Measure (bar)" for sb in app.selectbox)
@@ -11412,7 +11493,7 @@ def test_app_switch_to_variwide_shows_width_control_and_regenerates_config(app):
     # The Y control is a single-select named for the GEOMETRIC CHANNEL, so it pairs with "Width"
     # and the two read as the two dimensions of one rectangle.
     assert any(sb.label == "Height (bar)" for sb in app.selectbox)
-    assert not app.pills
+    assert not _y_pills(app)
     assert not app.multiselect
 
     height = next(sb for sb in app.selectbox if sb.label == "Height (bar)")
@@ -11495,7 +11576,7 @@ def test_app_leaving_variwide_retires_the_width_control_and_the_bars_kpi(app):
     assert any(sb.label == "Width" for sb in app.selectbox)
     assert "Bars" in {m.label for m in app.metric}
 
-    app.selectbox[1].set_value("column").run()
+    _select_chart_type(app, "column")
     assert not app.exception
     assert not any(sb.label == "Width" for sb in app.selectbox)
     assert not any(sb.label == "Height (bar)" for sb in app.selectbox)
@@ -11526,7 +11607,7 @@ def test_app_switch_to_dumbbell_shows_after_control_and_regenerates_config(app):
     # The Y control is a single-select named "Before", so the two read in the order they are
     # drawn. This is the one extra-column pair in the sidebar whose halves are ORDERED.
     assert any(sb.label == "Before" for sb in app.selectbox)
-    assert not app.pills
+    assert not _y_pills(app)
     assert not app.multiselect
 
     before = next(sb for sb in app.selectbox if sb.label == "Before")
@@ -11614,7 +11695,7 @@ def test_app_leaving_dumbbell_retires_the_after_control_and_the_changes_kpi(app)
     assert any(sb.label == "After" for sb in app.selectbox)
     assert "Changes" in {m.label for m in app.metric}
 
-    app.selectbox[1].set_value("column").run()
+    _select_chart_type(app, "column")
     assert not app.exception
     assert not any(sb.label == "After" for sb in app.selectbox)
     assert not any(sb.label == "Before" for sb in app.selectbox)
@@ -11649,9 +11730,7 @@ def test_app_timeline_on_a_dataset_with_no_dates_says_so_and_stops(app):
     It must STOP, not warn: with no date column there is nothing for the Date picker to offer,
     so every control below it would be drawing on an empty list.
     """
-    next(sb for sb in app.selectbox if sb.label == "Chart type").set_value(
-        "timeline"
-    ).run()
+    _select_chart_type(app, "timeline")
     assert not app.exception  # a refusal, not a traceback
     assert app.error
     assert "no date columns" in app.error[0].value
@@ -11659,7 +11738,7 @@ def test_app_timeline_on_a_dataset_with_no_dates_says_so_and_stops(app):
     assert not any(sb.label == "Date (when)" for sb in app.selectbox)
     # And the gate is SPECIFIC — the same dataset is fine for a type that wants a number, which
     # is what stops this arm from being the old blanket refusal in new words.
-    next(sb for sb in app.selectbox if sb.label == "Chart type").set_value("line").run()
+    _select_chart_type(app, "line")
     assert not app.error
 
 
@@ -11678,7 +11757,7 @@ def test_app_switch_to_timeline_shows_the_date_control_and_regenerates_config(ap
     assert any(sb.label == "Event labels" for sb in app.selectbox)
     date_picker = next(sb for sb in app.selectbox if sb.label == "Date (when)")
     # Single-select: a second date column would be a second instant per row, which is an xrange.
-    assert not app.pills
+    assert not _y_pills(app)
     assert not app.multiselect
 
     # THE LANDING VALUE, not merely the options. The picker is sourced from `date_columns`, so

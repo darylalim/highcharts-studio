@@ -33,6 +33,23 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.24.0] - 2026-10-07
+
+A reshaped control, so a minor.
+
+### Changed
+
+- **The chart-type picker has two steps:** a family (Basic, Part of whole, Comparison, Flow &
+  hierarchy, Time, Gauge) as pills, then a type within it. The 30 types no longer sit in one
+  list, the app still opens on Basic → line, and changing family selects that family's most
+  common type. The type selector's help shows only the chosen family's types.
+- **The sample datasets are listed in the same family order**, with the landing dataset first.
+
+### Added
+
+- **Builder API:** `CHART_FAMILIES` (each family's types, most common first) and
+  `chart_family(chart_type)`.
+
 ## [0.23.0] - 2026-10-07
 
 New controls, so a minor.

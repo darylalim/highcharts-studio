@@ -64,6 +64,9 @@ only if your use is non-commercial, or once you hold a commercial Highcharts lic
 
 - **Data in** — built-in sample datasets or your own CSV upload. Map columns to
   the chart with compact pills, falling back to `st.multiselect` on wide CSVs.
+- **Chart types by family** — pick a family (Basic, Part of whole, Comparison,
+  Flow & hierarchy, Time, Gauge), then a type within it, so the 30 types never sit
+  in one long list. The sample datasets are listed in the same family order.
 - **Style controls** — for the core chart types (line, spline, area, areaspline,
   column, bar, scatter, bubble, radar): axis titles, legend position or none, data
   labels, stacking (normal or percent) for column, bar and the area types, a log Y

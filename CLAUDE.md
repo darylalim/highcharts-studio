@@ -54,7 +54,9 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
 ## Structure
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV upload),
-  chart-type/column controls (pills for the Y series, falling back to `st.multiselect` on
+  a two-step chart-type picker (family pills, then a selectbox of that family's types, both
+  read from the builder's `CHART_FAMILIES`; the selectbox's help shows only that family's
+  types), column controls (pills for the Y series, falling back to `st.multiselect` on
   wide CSVs, plus one extra column selector per extra column kwarg), the `@st.cache_data`
   wrappers, a KPI metric row (its third metric adapts via `MARK_METRICS` — see
   [Chart types](#chart-types)), the chart embed (its ☰ menu downloads PNG/JPEG/SVG, drawn in
@@ -126,7 +128,10 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
   fragile: one selectbox added above shifts every index at once. There is one
   `_pick_*_sample` helper per type that needs a non-landing dataset, each sharing
   `_pick_sample(app, chart_type)` as its body while keeping its own name and its own
-  argument for why that type needs a dedicated sample.
+  argument for why that type needs a dedicated sample. Every AppTest that switches chart type
+  goes through `_select_chart_type(app, chart_type)`, which sets the family and then the type,
+  and every Y-pills assertion reads `_y_pills(app)`: the family control is a pills widget too,
+  drawn above the Y pills, so a bare `app.pills[0]` would silently mean the family.
 - `tests/test_hooks.py` — unit tests for the `.claude/hooks/` scripts: the pure decision
   functions (`is_python_target`, `has_dirty_python`) plus a black-box check of
   `post_edit_py.py`'s exit-code contract (0 lets the edit through) without spawning the
@@ -308,7 +313,9 @@ The project's dominant task, and the one that touches the most files. In order:
    differs from `len(y_cols)`; add the row to the table above (the test requires it).
 5. **Sample**: add a dataset to `sample_data.py` leading with a category column, and a
    `_pick_*_sample` helper if the landing dataset can't drive it.
-6. **Wire**: add the selector in `streamlit_app.py`, a `vocabularies` row if the type reads a
+6. **Wire**: place the type in one family of `CHART_FAMILIES` (the picker reaches a type only
+   through its family; `test_chart_families_partition_the_supported_types` fails until it is
+   placed), add its help bullet to `_TYPE_HELP` in `streamlit_app.py`, a `vocabularies` row if the type reads a
    column vocabulary other than `numeric_cols` (the row carries its Y source and both of its
    messages, so this is the one edit a coordinate type cannot half-do), any extra column widget, and
    forward it through both **renderer** cache wrappers **by keyword, under its own
