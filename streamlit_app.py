@@ -2,8 +2,8 @@
 
 Every chart on this page is produced by the Highcharts for Python toolkit
 (``highcharts-core``): a pandas DataFrame is turned into a Highcharts options
-object, then shown one of two ways — embedded via ``st.iframe`` or rendered
-server-side to a PNG. No Streamlit-native charts are used.
+object, then embedded via ``st.iframe``; each chart's own ☰ menu downloads it
+as PNG/JPEG/SVG, drawn in the browser. No Streamlit-native charts are used.
 
 Run it with:
 
@@ -11,8 +11,6 @@ Run it with:
 """
 
 from __future__ import annotations
-
-from typing import Literal
 
 import pandas as pd
 import streamlit as st
@@ -35,9 +33,7 @@ from highcharts_builder import (
     X_IN_Y_GUARD_TYPES,
     XRANGE_TYPES,
     build_chart_html,
-    build_chart_png,
     count_marks,
-    explain_export_failure,
     explain_gauge_error,
     explain_networkgraph_error,
     explain_tree_error,
@@ -47,11 +43,6 @@ from highcharts_builder import (
     picker_columns,
 )
 from sample_data import SAMPLES
-
-# Render modes for the "3 · Render" control.
-MODE_INTERACTIVE = "Interactive"
-MODE_STATIC = "Static PNG"
-RENDER_MODES = [MODE_INTERACTIVE, MODE_STATIC]
 
 # Above this many numeric columns the Y-series pills would wrap the narrow
 # sidebar, so fall back to st.multiselect (selection-widgets.md bounds pills at
@@ -85,32 +76,6 @@ def keep_picker_state() -> None:
         if key in st.session_state:
             st.session_state[key] = st.session_state[key]
 
-
-# The LAYOUT width handed to the export server for the Static PNG, in logical pixels.
-#
-# Without it the server lays every chart out at its own 600px default and `st.image(...,
-# width="stretch")` then STRETCHES that layout to the container — so the two render modes draw
-# genuinely different charts from one options dict, which this project treats as a bug class
-# rather than a tolerance. Highcharts lays out text at the width it is given: at 600 it starts
-# TRUNCATING labels ("Incorporat"), and truncation is not a scaling artefact that stretching can
-# undo. It bites hardest where a label IS the mark's identity — a timeline's events, where seven
-# of them already clip and twenty-seven are unreadable — but every type pays some of it.
-#
-# 800 rather than a round 1000: the chart sits in the LEFT column of `st.columns([3, 2])` on a
-# wide page, so this is the embed's realistic width rather than the window's. At `scale=2` that
-# is a 1600px image, which stays well inside the export server's limits.
-#
-# It is deliberately NOT the `Height (px)` slider's companion — there is no width slider, and
-# adding one would put a control in the sidebar that changes only ONE of the two render modes.
-CHART_PNG_WIDTH = 800
-
-# Short status badge (label, icon, color) shown above the chart per mode; the
-# caption below the chart carries the full description.
-_BadgeColor = Literal["blue", "violet"]
-MODE_BADGES: dict[str, tuple[str, str, _BadgeColor]] = {
-    MODE_INTERACTIVE: ("Interactive (iframe)", ":material/public:", "blue"),
-    MODE_STATIC: ("Static PNG", ":material/image:", "violet"),
-}
 
 # The one-series types, and the mark each one draws. These render a SINGLE series (of
 # cells/tiles/flows/boxes/steps), so the default "Series plotted" metric would misreport
@@ -217,9 +182,8 @@ st.set_page_config(
 
 # max_entries bounds each cache so entries are evicted LRU instead of piling up
 # as users sweep chart types, columns, heights, and titles. The memory-heavy
-# layers get the tighter caps: an uploaded CSV DataFrame can be multi-MB
-# (load_csv=8) and the PNG bytes are large (=64); the HTML and JS are small
-# strings that share the looser 128 cap.
+# layer gets the tighter cap: an uploaded CSV DataFrame can be multi-MB
+# (load_csv=8); the HTML and JS are small strings that share the looser 128 cap.
 @st.cache_data(show_spinner=False, max_entries=8)
 def load_csv(file) -> pd.DataFrame:
     return pd.read_csv(file)
@@ -251,56 +215,6 @@ def cached_chart_html(
         x_col,
         list(y_cols),
         height=height,
-        title=title,
-        size_col=size_col,
-        target_col=target_col,
-        parent_col=parent_col,
-        end_col=end_col,
-        high_col=high_col,
-        title_col=title_col,
-        goal_col=goal_col,
-        width_col=width_col,
-        after_col=after_col,
-        agg=agg,
-        dial=dial,
-    )
-
-
-@st.cache_data(
-    show_spinner="Rendering PNG via the Highcharts export server…", max_entries=64
-)
-def cached_chart_png(
-    df,
-    chart_type,
-    x_col,
-    y_cols,
-    height,
-    title,
-    size_col,
-    target_col,
-    parent_col,
-    end_col,
-    high_col,
-    title_col,
-    goal_col,
-    width_col,
-    after_col,
-    agg,
-    dial,
-    # LAST in the signature, and passed BY KEYWORD at the call site, though nothing mechanical
-    # requires it: `width` is a render-mode-own parameter, so `_forwarded_arguments`' intersection
-    # of the three builders drops it and neither ast test would notice a transposition. But it and
-    # `height` are two ints side by side — the same-typed, positionally-interchangeable shape those
-    # tests were written for — so it is spelled the way they would demand if they could see it.
-    width,
-) -> bytes:
-    return build_chart_png(
-        df,
-        chart_type,
-        x_col,
-        list(y_cols),
-        height=height,
-        width=width,
         title=title,
         size_col=size_col,
         target_col=target_col,
@@ -357,16 +271,16 @@ def cached_chart_js(
     ).to_js_literal()
 
 
-# The KPI's mark count, cached for the same reason the three renderers are — and it is
-# the same WORK, not a cheap tally: for sunburst and xrange `count_marks` reuses the whole
-# build rather than a drop predicate (the "whole-build reuse" its own comments name), so an
-# uncached call built those two charts a SECOND time on every rerun, including the reruns
-# that cannot change the number — a Height drag, a title edit, a render-mode flip, a
-# config-panel toggle. Measured on this venv a sunburst frame costs ~6ms at 2k rows and
-# ~800ms at 200k, against a 2-16ms key hash, so the win is an uploaded CSV's, not a sample's.
+# The KPI's mark count, cached for the same reason the renderers are — and it is the same WORK, not
+# a cheap tally: for sunburst and xrange `count_marks` reuses the whole build rather than a drop
+# predicate (the "whole-build reuse" its own comments name), so an uncached call built those two
+# charts a SECOND time on every rerun, including the reruns that cannot change the number — a
+# Height drag, a title edit, a config-panel toggle. Measured on this venv a sunburst frame costs
+# ~6ms at 2k rows and ~800ms at 200k, against a 2-16ms key hash, so the win is an uploaded CSV's,
+# not a sample's.
 #
 # NOT a member of tests/test_smoke.py's `_CACHE_LAYER`, and that is deliberate rather than an
-# omission: `_FORWARDED` is DERIVED from the three BUILDERS' shared keyword-only parameters,
+# omission: `_FORWARDED` is DERIVED from the BUILDERS' shared keyword-only parameters,
 # so it names size_col/high_col/goal_col/width_col/after_col/agg/dial too — kwargs
 # `count_marks` does not take and must not be handed. This wrapper forwards the three that
 # name a column it actually reads; the call site below passes them by keyword for the same
@@ -398,8 +312,8 @@ def cached_count_marks(
 st.title(":material/insights: Highcharts Studio")
 st.caption(
     "Every chart below is rendered by **highcharts-core** (the Highcharts for "
-    "Python toolkit) — embedded as an interactive iframe or a static PNG — with "
-    "no native Streamlit charts."
+    "Python toolkit) — embedded as an interactive iframe, downloadable from its ☰ "
+    "menu — with no native Streamlit charts."
 )
 
 
@@ -760,7 +674,7 @@ with st.sidebar:
     # Gauge draws no X control, and passes None. It is the one type with no label channel — its
     # marks are the selected COLUMNS — so there is nothing for an X column to name. The two
     # alternatives are both lies: rendering a control that does nothing lies in the UI, and
-    # passing a column the builder must ignore lies in the call site AND in three cache keys
+    # passing a column the builder must ignore lies in the call site AND in every cache key
     # (the chart would re-render on a change that cannot affect it). `build_options` takes
     # `str | None` precisely so this can be honest.
     if chart_type in GAUGE_TYPES:
@@ -1128,7 +1042,7 @@ with st.sidebar:
         # CAUSE that — with a key, `value=` is honoured only on the FIRST render, so the stale
         # number becomes permanent and silent. The re-mint is also visible (the box shows the
         # new derived number) and is scoped to the derivation, not to every rerun: a typed dial
-        # survives a title edit, a height drag and a render-mode switch.
+        # survives a title edit and a height drag.
         # A horizontal container, not st.columns(2): this is a plain two-widget row, not
         # a fixed grid or a deliberate width ratio (the st.columns([3, 2]) in the main
         # panel is the latter and stays). It is the KPI row's pattern, and it WRAPS rather
@@ -1148,23 +1062,6 @@ with st.sidebar:
         placeholder=f"{chart_type.title()} chart",
     )
     height = st.slider("Height (px)", min_value=300, max_value=800, value=480, step=20)
-
-    st.header(":material/tune: 3 · Render")
-    # `required=True` for the Source control's reason: it refuses the deselect at the
-    # widget rather than absorbing the resulting None downstream, so the control can never
-    # render empty while the page renders a chart.
-    render_mode = st.segmented_control(
-        "Mode",
-        RENDER_MODES,
-        default=MODE_INTERACTIVE,
-        required=True,
-        help=(
-            "- **Interactive** — Highcharts loads from the CDN in a sandboxed "
-            "iframe.\n"
-            "- **Static PNG** — rendered server-side via the Highcharts export "
-            "server; the browser loads no Highcharts JS."
-        ),
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1425,12 +1322,7 @@ with left.container(border=True, height="stretch"):
             st.warning(problem, icon=":material/warning:")
             st.stop()
 
-    badge_label, badge_icon, badge_color = MODE_BADGES[render_mode]
-    with st.container(horizontal=True):
-        st.badge(
-            f"{chart_type.title()} chart", icon=":material/bar_chart:", color="grey"
-        )
-        st.badge(badge_label, icon=badge_icon, color=badge_color)
+    st.badge(f"{chart_type.title()} chart", icon=":material/bar_chart:", color="grey")
 
     # No theme is read here, and that is the decision rather than an omission. The builder
     # has no `dark` flag any more: .streamlit/config.toml is a single [theme], so every
@@ -1444,80 +1336,35 @@ with left.container(border=True, height="stretch"):
     # test_app_theme_is_a_single_mode_with_no_light_dark_toggle is load-bearing rather than
     # tidy: it is the only thing standing between that edit and a silently wrong render.
 
-    if render_mode == MODE_STATIC:
-        # Server-side render: no Highcharts JS runs in the browser.
-        try:
-            png = cached_chart_png(
-                df,
-                chart_type,
-                x_col,
-                tuple(y_cols),
-                height,
-                title,
-                size_col=size_col,
-                target_col=target_col,
-                parent_col=parent_col,
-                end_col=end_col,
-                high_col=high_col,
-                title_col=title_col,
-                goal_col=goal_col,
-                width_col=width_col,
-                after_col=after_col,
-                agg=agg,
-                dial=dial,
-                width=CHART_PNG_WIDTH,
-            )
-        except Exception as exc:  # build error or export-server failure
-            # The three causes need three different answers, and the builder owns the
-            # export-server relationship, so it owns the explanation too (a pure,
-            # importable function, as the hooks convention asks).
-            st.error(
-                f"Static (PNG) render failed.\n\n`{type(exc).__name__}: {exc}`\n\n"
-                f"{explain_export_failure(exc)}",
-                icon=":material/cloud_off:",
-            )
-            st.stop()
-        st.image(png, width="stretch")
-        st.download_button(
-            "Download PNG",
-            png,
-            file_name=f"{chart_type}-chart.png",
-            mime="image/png",
-            icon=":material/download:",
-        )
-        st.caption(
-            "Static PNG rendered server-side via the Highcharts export server — "
-            "the browser loads no Highcharts JS."
-        )
-    else:
-        html = cached_chart_html(
-            df,
-            chart_type,
-            x_col,
-            tuple(y_cols),
-            height,
-            title,
-            size_col=size_col,
-            target_col=target_col,
-            parent_col=parent_col,
-            end_col=end_col,
-            high_col=high_col,
-            title_col=title_col,
-            goal_col=goal_col,
-            width_col=width_col,
-            after_col=after_col,
-            agg=agg,
-            dial=dial,
-        )
-        # The HTML is embedded in a sandboxed iframe with a FIXED height. st.iframe
-        # DOES measure its content by default (`height="content"`), so the pin is a
-        # choice, not a workaround: the same `height` feeds build_chart_html and the
-        # sidebar's Height (px) slider, and letting the iframe self-measure would sever
-        # that slider from the embed it is supposed to size. +24px for the chrome.
-        st.iframe(html, height=height + 24)
-        st.caption(
-            "Interactive chart — Highcharts JS is loaded from the CDN in the browser."
-        )
+    html = cached_chart_html(
+        df,
+        chart_type,
+        x_col,
+        tuple(y_cols),
+        height,
+        title,
+        size_col=size_col,
+        target_col=target_col,
+        parent_col=parent_col,
+        end_col=end_col,
+        high_col=high_col,
+        title_col=title_col,
+        goal_col=goal_col,
+        width_col=width_col,
+        after_col=after_col,
+        agg=agg,
+        dial=dial,
+    )
+    # The HTML is embedded in a sandboxed iframe with a FIXED height. st.iframe
+    # DOES measure its content by default (`height="content"`), so the pin is a
+    # choice, not a workaround: the same `height` feeds build_chart_html and the
+    # sidebar's Height (px) slider, and letting the iframe self-measure would sever
+    # that slider from the embed it is supposed to size. +24px for the chrome.
+    st.iframe(html, height=height + 24)
+    st.caption(
+        "Interactive chart — Highcharts JS is loaded from the CDN in the browser. "
+        "Use the chart's ☰ menu to download it as PNG, JPEG or SVG."
+    )
 
     # Gate the generated-config panel behind a toggle so cached_chart_js only
     # builds (and re-hashes df) when the user actually asks for it. A plain

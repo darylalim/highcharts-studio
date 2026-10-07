@@ -33,8 +33,8 @@ sample_data.py / CSV upload
   -> streamlit_app.py        widgets, guards, @st.cache_data wrappers, KPI row
   -> build_options()         DataFrame -> Highcharts options dict  (Streamlit-free)
   -> Chart.from_options()    via make_chart()
-  -> build_chart_html()      iframe, Highcharts from the CDN        (interactive)
-     build_chart_png()       bytes from the export server           (static)
+  -> build_chart_html()      iframe, Highcharts from the CDN; its ☰ menu draws
+                             PNG/JPEG/SVG downloads in the browser
 ```
 
 ## Quick start
@@ -47,9 +47,9 @@ uv run pytest && uv run ruff check . && uv run ty check   # the three gates
 
 **No environment variables, no secrets, and no API keys are required.** The app reads
 nothing from `st.secrets` or `os.environ`; `.streamlit/secrets.toml` appears only as a
-`permissions.deny` rule, guarding a file this project does not use. The two network
-dependencies are unauthenticated CDNs — `code.highcharts.com` (interactive) and
-`export.highcharts.com` (static PNG).
+`permissions.deny` rule, guarding a file this project does not use. The one network
+dependency is an unauthenticated CDN, `code.highcharts.com`, fetched by the viewer's browser;
+downloads are drawn in the browser too, so the app never contacts `export.highcharts.com`.
 
 ## Structure
 
@@ -57,11 +57,9 @@ dependencies are unauthenticated CDNs — `code.highcharts.com` (interactive) an
   chart-type/column controls (pills for the Y series, falling back to `st.multiselect` on
   wide CSVs, plus one extra column selector per extra column kwarg), the `@st.cache_data`
   wrappers, a KPI metric row (its third metric adapts via `MARK_METRICS` — see
-  [Chart types](#chart-types)), the render-mode selector (interactive iframe / static
-  PNG — the PNG path passing `CHART_PNG_WIDTH` so the export server lays the chart out at the
-  width it will be shown at rather than at its own 600px default, see
-  [Conventions](#conventions)), the chart embed, and a toggle revealing the generated
-  Highcharts config (JS). The
+  [Chart types](#chart-types)), the chart embed (its ☰ menu downloads PNG/JPEG/SVG, drawn in
+  the browser; there is no render-mode selector since the Static PNG mode was retired, see
+  [Conventions](#conventions)), and a toggle revealing the generated Highcharts config (JS). The
   **no-plottable-columns gate** runs *below* the chart-type selectbox and is
   **type-aware**: xrange's start/end are coordinates and may be dates, and a date column
   is object dtype, so a canonical Gantt CSV has no numeric columns at all and a
@@ -86,12 +84,11 @@ dependencies are unauthenticated CDNs — `code.highcharts.com` (interactive) an
   keyed widget a run does not instantiate, and this gate stops *above* the keyed X and Y
   pickers ([the measurement](docs/decisions.md#keyed-widgets-the-third-way-a-picker-loses-its-answer)).
 - `highcharts_builder.py` — pure, Streamlit-free helpers that turn a DataFrame into a
-  Highcharts options `dict`, a `Chart`, and embeddable HTML or PNG bytes. Independently
+  Highcharts options `dict`, a `Chart`, and embeddable HTML. Independently
   importable and unit-testable. It also owns three things that would otherwise drift from
-  it: the **diagnosis** of its own failures (`explain_export_failure`, `explain_tree_error`,
-  `explain_xrange_error`, `explain_gauge_error`, `explain_networkgraph_error` — so a message
-  can't drift from the error it stands in for; the first duck-types on `exc.response.status_code` rather than
-  importing `requests`, which this project never declares), the **options** its widgets
+  it: the **diagnosis** of its own failures (`explain_tree_error`, `explain_xrange_error`,
+  `explain_gauge_error`, `explain_networkgraph_error` — so a message can't drift from the error
+  it stands in for), the **options** its widgets
   offer (`picker_columns` — one sniff of the frame answering both coordinate pickers at once,
   with `coordinate_columns` / `date_columns` as thin wrappers over its two halves — the app
   reads the pair, and the wrappers stay for the pure-API caller and their own tests. What the one
@@ -155,8 +152,7 @@ dependencies are unauthenticated CDNs — `code.highcharts.com` (interactive) an
   unlocks the in-app light/dark toggle, so a lone `[theme]` locks the app to one mode,
   here **dark**. Pinned by `test_app_theme_is_a_single_mode_with_no_light_dark_toggle`,
   because re-adding a subtable is a change nothing else would object to. Chart colors are
-  themed separately (see Conventions) since no theme CSS reaches an iframe or a
-  server-side PNG.
+  themed separately (see Conventions) since no theme CSS reaches an iframe.
 - `.claude/settings.json` + `.claude/hooks/*.py` — committed Claude Code hooks that mirror
   the CI gates, plus the `permissions.deny` rules that protect `uv.lock`,
   `.streamlit/secrets.toml` and `.git/` (see [Hooks](#hooks)).
@@ -186,8 +182,8 @@ dependencies are unauthenticated CDNs — `code.highcharts.com` (interactive) an
   pattern applied to release tooling; the impure parts stay in the workflow.
 - `LICENSE` / `NOTICE` — MIT for this project's own code, kept *pristine* (no text
   appended) so GitHub's detector classifies the repo as MIT; the third-party notice is
-  split out because the two proprietary layers the app renders with (Highcharts JS / the
-  export server, and the `highcharts-core` wrapper) are separately licensed and not
+  split out because the two proprietary layers the app renders with (Highcharts JS, and the
+  `highcharts-core` wrapper) are separately licensed and not
   covered by the MIT grant. Both are declared via `pyproject.toml`'s
   `license`/`license-files` and guarded by `tests/test_packaging.py`.
 - `CHANGELOG.md` — the release notes, newest first (Keep a Changelog format). Its top
@@ -211,15 +207,11 @@ chart = make_chart(df, chart_type, x_col, y_cols, title=title)
 # interactive: get_script_tags() + to_js_literal() wrapped as HTML for st.iframe
 html = build_chart_html(df, chart_type, x_col, y_cols, height=height, title=title)
 
-# static: rendered server-side to PNG bytes via the export server, for st.image
-png = build_chart_png(df, chart_type, x_col, y_cols, title=title)
-
-# ...and, when that raises, why — a build error, an unreachable server, or an HTTP
-# answer (a 4xx rejection is worth saying out loud: the server is plainly reachable).
-message = explain_export_failure(exc)  # plain markdown; the module stays Streamlit-free
+# downloads: none — every chart carries Highcharts' ☰ menu (`_EXPORTING`), which draws
+# PNG/JPEG/SVG in the browser with the export-server fallback off
 ```
 
-None of them takes a mode flag: `_themed` applies the dark chrome unconditionally, because
+Neither takes a mode flag: `_themed` applies the dark chrome unconditionally, because
 `.streamlit/config.toml` is a single `[theme]` and every viewer therefore gets the dark
 shell. The chart no longer *follows* the shell, it assumes it — which is why
 `test_app_theme_is_a_single_mode_with_no_light_dark_toggle` is load-bearing. The removed
@@ -228,8 +220,8 @@ shell. The chart no longer *follows* the shell, it assumes it — which is why
 
 Beyond `x_col`/`y_cols`, a type may take one of **9 extra column kwargs**, and which types
 share one is a deliberate claim — *a link is a link, but a goal is not a high*. Reusing a
-kwarg leaves the cache layer untouched; a new one costs three wrappers and three call
-sites, and that cost is paid whenever the **role** differs even though the dtype and
+kwarg leaves the cache layer untouched; a new one costs a wrapper and a call site per
+renderer, and that cost is paid whenever the **role** differs even though the dtype and
 picker source match. It costs no test edit: `_FORWARDED` is **derived** from the builders'
 signatures, so the cache-layer checks pick a new kwarg up automatically — but the kwarg
 **table below** is pinned by name, so a new row is not optional. Each row's middle cell is
@@ -309,7 +301,7 @@ The project's dominant task, and the one that touches the most files. In order:
 6. **Wire**: add the selector in `streamlit_app.py`, a `vocabularies` row if the type reads a
    column vocabulary other than `numeric_cols` (the row carries its Y source and both of its
    messages, so this is the one edit a coordinate type cannot half-do), any extra column widget, and
-   forward it through all three **renderer** cache wrappers **by keyword, under its own
+   forward it through both **renderer** cache wrappers **by keyword, under its own
    name** (and through `cached_count_marks` too, if `count_marks` reads it). A new
    kwarg also needs a row in the kwarg table above.
 7. **Test**: extend the three [sweeps](#test) rather than writing a per-type test, and
@@ -336,12 +328,11 @@ only the on-disk persisted cache, and its own source says so. A `runOnSave` reru
 clear them either. In-process, `st.cache_data.clear()` or the app menu's **Clear cache**
 does the job.
 
-A *blank* chart is usually a network issue instead: interactive mode loads Highcharts from
-the CDN (`code.highcharts.com`, at the pinned `HIGHCHARTS_JS_VERSION`), static mode from the
-export server (`export.highcharts.com`).
+A *blank* chart is usually a network issue instead: the chart loads Highcharts from the CDN
+(`code.highcharts.com`, at the pinned `HIGHCHARTS_JS_VERSION`).
 
 **Verify by rendering** (the methodology this project cites everywhere — a new type's
-`_themed` hook, null/edge-case geometry, and interactive↔PNG parity are *decided by
+`_themed` hook, null/edge-case geometry, and chart↔download parity are *decided by
 looking*, never inferred from a base class): render one chart to a file with
 `build_chart_html(df, type, …)`, serve it over `http://localhost`
 (`python3 -m http.server PORT --directory <dir>` in the background — `file://` is blocked
@@ -371,7 +362,7 @@ uv run pytest
 `tests/test_smoke.py` exercises the pure builder (`build_options`) parametrized across
 every supported chart type, then drives the full app headless via Streamlit's `AppTest`
 (switching controls, revealing the generated config, the KPI metric row, the wide-CSV
-`st.multiselect` fallback, the render-mode selector's two modes, and the guard messages).
+`st.multiselect` fallback, the absence of a render-mode control, and the guard messages).
 Per-type test inventory:
 [`docs/chart-types.md`](docs/chart-types.md#the-test-suite-type-by-type).
 
@@ -388,14 +379,13 @@ whenever someone remembers — prefer extending a sweep to writing a per-type te
 
 The app's **cache layer** is the part the ordinary AppTests barely reach, so it is pinned
 from **two** directions: **statically**, by two `ast` tests that read `streamlit_app.py` as
-source (each of the three **renderer** wrappers in `_CACHE_LAYER` forwards every
-column/policy argument under its **own** name, and all three call sites pass them by
-keyword); and **dynamically**, by
-`test_app_static_png_mode_executes_the_cached_png_wrapper`, which selects Static PNG for
-real with `build_chart_png` monkeypatched to a recorder, so no export server is contacted.
-The set of arguments both layers check is **derived** from the three builders' signatures
-(`_forwarded_arguments`), not hand-listed, so a new kwarg is covered the day it is added.
-There is a **fourth** cached wrapper, `cached_count_marks`, deliberately outside `_CACHE_LAYER`:
+source (each **renderer** wrapper in `_CACHE_LAYER` forwards every column/policy argument
+under its **own** name, and every call site passes them by keyword); and **dynamically**, by
+`test_app_executes_the_cached_html_wrapper_and_forwards_every_kwarg`, which runs the app with
+`build_chart_html` monkeypatched to a recorder. The set of arguments both layers check is
+**derived** from the builders' signatures (`_forwarded_arguments`, which excludes
+`container_id` by name), not hand-listed, so a new kwarg is covered the day it is added.
+There is a further cached wrapper, `cached_count_marks`, deliberately outside `_CACHE_LAYER`:
 `_FORWARDED` is derived from the *builders*, so it names `size_col`/`goal_col`/`agg`/`dial` and
 the rest — kwargs `count_marks` does not take. It forwards the three columns it actually reads.
 Why static, and why that test clears the caches on the way *out*:
@@ -598,8 +588,8 @@ conventions in their original, fully-enumerated form); the argument behind each 
 - **Non-finite is missing.** `pd.isna(inf)` is `False`, but an infinity can't be
   serialized: `to_js_literal` emits the bare token `inf`, which is not a JavaScript
   identifier (JS spells it `Infinity`), so the chart call dies with a `ReferenceError` and
-  the iframe renders blank; the export server, sent the non-standard JSON literal
-  `Infinity`, answers `400`. Each type applies its own missing-data policy to a non-finite
+  the iframe renders blank (the retired export server, sent the non-standard JSON literal
+  `Infinity`, answered `400`). Each type applies its own missing-data policy to a non-finite
   **value** — keep-the-slot types via `_num`, drop-the-row types via `_plottable`, the
   aggregating types via `_finite_values` — and the same policy governs the **label** column
   via `_label_ok`. Reachable from a plain CSV: `inf`, `Infinity`, `-inf` and `1e400` (which
@@ -607,8 +597,9 @@ conventions in their original, fully-enumerated form); the argument behind each 
   **empty** column sums to `0.0`, the additive **identity** — a confident claim of "the
   total is zero" where the truth is "there is no data" — so `_gauge_value` tests for empty
   **above** the reducer. Only `sum` lies, which makes it worse rather than better.
-- **Two string shapes the serializer emits UNQUOTED**, and both blank the **iframe** while the
-  **PNG renders perfectly** — an interactive-only divergence no options-dict test can see, so
+- **Two string shapes the serializer emits UNQUOTED**, and both blank the **iframe** — and
+  its download, which re-renders it in the browser (the retired export server, built from JSON,
+  rendered them perfectly, which is how they hid). No options-dict test can see it, so
   assert on `to_js_literal()` output, never on the dict. (1) A value that opens `{`, closes `}`
   and carries **at least as many colons as brace-pairs** is written as a bare JS object on **any
   key and any axis** —
@@ -635,25 +626,25 @@ conventions in their original, fully-enumerated form); the argument behind each 
   `<svg>`, **not** `html` —
   [why the pin must sit that low](docs/decisions.md#color-scheme-why-the-pin-sits-on-the-svg)).
   Highcharts ≥ 13 expresses its own defaults as `light-dark()` CSS variables, so any color
-  the project does *not* set would follow the **viewer's browser**. The export server
-  already rasterizes with the light resolution, so this makes the two render modes agree
-  and leaves `_themed` the single source of truth for the dark chrome. Anything a new chart
-  type wants themed must go through `build_options`. The export server has defaults of its own,
-  and the same rule applies to them: the app passes `CHART_PNG_WIDTH = 800` to
-  `build_chart_png` because the server otherwise lays the chart out at **600px** and
-  `st.image(..., width="stretch")` then stretches that layout — so the two modes drew genuinely
-  different charts. Highcharts lays out text at the width it is given and **truncates** labels at
-  600 ("Incorporat"), which no amount of stretching undoes; it bites every type and bites hardest
-  where a label IS the mark's identity. The **Highcharts release itself** is the largest default
+  the project does *not* set would follow the **viewer's browser**; the pin leaves `_themed` the
+  single source of truth for the dark chrome. Anything a new chart type wants themed must go
+  through `build_options`. Export has defaults of its own, and the same rule applies to them:
+  `_EXPORTING` sets `sourceWidth: 800` because the browser's export otherwise lays the chart out
+  at **600px** (the embed's `width:100%` gives it no pixel width to read), as the retired export
+  server did. Highcharts lays out text at the width it is given and **truncates** labels at 600
+  ("Incorporat"), which no rescaling undoes; it bites every type and bites hardest where a label
+  IS the mark's identity. The menu's chrome is themed in `_themed` too, except the ☰ button's
+  hover fill, which options cannot express and `_EXPORT_BUTTON_CSS` sets
+  ([why](docs/decisions.md#static-png-mode-and-its-retirement)). The **Highcharts release itself** is the largest default
   of all: highcharts-core emits unversioned CDN URLs, which serve whatever Highcharts released
   last, so `_pin_script_tags` rewrites every script to `HIGHCHARTS_JS_VERSION` (and raises on a
   URL it cannot pin, rather than let one module load a different release). An upgrade is a
   deliberate edit: bump the constant, render-check, ship. Never pin below **11.4.4**
   ([why](docs/decisions.md#highcharts-js-one-pinned-release)).
 - **Chart colors.** Theme via `highcharts_builder.DEFAULT_COLORS` (applied by
-  `build_options` to every chart, so the iframe and PNG paths are themed too). It **is**
+  `build_options` to every chart, so its downloads are themed too). It **is**
   `.streamlit/config.toml`'s `chartCategoricalColors`, copied by hand because no theme CSS
-  reaches an iframe or a server-side PNG; `_DARK_CHROME`'s `bg`/`text`/`muted`/`grid` are
+  reaches an iframe; `_DARK_CHROME`'s `bg`/`text`/`muted`/`grid` are
   likewise its `backgroundColor`/`textColor`/`grayColor`/`borderColor`, and
   `_HEATMAP_GRADIENT`'s two endpoints come off its `chartSequentialColors`. All of it is
   guarded by `test_theme_colors_stay_in_sync_with_config`, so the copy fails the suite

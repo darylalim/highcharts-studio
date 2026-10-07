@@ -10,7 +10,7 @@ lives can't silently drift apart:
 - the ``LICENSE`` file — kept as *pristine* MIT text (nothing appended), so
   GitHub's license detector classifies the repo as "MIT" and not "Other",
 - the ``NOTICE`` file — the third-party notice flagging the two proprietary
-  layers it renders with (Highcharts JS / the export server, and the
+  layers it renders with (Highcharts JS, and the
   ``highcharts-core`` wrapper), split out of ``LICENSE`` precisely so the
   detector isn't thrown off,
 - the ``README.md`` ``## License`` section,
@@ -62,7 +62,7 @@ def _project_metadata() -> dict:
 
 def _collapse_ws(text: str) -> str:
     """Lowercase and collapse whitespace runs so substring checks ignore how the
-    prose is line-wrapped (e.g. "export server" split across two lines)."""
+    prose is line-wrapped (e.g. "Highcharts JS" split across two lines)."""
     return re.sub(r"\s+", " ", text.lower())
 
 
@@ -144,7 +144,6 @@ def test_license_notice_flags_both_proprietary_layers():
     # either is the exact mistake this pins.
     text = _collapse_ws((ROOT / "NOTICE").read_text())
     assert "highcharts js" in text
-    assert "export server" in text
     assert "highcharts-core" in text
     assert "proprietary" in text
     # ...and that the MIT grant is explicitly disclaimed over them (the notice's
@@ -161,7 +160,6 @@ def test_readme_license_section_reflects_mit_and_the_notice():
     # Both proprietary layers get surfaced to a reader who never opens LICENSE,
     # with the same proprietary framing the LICENSE-file test pins.
     assert "highcharts js" in section
-    assert "export server" in section
     assert "highcharts-core" in section
     assert "proprietary" in section
     # The notice now lives in NOTICE, not LICENSE, so the section must point

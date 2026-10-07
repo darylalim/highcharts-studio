@@ -28,7 +28,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [Tooltip precision: when a channel is a value's only home](#tooltip-precision-when-a-channel-is-a-values-only-home) ·
 [`</script>` in user text: an encoding, not an edit](#script-in-user-text-an-encoding-not-an-edit) ·
 [Large data: the turboThreshold bug that was not there](#large-data-the-turbothreshold-bug-that-was-not-there) ·
-[Highcharts JS: one pinned release](#highcharts-js-one-pinned-release)
+[Highcharts JS: one pinned release](#highcharts-js-one-pinned-release) ·
+[Static PNG mode, and its retirement](#static-png-mode-and-its-retirement)
 
 ## Packaging: the fact with no second home
 
@@ -164,14 +165,17 @@ and only the network was ever worth avoiding:
   because `import streamlit_app` **executes the whole Streamlit script** — and because it
   catches what the keyword form cannot: `goal_col=high_col` type-checks, caches, and
   renders the wrong column while every assertion about *names* passes.
-- **Dynamically**, by `test_app_static_png_mode_executes_the_cached_png_wrapper`, which
-  selects Static PNG for real with `highcharts_builder.build_chart_png` monkeypatched to a
-  recorder, so forwarding is observed as **values** and no export server is contacted.
+- **Dynamically**, by a test that runs the app with the builder monkeypatched to a recorder,
+  so forwarding is observed as **values**. It was written for `cached_chart_png`
+  (`test_app_static_png_mode_executes_the_cached_png_wrapper`, selecting Static PNG with no
+  export server contacted); since that mode's retirement in 0.21.0 it is
+  `test_app_executes_the_cached_html_wrapper_and_forwards_every_kwarg`, on `cached_chart_html`.
 
 That dynamic test clears the `@st.cache_data` caches on the way **out** as well as in.
-`monkeypatch` restores the function but not the cached *value*, so a stand-in PNG left
-behind would be served to any later Static PNG render — which would then pass **without
-calling the builder at all**, reintroducing the exact vacuity the test was written to end.
+`monkeypatch` restores the function but not the cached *value*, so a stand-in result left
+behind would be served to any later render with the same arguments — which would then pass
+**without calling the builder at all**, reintroducing the exact vacuity the test was written
+to end.
 
 ## Keyed widgets: the third way a picker loses its answer
 
@@ -331,9 +335,11 @@ win.
 
 It is needed because Highcharts ≥ 13 expresses its own defaults as `light-dark()` CSS
 variables: any color the project does *not* set explicitly would follow the **viewer's
-browser** rather than the project's theme. The export server already rasterizes with the
-light resolution, so pinning it makes the two render modes agree and leaves `_themed` the
-single source of truth for dark mode.
+browser** rather than the project's theme. The export server rasterized with the light
+resolution, so pinning it made the two render modes agree; since the Static PNG mode's
+retirement (0.21.0) the reason that remains is the other half — it leaves `_themed` the single
+source of truth for dark mode, and the browser's own export, which re-renders the chart in the
+page, inherits it.
 
 The general rule that falls out: anything a new chart type wants themed must go through
 `build_options`, never through a Highcharts default.
@@ -430,12 +436,12 @@ cannot see the defect, and did not.
 
 `to_js_literal` writes some Python strings into the emitted JavaScript **without quotes**.
 When it does, the chart call is not valid JavaScript at all: the browser throws a
-`SyntaxError` and the iframe renders blank — while the Static PNG comes back **perfect**,
-because the export path never touches this code at all: `headless_export` builds its
-payload from `options.to_json()`, where a string is a JSON string and the question of
-quoting does not arise. So the two render modes disagree and only the interactive one is
-wrong, which is the class of bug `_LIGHT_COLOR_SCHEME_CSS` exists to close, arriving
-through a completely different door.
+`SyntaxError` and the iframe renders blank. While the Static PNG mode existed (until 0.21.0)
+its PNG came back **perfect**, because that export path never touched this code at all:
+`headless_export` built its payload from `options.to_json()`, where a string is a JSON
+string and the question of quoting does not arise. So the two render modes disagreed and
+only the interactive one was wrong. Today there is one render, and the browser's export
+re-renders it, so the bug blanks the chart and its download alike.
 No assertion over an options dict can see either of the two cases below; both are only
 visible in `Chart.to_js_literal()` output.
 
@@ -787,5 +793,69 @@ modules in order. Three choices in it are deliberate:
 `403 Missing Referer` to a request without a `Referer` header, so a script cannot settle whether a
 module exists at a version.
 
-The export server (the Static PNG path) runs its own Highcharts, which this does not reach. Plan
-#13 retires that path, after which the pin covers every chart the app draws.
+When this was written the export server (the Static PNG path) ran its own Highcharts, which the
+pin did not reach. Plan #13 retired that path in 0.21.0, so the pin now covers every chart the
+app draws, downloads included.
+
+## Static PNG mode, and its retirement
+
+Until 0.21.0 the app had two render modes: **Interactive** (the iframe) and **Static PNG**, which
+sent the chart to `export.highcharts.com` and showed the image with a download button. It was
+retired (plan #13) because everything it cost was paid by every user:
+
+- **A remote service** on every static render, and the app's only server-side network call.
+- **Three failure modes** with no fix inside the app — the request never sent (a build error),
+  sent and unanswered (unreachable server), answered with an error (4xx/5xx) — and
+  `explain_export_failure` to tell them apart.
+- **Two renderers that disagreed.** The server built from `options.to_json()` and loaded every
+  module, so a whole class of interactive-only bugs (unquoted strings, a missing or misordered
+  module, a solid gauge without its pane) hid behind a perfect PNG; and it laid the chart out at
+  600px unless told otherwise, which is why `CHART_PNG_WIDTH = 800` existed.
+- **One more control**, the Mode selector, which changed how the chart was drawn but not what.
+
+**What replaced it.** Every chart carries Highcharts' ☰ export menu (`_EXPORTING`, applied by
+`_themed`), from `modules/exporting` + `modules/offline-exporting`, which `get_script_tags` pulls
+in on its own once the options carry an `exporting` block — so `_pin_script_tags` versions them
+like any other module. The settings that carry the design:
+
+- `fallbackToExportServer: false`. Left on, an export the browser cannot do is quietly sent to
+  the server this removed. Off, a failure reports instead.
+- **Three menu items**, PNG/JPEG/SVG. The default menu also offers PDF, which needs
+  `exporting.libURL` to load jsPDF, and that option has had no default since Highcharts 13; with
+  the fallback off it could only fail.
+- `sourceWidth: 800`. The browser's export falls back to 600px exactly as the server did (the
+  embed's container is `width:100%`, so there is no pixel width to read): the first render came
+  out 1200x960. 800 is the retired `CHART_PNG_WIDTH`, for the same truncation reason.
+- `scale: 2`, so a PNG/JPEG is 1600x960 at the default height.
+
+**Verified by rendering, 2026-10-07** (Chrome, Highcharts 13.1.1): all 30 types exported PNG and
+SVG through `exporting.exportChart()` — the menu's own entry point, which merges the chart's
+`exporting` options (a direct `localExport` call skips that merge and exports at scale 1) — each
+PNG 1600x960 with the dark background in its corner pixel, no export error, and **zero** requests
+to `export.highcharts.com`. The menu and the ☰ button render dark, and the boxplot, heatmap and
+xrange exports were compared by eye with the on-screen charts. The downloads were intercepted in
+the page rather than saved.
+
+**A serializer finding.** The menu and button default to `var(--highcharts-background-color)`,
+which the `color-scheme` pin resolves to white, so they are themed in `navigation` like the rest
+of the chrome. The button's **hover** fill cannot be: highcharts-core types
+`navigation.buttonOptions.theme.states` with the *series* state model, which has no `fill`, and
+emits the hover dict as a JS string Highcharts ignores. So that one value is CSS,
+`_EXPORT_BUTTON_CSS` in `build_chart_html` — the only chart chrome themed outside the options,
+and safe because the button never appears in an exported image.
+
+**What it traded away.** A PNG that needed no client-side JavaScript, and the export server's
+independent rendering as an accidental parity check — though that check mostly *hid* bugs rather
+than catching them, since it was the half that worked.
+
+**The cache layer.** `_CACHE_LAYER` is down to two renderer wrappers. The dynamic forwarding test
+moved from `cached_chart_png` to `cached_chart_html`
+([the cache layer](#the-cache-layer-that-nothing-executed)), and `_forwarded_arguments` now
+excludes `container_id` by name: it used to fall out of the builders' intersection only because
+`build_chart_png` had no container.
+
+**Checked across browsers (2026-10-07):** Chrome's code path was exercised by script, with each
+download intercepted rather than saved. Real downloads were then tested by hand in **Firefox and
+Safari**: PNG and SVG both save from inside Streamlit's sandboxed iframe, and the PNG is dark.
+That was the condition that could have made the change unshippable, since the ☰ menu is now the
+only way to download a chart.

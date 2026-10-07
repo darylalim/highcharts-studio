@@ -33,6 +33,41 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.21.0] - 2026-10-07
+
+A new capability and removed public API, so a minor.
+
+### Added
+
+- **A ☰ export menu on every chart.** Highcharts' `exporting` and `offline-exporting` modules
+  draw PNG, JPEG and SVG downloads **in the browser**, with `fallbackToExportServer` off so a
+  failed export reports instead of quietly calling the export server. The menu and its button are
+  themed dark like the rest of the chart chrome. Verified by rendering: all 30 types export PNG
+  and SVG through the menu's own path, with the dark background and no request to the export
+  server.
+
+### Removed
+
+- **Static PNG mode and the render-mode selector.** The sidebar's "3 · Render" section is gone;
+  every chart is the interactive one, and downloads come from its menu.
+- **Public API: `build_chart_png` and `explain_export_failure`** from `highcharts_builder`. The
+  first rendered through `export.highcharts.com`; the second explained its failures. Neither has
+  a replacement, because nothing is rendered server-side any more.
+
+### Changed
+
+- **The app no longer contacts `export.highcharts.com`.** Its only network dependency is the
+  Highcharts CDN, fetched by the viewer's browser.
+- **Export size:** downloads are laid out at 800px (`sourceWidth`, the retired
+  `CHART_PNG_WIDTH`, since Highcharts otherwise falls back to 600px and truncates labels) at
+  `scale: 2`, so a PNG/JPEG is 1600x960 at the default height.
+- The Streamlit floor stays at 1.59.0, though the test that set it (`app.image`, Static PNG)
+  is gone; lowering it needs a green suite at the lower version first.
+
+Why, and what it traded away:
+[`docs/decisions.md`](docs/decisions.md#static-png-mode-and-its-retirement). Downloads were
+checked by hand in Firefox and Safari: PNG and SVG save, and the PNG is dark.
+
 ## [0.20.6] - 2026-10-07
 
 A label and docstring change with no new capability, so a patch.
