@@ -337,8 +337,8 @@ clear them either. In-process, `st.cache_data.clear()` or the app menu's **Clear
 does the job.
 
 A *blank* chart is usually a network issue instead: interactive mode loads Highcharts from
-the CDN (`code.highcharts.com`), static mode from the export server
-(`export.highcharts.com`).
+the CDN (`code.highcharts.com`, at the pinned `HIGHCHARTS_JS_VERSION`), static mode from the
+export server (`export.highcharts.com`).
 
 **Verify by rendering** (the methodology this project cites everywhere — a new type's
 `_themed` hook, null/edge-case geometry, and interactive↔PNG parity are *decided by
@@ -644,7 +644,12 @@ conventions in their original, fully-enumerated form); the argument behind each 
   `st.image(..., width="stretch")` then stretches that layout — so the two modes drew genuinely
   different charts. Highcharts lays out text at the width it is given and **truncates** labels at
   600 ("Incorporat"), which no amount of stretching undoes; it bites every type and bites hardest
-  where a label IS the mark's identity.
+  where a label IS the mark's identity. The **Highcharts release itself** is the largest default
+  of all: highcharts-core emits unversioned CDN URLs, which serve whatever Highcharts released
+  last, so `_pin_script_tags` rewrites every script to `HIGHCHARTS_JS_VERSION` (and raises on a
+  URL it cannot pin, rather than let one module load a different release). An upgrade is a
+  deliberate edit: bump the constant, render-check, ship. Never pin below **11.4.4**
+  ([why](docs/decisions.md#highcharts-js-one-pinned-release)).
 - **Chart colors.** Theme via `highcharts_builder.DEFAULT_COLORS` (applied by
   `build_options` to every chart, so the iframe and PNG paths are themed too). It **is**
   `.streamlit/config.toml`'s `chartCategoricalColors`, copied by hand because no theme CSS

@@ -16,6 +16,7 @@ from __future__ import annotations
 import html
 import itertools
 import math
+import re
 import warnings
 from typing import Any
 
@@ -5576,6 +5577,48 @@ _MODULE_LOAD_ORDER = (
     (_SANKEY_MODULE, "modules/organization.js"),
 )
 
+# The Highcharts JS release every interactive chart loads, for highcharts.js and every module alike.
+# highcharts-core emits UNVERSIONED CDN URLs (`https://code.highcharts.com/highcharts.js`), which
+# serve whatever Highcharts released last — so the JS that draws every chart changed under the app
+# with no change here (Highcharts 13's `light-dark()` defaults did exactly that, which is why
+# `_LIGHT_COLOR_SCHEME_CSS` exists). Pinned, an upgrade is a deliberate edit: bump this, render-check,
+# ship. 13.1.1 is the release the app was already drawing with when it was pinned (2026-10-07), so
+# pinning changed no chart. The FLOOR is 11.4.4: up to 11.4.3 a series of point OBJECTS past
+# `turboThreshold` drew blank, and 11 of the types emit them (see docs/decisions.md, "Large data").
+# The export server (the Static PNG path) runs its own Highcharts and is not affected by this.
+HIGHCHARTS_JS_VERSION = "13.1.1"
+_HIGHCHARTS_CDN = "https://code.highcharts.com/"
+
+
+def _pin_script_tags(script_tags: str) -> str:
+    """Rewrite every ``code.highcharts.com`` script URL to load ``HIGHCHARTS_JS_VERSION``.
+
+    ``https://code.highcharts.com/modules/sankey.js`` becomes
+    ``https://code.highcharts.com/<version>/modules/sankey.js``, the CDN's versioned path, so
+    highcharts.js and every module it needs load the SAME release. Rewrites the tag text from
+    ``get_script_tags`` rather than rebuilding it, as ``_order_script_tags`` does.
+
+    RAISES on a ``src`` that is not an unversioned ``code.highcharts.com`` URL: one that slipped
+    through would load the latest release beside pinned modules (a version mix that can break the
+    chart outright), and it would do so silently. A loud error beats that, and it also catches the
+    day highcharts-core changes its URL format, when a substring rewrite would otherwise no-op.
+    """
+    srcs = re.findall(r'src="([^"]*)"', script_tags)
+    unexpected = [
+        src
+        for src in srcs
+        if not src.startswith(_HIGHCHARTS_CDN)
+        or re.match(r"\d+\.\d+\.\d+/", src.removeprefix(_HIGHCHARTS_CDN))
+    ]
+    if unexpected:
+        raise ValueError(
+            f"cannot pin Highcharts to {HIGHCHARTS_JS_VERSION}: unexpected script URL(s) "
+            f"{unexpected} (expected unversioned {_HIGHCHARTS_CDN}… URLs from get_script_tags)"
+        )
+    return script_tags.replace(
+        f'src="{_HIGHCHARTS_CDN}', f'src="{_HIGHCHARTS_CDN}{HIGHCHARTS_JS_VERSION}/'
+    )
+
 
 def _order_script_tags(script_tags: str) -> str:
     """Ensure each module that EXTENDS another loads after it — ``modules/dependency-wheel.js`` and
@@ -5692,8 +5735,11 @@ def build_chart_html(
     # `_order_script_tags`.
     # get_script_tags(as_str=True) returns str, but the stub types it list[str] | str — the
     # to_js_literal `str | None` stub mismatch, one method over (see the module's ty notes).
-    script_tags = _order_script_tags(
-        chart.get_script_tags(as_str=True)  # ty: ignore[invalid-argument-type]
+    # `_pin_script_tags` then loads every one of them from HIGHCHARTS_JS_VERSION, never "latest".
+    script_tags = _pin_script_tags(
+        _order_script_tags(
+            chart.get_script_tags(as_str=True)  # ty: ignore[invalid-argument-type]
+        )
     )
     # Escaped because user text (labels, column names, the title) sits inside JS strings here, and
     # a `</script>` in any of them would end the element early. to_js_literal is stubbed

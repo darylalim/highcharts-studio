@@ -33,6 +33,21 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.20.5] - 2026-10-07
+
+No chart changes (the pinned release is the one already in use), so a patch.
+
+### Changed
+
+- **The Highcharts JS release is pinned.** Interactive charts used to load Highcharts from
+  unversioned CDN URLs, which serve whatever Highcharts released last, so a new release could
+  change every chart with no change here. `build_chart_html` now loads highcharts.js and every
+  module from `https://code.highcharts.com/13.1.1/…` (`HIGHCHARTS_JS_VERSION`), and refuses a
+  script URL it cannot pin rather than let one module load a different release. 13.1.1 is what
+  the app was already drawing with, confirmed in the browser for all 30 types. A test keeps the
+  pin at or above 11.4.4, below which 11 types draw blank past 1,000 points. Why, and how to
+  upgrade: [`docs/decisions.md`](docs/decisions.md#highcharts-js-one-pinned-release).
+
 ## [0.20.4] - 2026-10-07
 
 A test-only change, so a patch.

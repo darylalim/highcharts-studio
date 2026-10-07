@@ -27,7 +27,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [The strings highcharts-core emits unquoted](#the-strings-highcharts-core-emits-unquoted) ·
 [Tooltip precision: when a channel is a value's only home](#tooltip-precision-when-a-channel-is-a-values-only-home) ·
 [`</script>` in user text: an encoding, not an edit](#script-in-user-text-an-encoding-not-an-edit) ·
-[Large data: the turboThreshold bug that was not there](#large-data-the-turbothreshold-bug-that-was-not-there)
+[Large data: the turboThreshold bug that was not there](#large-data-the-turbothreshold-bug-that-was-not-there) ·
+[Highcharts JS: one pinned release](#highcharts-js-one-pinned-release)
 
 ## Packaging: the fact with no second home
 
@@ -755,3 +756,36 @@ One practical note for the next person who reads Highcharts' source: `code.highc
 `403 Missing Referer` to a request without a `Referer` header, which is why scripted fetches of it
 fail. The same files are published on npm, so
 `https://cdn.jsdelivr.net/npm/highcharts@<version>/highcharts.src.js` serves the source.
+
+## Highcharts JS: one pinned release
+
+The Python side of the app is pinned and CI-tested; until 0.20.5 the JavaScript that draws every
+chart was not. highcharts-core's `get_script_tags` emits **unversioned** CDN URLs
+(`https://code.highcharts.com/highcharts.js`), and those serve whatever Highcharts released last.
+So a new Highcharts major could change every chart with no change in this repo, and one already
+had: Highcharts 13's `light-dark()` defaults are the reason `_LIGHT_COLOR_SCHEME_CSS` exists.
+
+`_pin_script_tags` rewrites every script to the CDN's versioned path,
+`https://code.highcharts.com/<HIGHCHARTS_JS_VERSION>/…`, after `_order_script_tags` has put the
+modules in order. Three choices in it are deliberate:
+
+- **One version for everything.** highcharts.js and every module (17 distinct URLs across the 30
+  types) load the same release. A module from one release beside a core from another is a mix
+  Highcharts does not promise to support, and the failure would be a blank iframe.
+- **It raises on a URL it does not recognise** — one off the CDN, or already versioned — instead
+  of passing it through. A URL that slipped past would load "latest" silently, and the same check
+  catches the day highcharts-core changes its URL format and the rewrite would quietly no-op.
+- **The pinned version was the one already in use.** 13.1.1 was what the unversioned URLs served
+  on 2026-10-07, confirmed in the browser for all 30 types, so pinning changed no chart. It also
+  sets a floor: **11.4.4**, below which 11 types draw blank past 1,000 points
+  ([Large data](#large-data-the-turbothreshold-bug-that-was-not-there)), pinned by
+  `test_pinned_highcharts_version_is_at_or_above_the_turbo_threshold_floor`.
+
+**Upgrading** is now a deliberate change, like a Python dependency upgrade: bump
+`HIGHCHARTS_JS_VERSION`, render-check (every type loads the new release and draws; the
+`color-scheme` pin holds), and ship. Check the versioned URLs from a **browser**: the CDN answers
+`403 Missing Referer` to a request without a `Referer` header, so a script cannot settle whether a
+module exists at a version.
+
+The export server (the Static PNG path) runs its own Highcharts, which this does not reach. Plan
+#13 retires that path, after which the pin covers every chart the app draws.
