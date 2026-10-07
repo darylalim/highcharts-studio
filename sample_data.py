@@ -1133,6 +1133,10 @@ def _reporting_lines() -> pd.DataFrame:
 
 
 # Label -> factory. Each label hints at the chart types the dataset suits.
+# Ordered by the chart-type picker's families (Basic, Part of whole, Comparison, Flow &
+# hierarchy, Time, Gauge), so the Dataset dropdown reads in the same groups as the picker.
+# The landing dataset stays FIRST: the app opens on it, and the tests read it as
+# `next(iter(SAMPLES.values()))`.
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
     "Fruit sales (pie/bar/column)": _fruit_sales,
@@ -1141,24 +1145,24 @@ SAMPLES = {
     "Daily temperature (areaspline)": _daily_temperature,
     "Country economics, ~2023 (bubble)": _country_economics,
     "Product ratings (radar)": _product_ratings,
-    "Website activity by weekday (heatmap)": _weekly_activity,
     "Company market cap, ~2024 (treemap)": _company_market_cap,
     "Marketing conversion funnel (funnel)": _conversion_funnel,
     "Customer loyalty pyramid (pyramid)": _loyalty_pyramid,
+    "Quarterly profit bridge (waterfall)": _profit_bridge,
+    "Quarterly sales vs quota (bullet)": _sales_vs_quota,
+    "Market share shift by region (dumbbell)": _market_share_shift,
+    "Monthly temperature range (columnrange)": _temperature_range,
+    "Projected monthly active users (arearange)": _forecast_range,
+    "Website activity by weekday (heatmap)": _weekly_activity,
+    "Service response times (boxplot)": _response_times,
+    "Product line margin by revenue (variwide)": _product_line_margin,
     "Energy flow (sankey)": _energy_flow,
     "Regional migration flows (dependencywheel)": _regional_migration,
     "Service dependencies (networkgraph)": _service_dependencies,
     "Company reporting lines (organization)": _reporting_lines,
-    "Service response times (boxplot)": _response_times,
-    "Quarterly profit bridge (waterfall)": _profit_bridge,
     "Company headcount (sunburst)": _org_headcount,
     "Product release plan (xrange)": _release_plan,
-    "Monthly temperature range (columnrange)": _temperature_range,
-    "Projected monthly active users (arearange)": _forecast_range,
-    "Quarterly sales vs quota (bullet)": _sales_vs_quota,
-    "Product line margin by revenue (variwide)": _product_line_margin,
-    "Market share shift by region (dumbbell)": _market_share_shift,
     "Company milestones (timeline)": _company_milestones,
-    "Weekly bookings by region (solidgauge)": _weekly_bookings,
     "Server utilization (gauge)": _server_utilization,
+    "Weekly bookings by region (solidgauge)": _weekly_bookings,
 }

@@ -1589,7 +1589,9 @@ not merely the format string that used to hide the absurd number.
 ## The app's column controls
 
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
-  upload), chart-type/column controls (pills for the Y series, falling back to
+  upload), a two-step chart-type picker (plan #17: family pills over a selectbox of the
+  family's types, from `CHART_FAMILIES`; a family change re-mints the keyless selectbox, so it
+  lands on the family's first type), column controls (pills for the Y series, falling back to
   `st.multiselect` on wide CSVs, plus one type-specific extra column selector per extra
   column kwarg (stated as a rule rather than as a COUNT: this sentence read "the four"
   long after there were nine, and the enumeration below it had already outgrown the

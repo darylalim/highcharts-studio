@@ -371,6 +371,57 @@ SUPPORTED_TYPES = (
     + GAUGE_TYPES
 )
 
+
+# The chart-type picker's two steps (plan #17): a FAMILY, then a type within it, so the common
+# charts come first without removing any. Ordered — the picker shows families in this order and
+# each family's types in their order, most common first, because a family change resets the type
+# to its family's FIRST entry (the type selectbox has no key; its options changing re-mints it).
+# Every supported type is in exactly one family, pinned by a test, so a new type cannot be left
+# unreachable. Heatmap sits in Comparison rather than a Distribution family of its own: it colours
+# a grid of categories by value, and a Distribution family would hold boxplot alone.
+CHART_FAMILIES: dict[str, tuple[str, ...]] = {
+    "Basic": (
+        "line",
+        "spline",
+        "area",
+        "areaspline",
+        "column",
+        "bar",
+        "scatter",
+        "bubble",
+        "radar",
+    ),
+    "Part of whole": ("pie", "treemap", "funnel", "pyramid"),
+    "Comparison": (
+        "waterfall",
+        "bullet",
+        "dumbbell",
+        "columnrange",
+        "arearange",
+        "heatmap",
+        "boxplot",
+        "variwide",
+    ),
+    "Flow & hierarchy": (
+        "sankey",
+        "dependencywheel",
+        "networkgraph",
+        "organization",
+        "sunburst",
+    ),
+    "Time": ("xrange", "timeline"),
+    "Gauge": ("gauge", "solidgauge"),
+}
+
+
+def chart_family(chart_type: str) -> str:
+    """The family ``chart_type`` belongs to in the picker (``CHART_FAMILIES``)."""
+    for family, types in CHART_FAMILIES.items():
+        if chart_type in types:
+            return family
+    raise ValueError(f"{chart_type!r} is in no chart family")
+
+
 # Types whose x_col is a *category* axis, so it can't double as a y series: the
 # cartesian family plus radar (which shares their category-x data shape). Kept to
 # exactly cartesian + radar because it also parametrizes the shared category-x

@@ -31,7 +31,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [Highcharts JS: one pinned release](#highcharts-js-one-pinned-release) ·
 [Static PNG mode, and its retirement](#static-png-mode-and-its-retirement) ·
 [Hosting: a public demo on Community Cloud](#hosting-a-public-demo-on-community-cloud) ·
-[Style: one object, not one kwarg per control](#style-one-object-not-one-kwarg-per-control)
+[Style: one object, not one kwarg per control](#style-one-object-not-one-kwarg-per-control) ·
+[Chart-type picker: families, then types](#chart-type-picker-families-then-types)
 
 ## Packaging: the fact with no second home
 
@@ -941,3 +942,44 @@ points it cannot place, quietly misrepresenting the data).
 **The reference line is a fixed value.** One number, drawn as a horizontal line on the Y axis.
 Rejected: a computed mean or median, because "the mean of which series" has no single answer once
 two Y columns are selected. Its colour aliases an existing chrome colour; no new colour is invented.
+
+## Chart-type picker: families, then types
+
+A selectbox of 30 types made the app look heavier than it is, so plan #17 split it into two steps:
+a **family**, then a **type** within it. Every type stays reachable; the common ones come first.
+`CHART_FAMILIES` in the builder is the single table (six families, each type in exactly one, each
+family's most common type first), pinned by `test_chart_families_partition_the_supported_types`.
+Settled on 2026-10-07, before the code (the `required=True` check came back yes: Streamlit 1.65's
+`st.pills` takes it):
+
+- **Family control: `st.pills`, single select.** One click, it wraps in the narrow sidebar,
+  and the app already uses pills for the Y picker. Not `st.segmented_control` (the app uses
+  it for two-option choices; six segments crowd the sidebar), and not a selectbox (two
+  dropdowns in a row, and a new selectbox above the type selector would shift the 39
+  positional `app.selectbox[n]` lookups in the tests). **Check when building:** whether
+  `st.pills` takes `required=True` as `segmented_control` does here; if not, handle the
+  deselected (`None`) case so the control can never show empty while a chart renders.
+- **On a family change, select the family's first type.** This needs no code: the
+  chart-type selectbox has no `key=`, so when its options change Streamlit gives it a new
+  identity and it resets to the first option. Remembering the last pick per family was
+  rejected: it needs new session state that `keep_picker_state()` would also have to cover,
+  against the lightweight direction. That is why each family lists its most common type
+  first.
+- **Six families, not seven.** Heatmap colours a grid of categories by value, which is a
+  comparison rather than a distribution; moving it would leave a *Distribution* family with
+  only boxplot, so the two merge into *Comparison*. If the freeze in
+  [#10](#10-new-chart-types) lifts and `histogram` arrives, *Distribution* can return with
+  two members.
+- **Help text per family.** The chart-type selectbox's help is one tooltip with 30 bullets
+  today; it shows only the selected family's entries instead.
+- **Order the samples by family.** The Dataset dropdown lists 26 samples in the order they
+  were added. Reorder the `SAMPLES` registry to follow the six families, Basic first, so
+  the list reads in the same groups as the picker. *Monthly revenue vs cost* must stay the
+  **first** entry: it is the landing dataset, and tests read it as
+  `next(iter(SAMPLES.values()))`. A dict reorder, no other code.
+
+**Found while building.** The family control is a **pills** widget, drawn above the Y pills, so
+every test that read `app.pills[0]` (33 of them) would have silently meant the family control. They
+read `_y_pills(app)` now, and every type switch in the AppTests goes through
+`_select_chart_type(app, chart_type)`, which sets the family first, so the family step is one
+function rather than an edit per test.

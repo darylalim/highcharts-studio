@@ -109,7 +109,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | done (0.21.1) |
 | 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | done (0.22.0) |
 | 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | done (0.23.0) |
-| 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
+| 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | done (0.24.0) |
 | 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
 | 12th | 2 | [Export as Python](#2-export-as-python) | S | planned |
 | 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
@@ -201,67 +201,11 @@ which controls each type should gain, one at a time.
 
 ### 17. Group the chart-type picker by family
 
-- **What & why:** A selectbox of 30 types makes the app look heavier than it is. A
-  two-step picker (a **family**, then the **type** within it) shows the common charts first
-  without removing any. Six families, every type in exactly one, each family's most common
-  type first:
-
-  | Family | Types |
-  |---|---|
-  | Basic | line, spline, area, areaspline, column, bar, scatter, bubble, radar |
-  | Part of whole | pie, treemap, funnel, pyramid |
-  | Comparison | waterfall, bullet, dumbbell, columnrange, arearange, heatmap, boxplot, variwide |
-  | Flow & hierarchy | sankey, dependencywheel, networkgraph, organization, sunburst |
-  | Time | xrange, timeline |
-  | Gauge | gauge, solidgauge |
-
-  The app opens on Basic → line, as today.
-- **Why after #5:** both need a per-type table in the builder (`style_controls_for`, and
-  the family map here), so the second one copies the pattern the first one set.
-- **Touches:** `highcharts_builder.py` (a `CHART_FAMILIES` map, pure), `streamlit_app.py`
-  (the family pills above the chart-type selectbox, and its help text), the AppTests that
-  switch chart type, `CLAUDE.md`'s description of the selector, and `README.md`'s.
-- **Tests:**
-  - Every supported type is in **exactly one** family, so a future type cannot be left
-    unreachable (the same safeguard as the docs-count tests).
-  - One `_select_chart_type(app, chart_type)` helper sets the family and then the type, and
-    every AppTest that switches type uses it (the `_pick_sample` pattern), so the family step
-    is one change rather than one per test.
-  - The keyed-picker AppTests must still pass: a family change is a type change, and the X
-    and Y pickers must keep their values through it (the widget-identity rules in
-    `CLAUDE.md`'s Test section). Verify by breaking it.
-- **Decisions:** see [below](#decisions-for-17).
-- **Size:** M · **Status:** planned
-
-#### Decisions for #17
-
-Settled on 2026-10-07:
-
-- **Family control: `st.pills`, single select.** One click, it wraps in the narrow sidebar,
-  and the app already uses pills for the Y picker. Not `st.segmented_control` (the app uses
-  it for two-option choices; six segments crowd the sidebar), and not a selectbox (two
-  dropdowns in a row, and a new selectbox above the type selector would shift the 39
-  positional `app.selectbox[n]` lookups in the tests). **Check when building:** whether
-  `st.pills` takes `required=True` as `segmented_control` does here; if not, handle the
-  deselected (`None`) case so the control can never show empty while a chart renders.
-- **On a family change, select the family's first type.** This needs no code: the
-  chart-type selectbox has no `key=`, so when its options change Streamlit gives it a new
-  identity and it resets to the first option. Remembering the last pick per family was
-  rejected: it needs new session state that `keep_picker_state()` would also have to cover,
-  against the lightweight direction. That is why each family lists its most common type
-  first.
-- **Six families, not seven.** Heatmap colours a grid of categories by value, which is a
-  comparison rather than a distribution; moving it would leave a *Distribution* family with
-  only boxplot, so the two merge into *Comparison*. If the freeze in
-  [#10](#10-new-chart-types) lifts and `histogram` arrives, *Distribution* can return with
-  two members.
-- **Help text per family.** The chart-type selectbox's help is one tooltip with 30 bullets
-  today; it shows only the selected family's entries instead.
-- **Order the samples by family.** The Dataset dropdown lists 26 samples in the order they
-  were added. Reorder the `SAMPLES` registry to follow the six families, Basic first, so
-  the list reads in the same groups as the picker. *Monthly revenue vs cost* must stay the
-  **first** entry: it is the landing dataset, and tests read it as
-  `next(iter(SAMPLES.values()))`. A dict reorder, no other code.
+Done in 0.24.0: `CHART_FAMILIES` and `chart_family` in the builder, family pills (with
+`required=True`, which Streamlit 1.65 supports) over a selectbox of the family's types, help per
+family, and samples in family order. `test_chart_families_partition_the_supported_types` keeps
+every type reachable. The decisions and their reasons:
+[`decisions.md`](decisions.md#chart-type-picker-families-then-types).
 
 ### 15. Embeddable outputs: HTML, JS, JSON
 
