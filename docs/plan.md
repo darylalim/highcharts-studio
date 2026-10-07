@@ -106,13 +106,13 @@ In build order. Numbers are stable IDs, not priorities.
 | 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | planned |
 | 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
 | 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
-| 7th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
-| 8th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
-| 9th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
-| 10th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
-| 11th | 2 | [Export as Python](#2-export-as-python) | S | planned |
-| 12th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
-| — | 23 | [Decide where the app runs](#23-decide-where-the-app-runs) | — | idea |
+| 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | planned |
+| 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
+| 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
+| 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
+| 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
+| 12th | 2 | [Export as Python](#2-export-as-python) | S | planned |
+| 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
@@ -256,6 +256,46 @@ In build order. Numbers are stable IDs, not priorities.
 - **Shipping:** removes public API (`build_chart_png`, `explain_export_failure`), so its
   changelog section has a **Removed** heading naming both (see Shipping in the Legend).
 - **Size:** S–M (mostly deletion, plus a render check) · **Status:** planned
+
+### 23. Host a public demo on Streamlit Community Cloud
+
+- **What & why:** A lightweight editor nobody can reach is half done. Deploy the app as a
+  **public, non-commercial demo** on Streamlit Community Cloud and link it from the README.
+  Local (`uv run streamlit run streamlit_app.py`) stays the documented way to run it, and
+  the only way for anyone who forks it.
+- **Decided (2026-10-07):** Community Cloud, non-commercial. It fits with almost no work:
+  the app reads no secrets and no environment variables, and its runtime set is three
+  packages. The rejected options, so they are not re-proposed without new information:
+  - **Local only:** safe, but leaves the editor loop finished with nowhere to use it. It
+    stays as the fallback, not the answer.
+  - **Static hosting via stlite ([#14](#14-spike-run-the-app-in-the-browser-stlite)):**
+    every visitor downloads tens of MB before the first chart, which works against
+    "lightweight", and it waits on an unrun spike. If that spike ever shows a fast enough
+    first load, it can replace this deployment later; it does not block it.
+- **Licence:** Highcharts JS and `highcharts-core` are free for personal and non-commercial
+  use, and a public deployment is still a use of them. This demo qualifies only while it
+  stays non-commercial (no ads, no paid tier, not a company product). If that changes, the
+  deployment comes down until a commercial licence is in place. The README's `## License`
+  section and `NOTICE` already put licensing on whoever deploys; the live-demo section says
+  the demo is non-commercial.
+- **Depends on:** [#13](#13-client-side-export). With Static PNG mode retired, the hosted
+  app's only outside dependency is the Highcharts CDN, so a visitor's render no longer
+  calls `export.highcharts.com`.
+- **Touches:** `README.md` (a live-demo link near the top and a short deploy section), and a
+  deploy config only if Community Cloud needs one.
+- **Check when building:**
+  - Whether Community Cloud installs from `pyproject.toml` + `uv.lock` directly. If it needs
+    a `requirements.txt`, that is a second copy of the dependency list:
+    [#12](#12-pin-the-runtime-dependency-set) must then pin the two together, or the copy
+    drifts.
+  - That the deployment runs on Python 3.12 (set in the app's advanced settings), the
+    interpreter the tests use.
+  - That the interactive chart loads inside Community Cloud's page (the CDN is fetched by
+    the viewer's browser, not the server, so this is a browser check).
+- **Known limit:** free apps sleep after a period of inactivity, so the first visitor after
+  a quiet spell waits for a cold start. Say so in the README rather than work around it.
+- **Shipping:** no new app behaviour, so a **patch** bump (see Shipping in the Legend).
+- **Size:** S · **Status:** planned
 
 ### 21. Pin the Highcharts JS version
 
@@ -579,24 +619,6 @@ Settled on 2026-10-07:
 - **Decided:** edit cells only (no adding or deleting rows, the lightweight answer), and
   edits reset when the dataset changes: they belong to the data they were made on.
 - **Size:** S · **Status:** planned
-
-## Ideas
-
-### 23. Decide where the app runs
-
-- **What & why:** No item says where the app is hosted. The README mentions deploying only
-  to warn about Highcharts licensing. A lightweight editor nobody can reach is half done.
-  The options:
-  - **Local only**, as today: `uv run streamlit run streamlit_app.py`. Nothing to decide
-    about licensing beyond the user's own use.
-  - **Streamlit Community Cloud:** free, and a fit (the app reads no secrets and needs no
-    environment variables). A public deployment is a public use of Highcharts, so the
-    licence question comes first.
-  - **Static hosting via stlite:** [#14](#14-spike-run-the-app-in-the-browser-stlite),
-    if its spike succeeds.
-- **Open questions (yours):** public, private or local only? And which Highcharts licence
-  covers a public deployment, if any?
-- **Size:** S once decided (a deploy config and a README section) · **Status:** idea
 
 ## Folded
 
