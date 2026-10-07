@@ -29,7 +29,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [`</script>` in user text: an encoding, not an edit](#script-in-user-text-an-encoding-not-an-edit) ·
 [Large data: the turboThreshold bug that was not there](#large-data-the-turbothreshold-bug-that-was-not-there) ·
 [Highcharts JS: one pinned release](#highcharts-js-one-pinned-release) ·
-[Static PNG mode, and its retirement](#static-png-mode-and-its-retirement)
+[Static PNG mode, and its retirement](#static-png-mode-and-its-retirement) ·
+[Hosting: a public demo on Community Cloud](#hosting-a-public-demo-on-community-cloud)
 
 ## Packaging: the fact with no second home
 
@@ -859,3 +860,38 @@ download intercepted rather than saved. Real downloads were then tested by hand 
 Safari**: PNG and SVG both save from inside Streamlit's sandboxed iframe, and the PNG is dark.
 That was the condition that could have made the change unshippable, since the ☰ menu is now the
 only way to download a chart.
+
+## Hosting: a public demo on Community Cloud
+
+The app is deployed at <https://highcharts-studio.streamlit.app> (2026-10-07), a **public,
+non-commercial** demo on Streamlit Community Cloud. Running it locally stays the documented way to
+use it, and the only way for anyone who forks it. A lightweight editor nobody can reach is half
+done, which is why hosting joined the 1.0 set at all.
+
+**Why Community Cloud.** It needed almost nothing from the app: no secrets, no environment
+variables, a three-package runtime set, and since 0.21.0 no server-side network call (the export
+server is gone; the Highcharts CDN is fetched by the viewer's browser). It installs from
+**`uv.lock`**, the first file in its search order, so there is no `requirements.txt` to keep in step
+with `pyproject.toml`, and its default Python is 3.12, the interpreter the tests use. Not
+documented: which uv command it runs, so the `dev` group (pytest, Ruff, ty) may be installed too,
+which costs only build time.
+
+**The two options rejected**, so they are not re-proposed without new information:
+
+- **Local only:** safe, but it left the editor finished with nowhere to use it.
+- **Static hosting via stlite** (plan #14): every visitor would download tens of MB before the first
+  chart, and it waits on an unrun spike. If that spike shows a fast enough first load, it can replace
+  this deployment; it does not block it.
+
+**The licence condition.** Highcharts JS and `highcharts-core` are free for personal and
+non-commercial use, and a public deployment is still a use of them. The demo qualifies only while it
+stays non-commercial (no ads, no paid tier, not a company product). If that changes, the deployment
+comes down until a commercial licence is in place.
+
+**Checked on the live app:** a chart draws and a ☰ download works, and the app loads in a signed-out
+private window. That last check matters because the owner is always signed in to their own apps: an
+anonymous request from a script is redirected to Community Cloud's login, which looks the same for
+a private app as for a public one, so only a signed-out browser can tell them apart.
+
+**Known limit:** free apps sleep after a period without visitors, so the first visit after a quiet
+spell waits for a cold start. The README says so rather than working around it.

@@ -33,6 +33,19 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.21.1] - 2026-10-07
+
+Documentation only, so a patch.
+
+### Added
+
+- **A public demo** at <https://highcharts-studio.streamlit.app>, on Streamlit Community Cloud,
+  linked from the top of the README. It is non-commercial, which is the condition Highcharts'
+  free licence sets for a public deployment.
+- **A `## Deploy` section in the README:** Community Cloud installs from `uv.lock` (no
+  `requirements.txt` needed) on Python 3.12, and licensing comes first. Why this host, and what
+  was rejected: [`docs/decisions.md`](docs/decisions.md#hosting-a-public-demo-on-community-cloud).
+
 ## [0.21.0] - 2026-10-07
 
 A new capability and removed public API, so a minor.

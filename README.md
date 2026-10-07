@@ -10,9 +10,13 @@ with [Highcharts](https://github.com/highcharts-for-python) — **every chart is
 produced by `highcharts-core`** (the Highcharts for Python toolkit), with no
 native Streamlit charts.
 
+**Live demo: <https://highcharts-studio.streamlit.app>** — a public, non-commercial
+deployment on Streamlit Community Cloud. If nobody has used it for a while it may take a
+moment to wake up.
+
 ## Contents
 
-[Setup](#setup) · [Run](#run) · [Features](#features) ·
+[Setup](#setup) · [Run](#run) · [Deploy](#deploy) · [Features](#features) ·
 [Chart types](#chart-types) · [Development](#development) · [Notes](#notes) ·
 [License](#license)
 
@@ -34,6 +38,27 @@ Then open <http://localhost:8501>. Pick a sample dataset (or upload a CSV),
 choose a chart type and map its columns, then download the chart as PNG, JPEG
 or SVG from its ☰ menu. The app ships a single dark theme, and the charts are
 built to match it.
+
+## Deploy
+
+The app runs on [Streamlit Community Cloud](https://streamlit.io/cloud) as it is: it
+reads no secrets and no environment variables, and its only network dependency is the
+Highcharts CDN, which the viewer's browser fetches.
+
+1. Fork or push this repository to GitHub.
+2. In Community Cloud, create an app from the repository with `streamlit_app.py` as the
+   entrypoint.
+3. Leave the Python version at **3.12** (Community Cloud's default, and the version the
+   tests run on).
+
+Community Cloud installs from `uv.lock`, which it looks for before any other dependency
+file, so no `requirements.txt` is needed. Free apps can go to sleep when nobody has used
+them for a while, so the first visit after a quiet spell waits for the app to start.
+
+**Licensing comes first.** Highcharts JS and `highcharts-core` are free for personal and
+non-commercial use only, and a public deployment is still a use of them. Deploy publicly
+only if your use is non-commercial, or once you hold a commercial Highcharts licence (see
+[License](#license)).
 
 ## Features
 
