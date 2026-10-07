@@ -33,6 +33,25 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.20.1] - 2026-10-07
+
+Dependency upgrade, no change to the app's behaviour, so a patch. The floors in
+`pyproject.toml` stay where they are: `streamlit>=1.59.0` is set by the test harness's
+`app.image` node, not by the newest release, and a newer lockfile does not move it.
+
+### Changed
+
+- **Runtime, in `uv.lock` only:** `streamlit` 1.62.0 → 1.65.0 and `pandas` 3.0.5 → 3.0.6;
+  `highcharts-core` was already current at 1.11.0. Transitive updates include a major bump of
+  `websockets` (16 → 17), plus `uvicorn`, `starlette`, `altair` and `numpy`; `blinker` dropped
+  out of the tree.
+- **Dev pins, in `pyproject.toml`:** `ruff` 0.16.4 → 0.16.10 and `ty` 0.0.73 → 0.0.85. The `ty`
+  bump was given the two checks its pin comment asks for, since its old regression was a
+  performance one that announced nothing: the gate was **re-timed** (~0.2s, nowhere near the
+  0.0.49 cliff), and each of the four inline `# ty: ignore[...]` suppressions was **deleted in
+  turn** and its error watched come back under the same rule name — so none of them now
+  silences nothing, and none of their rules was renamed upstream.
+
 ## [0.20.0] - 2026-09-08
 
 **The date is a Y.** A timeline's data is an event's name and the moment it happened, and
