@@ -110,7 +110,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | done (0.22.0) |
 | 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | done (0.23.0) |
 | 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | done (0.24.0) |
-| 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
+| 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | done (0.25.0) |
 | 12th | 2 | [Export as Python](#2-export-as-python) | S | planned |
 | 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
 | — | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | idea |
@@ -209,104 +209,13 @@ every type reachable. The decisions and their reasons:
 
 ### 15. Embeddable outputs: HTML, JS, JSON
 
-- **What & why:** Let a user take the chart *out* in the three forms other pages use, each
-  of which works when pasted somewhere else. Today none of them does:
-  - **HTML:** `build_chart_html` returns a full document (`<html>`, `<head>`, `<body>`),
-    which works as a standalone file or in an iframe but cannot be pasted into a page.
-  - **JS:** `to_js_literal` wraps the call in `document.addEventListener('DOMContentLoaded',
-    …)`. Pasted into a page that has already loaded (as most site editors insert content),
-    that event has already fired and the chart **never draws**, with no error. Its fixed
-    `'hc_chart'` id also collides when one page holds two charts.
-  - **JSON:** not produced. `json.dumps(build_options(...))` raises
-    `TypeError: EnforcedNullType is not JSON serializable` on any chart with a gap in its
-    data (checked with one `NaN`).
-
-  The builder emits **no JavaScript callback functions**, so the options are pure data and
-  JSON loses nothing.
-- **Design:**
-  1. **JSON is the canonical output.** A pure `build_chart_json(...)` serializes the
-     options with `EnforcedNull` written as `null` and `allow_nan=False`, so a bare `inf` or
-     `NaN` raises instead of shipping. It also writes `<`, `>` and `&` as `\u003c`,
-     `\u003e` and `\u0026`: still valid JSON with the same values, and it can never close a
-     `<script>` element on the page it is pasted into (the embed form of
-     [#20](#20-escape-script-in-the-charts-js)).
-  2. **JS is built from the JSON**, not from `to_js_literal`: `Highcharts.chart(el, <json>)`.
-     JSON is valid JavaScript, so this output cannot hit either of the
-     [unquoted-string bugs](decisions.md#the-strings-highcharts-core-emits-unquoted). It
-     quotes the text correctly rather than editing it, so it does not break the rule against
-     changing what the user typed. It runs immediately, with no `DOMContentLoaded` wrapper.
-  3. **HTML has two variants from one function:** a **snippet** (script tags, a `<div>`
-     with a unique or user-chosen id, the JS above, and the `color-scheme` pin limited to
-     that chart so it cannot restyle the host page) and the **full page** (folded in from
-     [#1](#1-download-the-chart-as-html): the same snippet in a document skeleton, for a
-     standalone file). CDN-linked only, so both need a network connection to open; an
-     inlined-JS variant is out (a large file and a licence question, see the dependency rule
-     under [Direction](#direction-a-lightweight-chart-editor)).
-  4. **One Export panel in the app** replaces the "Show the generated Highcharts config"
-     toggle: tabs for HTML / JS / JSON / Python ([#2](#2-export-as-python)), each an
-     `st.code` block (it has a copy button) plus an `st.download_button`. The panel stays
-     behind a toggle so nothing is built until asked, the reason the current toggle exists.
-     It also carries:
-     - a one-line **licence note**: Highcharts is free for non-commercial use, and a
-       commercial site needs its own Highcharts licence. `NOTICE` covers this app, not a
-       user's page;
-     - a **size warning** when the export is large, since the snippet carries every row of
-       data inline (a 50,000-row CSV makes a multi-MB paste).
-- **Touches:** `highcharts_builder.py` (`build_chart_json`, the snippet builder, and
-  `build_chart_html` rebuilt on top of them), `streamlit_app.py` (the Export panel and its
-  cached wrappers, forwarded by keyword like the renderer wrappers), tests, `CLAUDE.md`
-  (the public API block and the flow diagram), and `README.md` (the Export panel).
-- **Tests:**
-  - A **sweep** over every supported type: the JSON output passes `json.loads`, and the
-    row-less and non-finite frames still serialize. Extend the existing sweeps rather than
-    writing per-type tests.
-  - The JS output **parses**, for every type: `esprima.parseScript()` (already installed with
-    `highcharts-core`, so no new dependency) proves structure rather than matching text, and
-    catches the whole unquoted-string class by construction.
-  - A `</script>` label stays inside the JSON for every type (the #20 sweep, run on the
-    embed outputs).
-  - The unquoted-string sweep's two cases, run against the new JS output, must come out
-    **quoted**. The test pinning the library bug in `to_js_literal` stays as it is: the bug
-    is still there, only this output no longer goes through it.
-  - **Verify by rendering:** paste the snippet into a plain page *after* load (inserted by a
-    script) and confirm it draws; put two snippets on one page and confirm both draw.
-- **Decisions:** see [below](#decisions-for-15).
-- **Size:** M · **Status:** planned
-
-#### Decisions for #15
-
-Settled on 2026-10-07:
-
-- **Script tags: check first.** The snippet loads the CDN scripts only if they are
-  missing, then draws, so pasting several snippets on one page is safe. The check has to
-  be **per module**, not only `window.Highcharts`: a sankey snippet pasted after a line
-  snippet finds Highcharts already loaded but still needs `modules/sankey.js`.
-- **JSON: standard-library `json`** over the `build_options` dict, with `EnforcedNull`
-  written as `null` and `allow_nan=False`. Not `chart.to_json()`. Charts still pass through
-  `highcharts-core` (`make_chart` validates them) everywhere else.
-- **The app's own iframe stays on `to_js_literal` for now.** Switching it is
-  [#16](#16-switch-the-apps-iframe-to-the-json-built-js), deferred, so #15 only changes the
-  exports.
-- **Container id: generated, overridable.** By default, a stable id derived from the
-  options (e.g. `hc-3f9a`), so the same chart always gets the same id; an optional text box
-  sets your own to match an existing `<div>`. Two *identical* charts on one page would share
-  an id, which is the case the override is for.
-
-- **CDN version: pinned, in the app and the exports alike**, by
-  [#21](#21-pin-the-highcharts-js-version). What the app shows is then exactly what a
-  snippet embeds, and a pasted snippet cannot change when Highcharts releases a new major.
-- **Background: dark, as the app shows it.** A dark chart reads as a self-contained card on
-  a light page, and the "one mode" rule and its palette tests stay as they are. Rejected: a
-  light export theme (it partly reverses
-  [the light-mode removal](decisions.md#light-mode-and-its-removal) and needs a second set of
-  chrome colours that pass the colour-blindness tests), a user toggle (that, plus a control),
-  and a transparent background (the chart's light text would be unreadable on a light page).
-- **Accessibility module: in embeds only.** Snippets load `modules/accessibility`, through
-  the same per-module check as every other module; the app's own preview does not. Embeds
-  are where charts reach the public, and without the module Highcharts logs a warning in
-  the host page's console.
-- **Size warning at 1 MB** of export text. Well past every sample, and around where a pasted
-  snippet starts to slow a page or hit a CMS field limit.
+Done in 0.25.0: `build_chart_exports` (JSON, the JS call, an HTML snippet and a full page) and the
+app's Export panel, which replaced the generated-config toggle. Two choices settled with the user
+before the code: the JS tab holds the chart call alone (the snippet is the self-contained form),
+and the treemap's lost tile border, found while comparing the options dict with the emitted JS, was
+fixed first. The Python tab arrives with [#2](#2-export-as-python). The design, the decisions and
+what rendering verified:
+[`decisions.md`](decisions.md#embeddable-exports-json-first).
 
 ### 2. Export as Python
 
@@ -361,8 +270,8 @@ answer once two Y columns are selected), drawn dashed in the chrome's text colou
 
 ### 1. Download the chart as HTML
 
-Folded into [#15](#15-embeddable-outputs-html-js-json) as its **full page** variant. The
-decision made here carries over: CDN-linked only, no inlined Highcharts JavaScript.
+Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.25.0 as the
+**HTML page** tab: CDN-linked only, no inlined Highcharts JavaScript.
 
 ## Deferred
 

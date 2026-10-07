@@ -83,8 +83,11 @@ only if your use is non-commercial, or once you hold a commercial Highcharts lic
   series plotted, or — for the types whose single series draws many marks — that
   mark count, named for what it counts (cells, tiles, stages, flows, boxes,
   sectors, bars, ranges, measures, changes, events, and so on).
-- **See the config** — a toggle reveals the generated Highcharts config
-  (`to_js_literal()` output).
+- **Export for other pages** — a toggle opens the Export panel: an HTML snippet to
+  paste into any page (it loads Highcharts only if the page lacks it, so several
+  snippets can share a page), a standalone HTML page, the JS call alone, and the
+  JSON options, each with a copy button and a download. Highcharts is free for
+  non-commercial use only; a commercial site needs its own Highcharts licence.
 - **Consistent palette** — every series uses the brand palette (`DEFAULT_COLORS`),
   which *is* the Streamlit theme's `chartCategoricalColors` from
   `.streamlit/config.toml`, kept in sync by a test rather than by hand.

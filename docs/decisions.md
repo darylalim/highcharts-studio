@@ -32,7 +32,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [Static PNG mode, and its retirement](#static-png-mode-and-its-retirement) ·
 [Hosting: a public demo on Community Cloud](#hosting-a-public-demo-on-community-cloud) ·
 [Style: one object, not one kwarg per control](#style-one-object-not-one-kwarg-per-control) ·
-[Chart-type picker: families, then types](#chart-type-picker-families-then-types)
+[Chart-type picker: families, then types](#chart-type-picker-families-then-types) ·
+[Embeddable exports: JSON first](#embeddable-exports-json-first)
 
 ## Packaging: the fact with no second home
 
@@ -157,7 +158,7 @@ and new prose about a type-scaled set should prefer a **rule** to a **tally**.
 
 ## The cache layer that nothing executed
 
-`cached_chart_html` and `cached_chart_js` were covered only *indirectly*. `cached_chart_png`
+`cached_chart_html` and `cached_chart_js` (since 0.25.0, `cached_chart_exports`) were covered only *indirectly*. `cached_chart_png`
 was, for a long time, executed by **nothing** — the AppTests stay on the network-free
 interactive path, so the Static PNG wrapper was never entered by any test at all.
 
@@ -983,3 +984,68 @@ every test that read `app.pills[0]` (33 of them) would have silently meant the f
 read `_y_pills(app)` now, and every type switch in the AppTests goes through
 `_select_chart_type(app, chart_type)`, which sets the family first, so the family step is one
 function rather than an edit per test.
+
+## Embeddable exports: JSON first
+
+Plan #15 lets a chart leave the app in the forms other pages take. Before it, none worked when
+pasted elsewhere: `build_chart_html` returns a whole document; `to_js_literal` wraps its call in
+`DOMContentLoaded`, which a page that has already loaded never fires again (so the chart silently
+never draws) and uses a fixed `'hc_chart'` id; and `json.dumps(build_options(...))` raised on any
+chart with a gap, because `EnforcedNull` is not JSON.
+
+**JSON is the canonical form.** `_options_json` serializes the options dict with the standard
+library: `EnforcedNull` becomes `null`, `allow_nan=False` makes a stray NaN or infinity raise
+instead of shipping, and `<`, `>`, `&` become `\u003c`, `\u003e`, `\u0026`, the same values once
+parsed but unable to close a `<script>` element (#20's escape, for embeds). The builder emits no
+JavaScript functions, so JSON loses nothing. The JS is `Highcharts.chart(id, <json>);`, built from
+it, so it is immune to both of the strings highcharts-core emits unquoted.
+
+**The snippet's loader** adds each pinned module only if the page lacks it, in order, so several
+snippets share one page: a tag another snippet is still loading is waited on, a tag the host page
+wrote itself counts as loaded, and a page that already has Highcharts is not given a second copy.
+It runs immediately. Its styles (the `color-scheme` pin and the ☰ button's hover) are scoped to its
+own id. Rendered on 2026-10-07: two snippets (a line and a sankey) on one page; the same two
+inserted by a script **after** load, which also exercised the wait (each module loaded once); a
+host page that already loads Highcharts; and the full page. All drew. The first attempt at the
+after-load page failed in the HARNESS, not the snippet: it embedded the snippets with `json.dumps`
+inside its own `<script>`, and the snippet's `</script>` closed it — #20's bug, in the test page.
+
+**A bug it surfaced in the app.** Comparing the options dict with what highcharts-core keeps, for
+every type, found one key the core drops: `plotOptions.treemap.borderColor`, which `_themed` set so
+the tile gaps would match the dark background. The app had drawn light gaps all along, while the
+dict, and the test asserting on it, said otherwise. It is now set per level (`levels`), which
+survives; and `test_no_option_the_builder_sets_is_silently_dropped` runs the same comparison over
+every type, failing on any new dropped key until it is fixed or listed with a reason.
+
+**Settled on 2026-10-07, before the code:**
+
+- **Script tags: check first.** The snippet loads the CDN scripts only if they are
+  missing, then draws, so pasting several snippets on one page is safe. The check has to
+  be **per module**, not only `window.Highcharts`: a sankey snippet pasted after a line
+  snippet finds Highcharts already loaded but still needs `modules/sankey.js`.
+- **JSON: standard-library `json`** over the `build_options` dict, with `EnforcedNull`
+  written as `null` and `allow_nan=False`. Not `chart.to_json()`. Charts still pass through
+  `highcharts-core` (`make_chart` validates them) everywhere else.
+- **The app's own iframe stays on `to_js_literal` for now.** Switching it is
+  [#16](#16-switch-the-apps-iframe-to-the-json-built-js), deferred, so #15 only changes the
+  exports.
+- **Container id: generated, overridable.** By default, a stable id derived from the
+  options (e.g. `hc-3f9a`), so the same chart always gets the same id; an optional text box
+  sets your own to match an existing `<div>`. Two *identical* charts on one page would share
+  an id, which is the case the override is for.
+
+- **CDN version: pinned, in the app and the exports alike**, by
+  [#21](#21-pin-the-highcharts-js-version). What the app shows is then exactly what a
+  snippet embeds, and a pasted snippet cannot change when Highcharts releases a new major.
+- **Background: dark, as the app shows it.** A dark chart reads as a self-contained card on
+  a light page, and the "one mode" rule and its palette tests stay as they are. Rejected: a
+  light export theme (it partly reverses
+  [the light-mode removal](decisions.md#light-mode-and-its-removal) and needs a second set of
+  chrome colours that pass the colour-blindness tests), a user toggle (that, plus a control),
+  and a transparent background (the chart's light text would be unreadable on a light page).
+- **Accessibility module: in embeds only.** Snippets load `modules/accessibility`, through
+  the same per-module check as every other module; the app's own preview does not. Embeds
+  are where charts reach the public, and without the module Highcharts logs a warning in
+  the host page's console.
+- **Size warning at 1 MB** of export text. Well past every sample, and around where a pasted
+  snippet starts to slow a page or hit a CMS field limit.

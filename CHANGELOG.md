@@ -33,6 +33,34 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.25.0] - 2026-10-07
+
+New exports, so a minor.
+
+### Added
+
+- **An Export panel** (behind a toggle) with the chart in four forms, each with a copy button
+  and a download: an **HTML snippet** to paste into any page (it loads the pinned Highcharts
+  modules only if the page lacks them, so several snippets share a page, and its styles are
+  scoped to its own `<div>`), a standalone **HTML page**, the **JS** call alone, and the
+  **JSON** options. An optional container id; a licence note; a warning above 1 MB.
+- **Builder API:** `build_chart_exports(...)` returning `ChartExports` (`json`, `js`,
+  `html_snippet`, `html_page`, `container_id`, `modules`), and `EXPORT_SIZE_WARNING_BYTES`. The
+  exports are serialized with the standard library's `json`, so they cannot hit the strings
+  highcharts-core emits unquoted, and user text cannot close a `<script>` element.
+
+### Changed
+
+- **The "Show the generated Highcharts config" toggle is replaced by the Export panel**, whose
+  JS and JSON tabs show the same options.
+
+### Fixed
+
+- **Treemap tile gaps were light, not dark.** highcharts-core silently drops
+  `plotOptions.treemap.borderColor`, so the dark gaps `_themed` asked for never reached the chart.
+  The border is now set per level, which survives. A new test compares every type's options with
+  what highcharts-core keeps, so a dropped key fails the suite.
+
 ## [0.24.0] - 2026-10-07
 
 A reshaped control, so a minor.

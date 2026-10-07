@@ -14,8 +14,10 @@ The flow mirrors the highcharts-core pattern (an options ``dict`` ->
 
 from __future__ import annotations
 
+import hashlib
 import html
 import itertools
+import json
 import math
 import re
 import warnings
@@ -24,7 +26,7 @@ from typing import Any
 
 import pandas as pd
 from highcharts_core.chart import Chart
-from highcharts_core.constants import EnforcedNull
+from highcharts_core.constants import EnforcedNull, EnforcedNullType
 
 # Chart types this example supports, grouped by the data shape they need.
 CARTESIAN_TYPES = ("line", "spline", "area", "areaspline", "column", "bar")
@@ -1338,7 +1340,19 @@ def _themed(options: dict) -> dict:
         # they don't read as white grid-lines (as pie does for its slice gaps). The
         # data-label color stays "contrast" (set in build_options): tiles are
         # palette-colored in both themes, so it needs no dark flip.
+        #
+        # Set PER LEVEL, not as `plotOptions.treemap.borderColor`. That key is what Highcharts
+        # documents, but highcharts-core's treemap model DROPS it on the way to the emitted JS (so
+        # do a series-level and a `plotOptions.series` one), so until 0.25.0 the app drew the very
+        # light gaps this hook exists to remove, while the options dict said otherwise. Found by
+        # comparing the dict with the emitted JS for plan #15, whose JSON export reads the dict
+        # and would have drawn the dark gaps the app did not. `levels` survives serialization, and
+        # every tile of the app's flat treemap is level 1. The plain key stays for any consumer of
+        # the dict that does not go through highcharts-core (the JSON export), where it is honoured.
         options["plotOptions"]["treemap"]["borderColor"] = t["bg"]
+        options["plotOptions"]["treemap"]["levels"] = [
+            {"level": 1, "borderColor": t["bg"]}
+        ]
     if options["chart"].get("type") in FUNNEL_TYPES:
         # Pie's TWO flips, not treemap's one — because a funnel's data labels sit OUTSIDE the
         # shape on the chart background (its `verticalAlign: middle` default, verified against the
@@ -6126,3 +6140,217 @@ def build_chart_html(
   <script>{chart_js}</script>
 </body>
 </html>"""
+
+
+# --------------------------------------------------------------------------- #
+# Embeddable exports (plan #15): JSON, a JS call, an HTML snippet, a full page
+# --------------------------------------------------------------------------- #
+# The app warns above this many bytes of export text: past every sample by far, and around where a
+# pasted snippet starts to slow a page or hit a CMS field limit (it carries every row inline).
+EXPORT_SIZE_WARNING_BYTES = 1_000_000
+# Embeds load the accessibility module too (the app's own preview does not): an embed is where a
+# chart reaches the public, and without it Highcharts logs a warning in the HOST page's console.
+_ACCESSIBILITY_MODULE = "modules/accessibility.js"
+# A container id the snippet can use as an HTML id AND inside a CSS selector unescaped.
+_CONTAINER_ID = re.compile(r"[A-Za-z][\w-]*\Z")
+
+
+def _json_default(value: object) -> object:
+    """``json.dumps`` fallback: ``EnforcedNull`` is JSON ``null``; a numpy scalar is its value."""
+    if isinstance(value, EnforcedNullType):
+        return None
+    item = getattr(value, "item", None)
+    if callable(item):
+        return item()
+    raise TypeError(f"{type(value).__name__} is not JSON serializable")
+
+
+def _options_json(options: dict, *, indent: int | None) -> str:
+    """The options as JSON that is safe to paste inside a ``<script>`` element.
+
+    ``allow_nan=False``: a NaN or an infinity RAISES rather than shipping as the non-standard
+    ``NaN``/``Infinity`` literals (every type already turns missing data into ``null``, so this
+    only fires on a builder bug). ``<``, ``>`` and ``&`` are written as ``\\u003c``, ``\\u003e``
+    and ``\\u0026``: the same values once parsed, but a ``</script>`` in a label can never close
+    the element the JSON is pasted into (#20's escape, for the embeds). They can only occur inside
+    JSON strings, so the replacement cannot touch the structure.
+    """
+    text = json.dumps(
+        options,
+        default=_json_default,
+        allow_nan=False,
+        ensure_ascii=False,
+        indent=indent,
+        separators=(",", ":") if indent is None else None,
+    )
+    return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def _scoped_css(css: str, container_id: str) -> str:
+    """A one-rule stylesheet with every selector prefixed by ``#container_id``, so a snippet's
+    styles reach its own chart and nothing else on the host page."""
+    selectors, body = css.split("{", 1)
+    scoped = ",".join(f"#{container_id} {sel.strip()}" for sel in selectors.split(","))
+    return f"{scoped}{{{body}"
+
+
+# The snippet's loader. Each module is added only if the page lacks it, IN ORDER (a module needs
+# the core, and dependency-wheel needs sankey), so several snippets on one page share the loads:
+# - a tag this loader added carries data-hc-loader; if it has not finished loading yet (two
+#   snippets pasted together), the next snippet waits on its load event;
+# - a tag the HOST page wrote itself has already run (it blocked the parser before this script),
+#   so it counts as loaded;
+# - if the page already has Highcharts under any URL, the core is not loaded a second time.
+# It runs immediately, with no DOMContentLoaded wrapper: pasted into a page that has already
+# loaded, as site editors insert content, that event has fired and a chart waiting on it never
+# draws. Kept free of "</" so the element it sits in cannot be closed from inside.
+_LOADER_JS = """(function () {
+  var urls = %(urls)s;
+  function draw() { Highcharts.chart(%(container)s, %(options)s); }
+  function step(i) {
+    if (i === urls.length) { draw(); return; }
+    if (i === 0 && window.Highcharts) { step(1); return; }
+    var tag = document.querySelector('script[src="' + urls[i] + '"]');
+    if (tag && (!tag.hasAttribute("data-hc-loader") || tag.hasAttribute("data-hc-loaded"))) {
+      step(i + 1);
+      return;
+    }
+    if (!tag) {
+      tag = document.createElement("script");
+      tag.src = urls[i];
+      tag.setAttribute("data-hc-loader", "1");
+      tag.addEventListener("load", function () { tag.setAttribute("data-hc-loaded", "1"); });
+      document.head.appendChild(tag);
+    }
+    tag.addEventListener("load", function () { step(i + 1); });
+  }
+  step(0);
+})();"""
+
+
+@dataclass(frozen=True)
+class ChartExports:
+    """A chart in the four forms other pages take, all built from ONE ``build_options`` call.
+
+    - ``json``: the options, pretty-printed. The canonical form; the others are built from it.
+    - ``js``: ``Highcharts.chart(<id>, <options>);`` alone, for a page that already loads
+      Highcharts and the modules in ``modules`` and has a ``<div>`` with that id.
+    - ``html_snippet``: self-contained: a ``<div>``, styles scoped to it, and a loader that adds
+      each pinned module only if the page lacks it, then draws.
+    - ``html_page``: the snippet in a document, for a standalone ``.html`` file.
+
+    Every form needs a network connection to open: the CDN is linked, never inlined.
+    """
+
+    json: str
+    js: str
+    html_snippet: str
+    html_page: str
+    container_id: str
+    modules: tuple[str, ...]
+
+
+def build_chart_exports(
+    df: pd.DataFrame,
+    chart_type: str,
+    x_col: str | None,
+    y_cols: list[str],
+    *,
+    container_id: str | None = None,
+    height: int = 480,
+    title: str | None = None,
+    size_col: str | None = None,
+    target_col: str | None = None,
+    parent_col: str | None = None,
+    end_col: str | None = None,
+    high_col: str | None = None,
+    title_col: str | None = None,
+    goal_col: str | None = None,
+    width_col: str | None = None,
+    after_col: str | None = None,
+    agg: str = _GAUGE_DEFAULT_AGG,
+    dial: tuple[float, float] | None = None,
+    style: ChartStyle | None = None,
+) -> ChartExports:
+    """Build the chart's embeddable exports (``ChartExports``).
+
+    The options are serialized with the standard library's ``json`` (``_options_json``), not
+    ``to_js_literal``, so these outputs cannot hit either of the strings highcharts-core emits
+    unquoted: JSON quotes every string, which encodes what the user typed rather than editing it.
+    The chart still passes through highcharts-core (``Chart.from_options``) to resolve and pin the
+    script tags, which also validates it exactly as the app's own chart is validated.
+
+    ``container_id`` defaults to a stable id derived from the options (``hc-`` plus six hex
+    digits), so the same chart always gets the same id and two different charts on one page do
+    not collide; pass one to match an existing ``<div>``. It must start with a letter and use only
+    letters, digits, ``-`` and ``_``, since it is used unescaped in a CSS selector.
+    """
+    options = build_options(
+        df,
+        chart_type,
+        x_col,
+        y_cols,
+        title=title,
+        size_col=size_col,
+        target_col=target_col,
+        parent_col=parent_col,
+        end_col=end_col,
+        high_col=high_col,
+        title_col=title_col,
+        goal_col=goal_col,
+        width_col=width_col,
+        after_col=after_col,
+        agg=agg,
+        dial=dial,
+        style=style,
+    )
+    compact = _options_json(options, indent=None)
+    pretty = _options_json(options, indent=2)
+    if container_id is None:
+        container_id = "hc-" + hashlib.sha1(compact.encode()).hexdigest()[:6]
+    elif not _CONTAINER_ID.match(container_id):
+        raise ValueError(
+            f"container id {container_id!r} must start with a letter and use only letters, "
+            "digits, '-' and '_'"
+        )
+
+    chart = Chart.from_options(options)
+    tags = _pin_script_tags(_order_script_tags(chart.get_script_tags(as_str=True)))
+    modules = tuple(re.findall(r'src="([^"]+)"', tags)) + (
+        f"{_HIGHCHARTS_CDN}{HIGHCHARTS_JS_VERSION}/{_ACCESSIBILITY_MODULE}",
+    )
+    # The loader's "core already on the page" check assumes the core comes first.
+    assert modules[0].endswith("/highcharts.js"), modules
+
+    container = json.dumps(container_id)
+    js = f"Highcharts.chart({container}, {compact});"
+    loader = _LOADER_JS % {
+        "urls": json.dumps(list(modules)),
+        "container": container,
+        "options": compact,
+    }
+    styles = _scoped_css(_LIGHT_COLOR_SCHEME_CSS, container_id) + _scoped_css(
+        _EXPORT_BUTTON_CSS, container_id
+    )
+    snippet = (
+        f'<div id="{container_id}" style="width:100%;height:{height}px"></div>\n'
+        f"<style>{styles}</style>\n"
+        f"<script>\n{loader}\n</script>\n"
+    )
+    page_title = html.escape(str(options.get("title", {}).get("text") or "Chart"))
+    page = (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>{page_title}</title>\n"
+        f"<style>html,body{{margin:0;background:{_DARK_CHROME['bg']}}}</style>\n"
+        f"</head>\n<body>\n{snippet}</body>\n</html>\n"
+    )
+    return ChartExports(
+        json=pretty,
+        js=js,
+        html_snippet=snippet,
+        html_page=page,
+        container_id=container_id,
+        modules=modules,
+    )

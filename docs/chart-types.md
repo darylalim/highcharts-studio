@@ -1715,8 +1715,9 @@ not merely the format string that used to hide the absurd number.
   are hidden with their values kept, and the whole set reaches the builder as one `ChartStyle`;
   see [the decision](decisions.md#style-one-object-not-one-kwarg-per-control)), the
   chart embed (whose ☰ menu downloads PNG/JPEG/SVG; the render-mode selector and its
-  Static PNG mode went in 0.21.0), and a toggle that reveals
-  the generated Highcharts config (JS). No theme is read: `.streamlit/config.toml` is a
+  Static PNG mode went in 0.21.0), and the **Export** panel behind a toggle (plan #15: HTML
+  snippet, HTML page, JS and JSON, from `build_chart_exports`; it replaced the toggle that
+  revealed the generated `to_js_literal` config). No theme is read: `.streamlit/config.toml` is a
   single `[theme]`, so every viewer gets the dark shell and `_themed` applies the dark
   chrome unconditionally rather than following a flag.
   The **no-plottable-columns gate** runs *below* the chart-type selectbox and is
@@ -2400,7 +2401,8 @@ aggregation picker and Dial min/max inputs — and gauge's *absent* X control an
 *absent* Y control, the two mirror-image subtractive changes — and boxplot's
 and waterfall's
 single-select Y —
-revealing the generated config behind its toggle,
+opening the Export panel behind its toggle (whose JS tab the config AppTests read, in
+JSON's spelling),
 the KPI metric row, the wide-CSV
 `st.multiselect` fallback, the absence of a render-mode control, and asserting
 the guard messages — including a *cyclic uploaded CSV*, a builder error a user

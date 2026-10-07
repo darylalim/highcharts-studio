@@ -103,6 +103,7 @@ Layers:
 import ast
 import inspect
 import itertools
+import json
 import math
 import re
 import sys
@@ -1625,6 +1626,137 @@ def test_samples_are_listed_in_the_pickers_family_order():
     assert next(iter(SAMPLES)) == "Monthly revenue vs cost (line/area/column)"
 
 
+# --------------------------------------------------------------------------- #
+# Embeddable exports (plan #15): JSON, the JS call, an HTML snippet, a full page
+# --------------------------------------------------------------------------- #
+def _exports_for(df, chart_type, **extra):
+    """build_chart_exports with the sweeps' per-type companion columns."""
+    from highcharts_builder import build_chart_exports
+
+    return build_chart_exports(
+        df,
+        chart_type,
+        None if chart_type in GAUGE_TYPES else "label",
+        _y_for(chart_type),
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
+        parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
+        **extra,
+    )
+
+
+def _snippet_script(snippet: str) -> str:
+    """The JavaScript inside an HTML snippet's one <script> element."""
+    return snippet.split("<script>\n", 1)[1].rsplit("\n</script>", 1)[0]
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_every_type_exports_valid_json_js_and_html(labeled_frame, chart_type):
+    # The exports are built from JSON (the standard library's), not from to_js_literal, so every
+    # form must be STRUCTURALLY valid for every type: the JSON loads, and the JS and the snippet's
+    # script parse (esprima proves structure rather than matching text). Parsing also proves the
+    # unquoted-string class cannot reach these outputs: a bare `{value:%b}` or `Date...` would be
+    # a syntax error, and the format-object pattern cannot match a quoted JSON key.
+    import esprima
+
+    from highcharts_builder import _HIGHCHARTS_CDN, HIGHCHARTS_JS_VERSION
+
+    exports = _exports_for(labeled_frame, chart_type)
+    json.loads(exports.json)
+    esprima.parseScript(exports.js)
+    esprima.parseScript(_snippet_script(exports.html_snippet))
+    assert not re.search(r"[A-Za-z]*[Ff]ormat:\s*\{", exports.js)
+    # Every module pinned, the accessibility module added for embeds, the core first.
+    pinned = f"{_HIGHCHARTS_CDN}{HIGHCHARTS_JS_VERSION}/"
+    assert all(m.startswith(pinned) for m in exports.modules)
+    assert exports.modules[0].endswith("/highcharts.js")
+    assert exports.modules[-1].endswith("/modules/accessibility.js")
+    # The full page wraps the same snippet.
+    assert exports.html_snippet in exports.html_page
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_exports_keep_user_text_inside_the_script_element(labeled_frame, chart_type):
+    # #20's sweep, run on the embeds: a `</script>` or `<!--` in a label or the title must not
+    # close or comment out the element the snippet is pasted into. The JSON writes `<` as
+    # \u003c, so the snippet's only closing tag is its own, and the text still decodes intact.
+    title = "t</SCRIPT><!--<script>"
+    df = labeled_frame.assign(
+        label=["</script><b>x</b>", "<!--<script>", "c"],
+        parent=[None, "</script><b>x</b>", "</script><b>x</b>"],
+    )
+    exports = _exports_for(df, chart_type, title=title)
+    assert len(re.findall(r"</script", exports.html_snippet, re.IGNORECASE)) == 1
+    assert "<!--" not in exports.html_snippet
+    assert json.loads(exports.json)["title"]["text"] == title
+
+
+def test_exports_serialize_row_less_and_missing_data():
+    # A gap is `null` (EnforcedNull would make json.dumps raise TypeError, which is why the
+    # export does not call it bare), and a header-only CSV exports an empty chart, not an error.
+    from highcharts_builder import build_chart_exports
+
+    gap = pd.DataFrame({"m": ["a", "b", "c"], "r": [1.0, float("nan"), 3.0]})
+    data = json.loads(build_chart_exports(gap, "line", "m", ["r"]).json)["series"][0][
+        "data"
+    ]
+    assert [None] in data or None in data
+    empty = pd.DataFrame(
+        {"m": pd.Series([], dtype=object), "r": pd.Series([], dtype=float)}
+    )
+    assert json.loads(build_chart_exports(empty, "line", "m", ["r"]).json)
+
+
+def test_export_json_refuses_a_non_finite_number():
+    # allow_nan=False: a NaN or an infinity that ever reached the options would raise rather
+    # than ship as the non-standard NaN/Infinity literals a JSON parser rejects.
+    from highcharts_builder import _options_json
+
+    with pytest.raises(ValueError):
+        _options_json({"a": float("nan")}, indent=None)
+    with pytest.raises(ValueError):
+        _options_json({"a": float("inf")}, indent=None)
+
+
+def test_export_container_id_is_stable_distinct_and_overridable():
+    # Generated from the options, so the same chart always gets the same id and two different
+    # charts on one page do not collide; overridable to match an existing <div>, and validated,
+    # because it is used unescaped in a CSS selector.
+    from highcharts_builder import build_chart_exports
+
+    df = pd.DataFrame({"m": ["a", "b"], "r": [1.0, 2.0], "c": [3.0, 4.0]})
+    first = build_chart_exports(df, "line", "m", ["r"])
+    assert (
+        first.container_id == build_chart_exports(df, "line", "m", ["r"]).container_id
+    )
+    assert re.fullmatch(r"hc-[0-9a-f]{6}", first.container_id)
+    assert (
+        first.container_id != build_chart_exports(df, "line", "m", ["c"]).container_id
+    )
+    mine = build_chart_exports(df, "line", "m", ["r"], container_id="sales-chart")
+    assert mine.container_id == "sales-chart"
+    assert 'id="sales-chart"' in mine.html_snippet
+    assert '"sales-chart"' in mine.js
+    # Its styles are scoped to that id, so they cannot restyle the host page.
+    assert "#sales-chart .highcharts-root{color-scheme:only light}" in mine.html_snippet
+    for bad in ("1chart", "my chart", "a{b}", ""):
+        with pytest.raises(ValueError, match="container id"):
+            build_chart_exports(df, "line", "m", ["r"], container_id=bad)
+
+
+def test_export_page_title_is_escaped():
+    from highcharts_builder import build_chart_exports
+
+    df = pd.DataFrame({"m": ["a", "b"], "r": [1.0, 2.0]})
+    page = build_chart_exports(df, "line", "m", ["r"], title="R&D <2026>").html_page
+    assert "<title>R&amp;D &lt;2026&gt;</title>" in page
+
+
 def _relative_luminance(hex_color):
     """WCAG 2.x relative luminance of a #rrggbb string."""
     raw = hex_color.lstrip("#")
@@ -2612,6 +2744,81 @@ def test_treemap_dark_mode_themes_tiles_and_skips_axes():
     assert opts["plotOptions"]["treemap"]["dataLabels"]["color"] == "contrast"
     # Treemap has no axes, so the axis-theming loop must simply skip it (not crash).
     assert "xAxis" not in opts
+
+
+# Keys the builder sets that highcharts-core DROPS on the way to the emitted JS, each with the
+# reason it is still set. A dropped key is a setting the app thinks it applied and never did (the
+# treemap tile border was one, for every release up to 0.24.0), so the sweep below fails on any
+# new one until it is either fixed or listed here on purpose.
+_KEYS_HIGHCHARTS_CORE_DROPS = {
+    # Kept for the JSON export (plan #15), which reads the dict and honours it; the app's chart
+    # gets the same border through `levels`, which survives.
+    ".plotOptions.treemap.borderColor",
+}
+
+
+def _option_paths(node, prefix: str = "") -> set[str]:
+    """Every key path in an options tree, skipping values that are empty or None (highcharts-core
+    omits an empty string from ``to_dict`` but still emits it, so those are not real drops)."""
+    from highcharts_core.constants import EnforcedNullType
+
+    paths: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if value is None or value == "" or isinstance(value, EnforcedNullType):
+                continue
+            paths |= {f"{prefix}.{key}"} | _option_paths(value, f"{prefix}.{key}")
+    elif isinstance(node, (list, tuple)):
+        for value in node:
+            paths |= _option_paths(value, f"{prefix}[]")
+    return paths
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_no_option_the_builder_sets_is_silently_dropped(labeled_frame, chart_type):
+    # The class of bug behind the treemap border: the builder sets a key, the options dict
+    # (and every dict-level test) says it is there, and highcharts-core drops it before the
+    # chart ever sees it. Compare the dict with what highcharts-core keeps, for every type.
+    # Only DROPS fail: highcharts-core also re-expresses data points as objects in `to_dict`,
+    # which adds paths without changing the chart.
+    def build(fn):
+        return fn(
+            labeled_frame,
+            chart_type,
+            None if chart_type in GAUGE_TYPES else "label",
+            _y_for(chart_type),
+            size_col=_size_for(chart_type),
+            target_col=_target_for(chart_type),
+            parent_col=_parent_for(chart_type),
+            end_col=_end_for(chart_type),
+            high_col=_high_for(chart_type),
+            goal_col=_goal_for(chart_type),
+            width_col=_width_for(chart_type),
+            after_col=_after_for(chart_type),
+        )
+
+    dropped = _option_paths(build(build_options)) - _option_paths(
+        build(make_chart).options.to_dict()
+    )
+    assert dropped <= _KEYS_HIGHCHARTS_CORE_DROPS, (
+        f"{chart_type}: highcharts-core drops {sorted(dropped - _KEYS_HIGHCHARTS_CORE_DROPS)} "
+        f"— the app would never apply them"
+    )
+
+
+def test_treemap_dark_tile_gaps_reach_the_emitted_js():
+    # The dict assertion above passed for every release up to 0.24.0 while the app drew LIGHT
+    # tile gaps: highcharts-core drops `plotOptions.treemap.borderColor` on the way to the JS, so
+    # the dict and the chart disagreed and only the chart was wrong (rendered: the tile stroke
+    # resolved to var(--highcharts-neutral-color-10)). Found comparing the dict with the JS for
+    # plan #15. The border now rides `levels`, which survives, so pin it on the EMITTED JS.
+    from highcharts_builder import _DARK_CHROME
+
+    df = pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]})
+    js = "".join(
+        (make_chart(df, "treemap", "name", ["v"]).to_js_literal() or "").split()
+    )
+    assert f"levels:[{{borderColor:'{_DARK_CHROME['bg']}',level:1}}]" in js
 
 
 def test_treemap_serializes_and_pulls_in_the_treemap_module():
@@ -9673,8 +9880,21 @@ def app():
 
 
 def _reveal_config(app):
-    """Flip the generated-config toggle on (revealing the st.code panel)."""
-    app.toggle[0].set_value(True).run()
+    """Open the Export panel (plan #15), which replaced the generated-config toggle."""
+    next(
+        t for t in app.toggle if t.label.endswith("Export this chart (HTML, JS, JSON)")
+    ).set_value(True).run()
+
+
+def _config_text(app) -> str:
+    """The Export panel's JS tab: ``Highcharts.chart(id, <options as compact JSON>);``.
+
+    The config AppTests read the chart's options here. It is the JSON-built JS, not the
+    ``to_js_literal`` form the app's iframe uses, so assertions are in JSON's spelling
+    (``"type":"pie"``); both come from the same ``build_options`` call with the same arguments,
+    and ``test_no_option_the_builder_sets_is_silently_dropped`` keeps the two from diverging.
+    """
+    return next(code for code in app.code if code.language == "javascript").value
 
 
 def _metrics(app) -> dict[str, str]:
@@ -9688,14 +9908,14 @@ def test_app_config_hidden_by_default_then_revealed_by_toggle(app):
     assert not app.code  # nothing rendered while the toggle is off
     _reveal_config(app)
     assert not app.exception
-    assert app.code and "Highcharts" in app.code[0].value  # config now rendered
+    assert app.code and "Highcharts" in _config_text(app)  # config now rendered
 
 
 def test_app_switch_to_pie_regenerates_config(app):
     _select_chart_type(app, "pie")  # Chart type -> pie
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'pie'" in app.code[0].value
+    assert '"type":"pie"' in _config_text(app)
 
 
 def test_app_switch_to_bubble_shows_size_control_and_regenerates_config(app):
@@ -9707,7 +9927,7 @@ def test_app_switch_to_bubble_shows_size_control_and_regenerates_config(app):
     assert any(sb.label == "Size (Z)" for sb in app.selectbox)  # now present
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'bubble'" in app.code[0].value
+    assert '"type":"bubble"' in _config_text(app)
 
 
 def test_app_switch_to_radar_regenerates_config(app):
@@ -9718,7 +9938,7 @@ def test_app_switch_to_radar_regenerates_config(app):
     assert not app.exception
     _reveal_config(app)
     assert not app.exception
-    assert "polar: true" in app.code[0].value
+    assert '"polar":true' in _config_text(app)
 
 
 def test_app_switch_to_heatmap_regenerates_config(app):
@@ -9730,8 +9950,8 @@ def test_app_switch_to_heatmap_regenerates_config(app):
     assert not app.exception
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'heatmap'" in app.code[0].value
-    assert "colorAxis" in app.code[0].value
+    assert '"type":"heatmap"' in _config_text(app)
+    assert "colorAxis" in _config_text(app)
 
 
 def test_app_switch_to_treemap_regenerates_config(app):
@@ -9744,7 +9964,7 @@ def test_app_switch_to_treemap_regenerates_config(app):
     assert not app.exception
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'treemap'" in app.code[0].value
+    assert '"type":"treemap"' in _config_text(app)
 
 
 @pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
@@ -9758,7 +9978,7 @@ def test_app_switch_to_funnel_family_regenerates_config(app, chart_type):
     assert not app.exception
     _reveal_config(app)
     assert not app.exception
-    assert f"type: '{chart_type}'" in app.code[0].value
+    assert f'"type":"{chart_type}"' in _config_text(app)
 
 
 def test_app_switch_to_sankey_shows_target_control_and_regenerates_config(app):
@@ -9776,7 +9996,7 @@ def test_app_switch_to_sankey_shows_target_control_and_regenerates_config(app):
     assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'sankey'" in app.code[0].value
+    assert '"type":"sankey"' in _config_text(app)
 
 
 def test_app_sankey_target_survives_a_source_change(app):
@@ -9841,7 +10061,7 @@ def test_app_switch_to_dependencywheel_shows_target_control_and_regenerates_conf
     assert not _y_pills(app)  # single-select Y (the weight), not the multi-select pills
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'dependencywheel'" in app.code[0].value
+    assert '"type":"dependencywheel"' in _config_text(app)
 
 
 def test_app_dependencywheel_kpi_shows_flows(app):
@@ -9874,7 +10094,7 @@ def test_app_switch_to_networkgraph_shows_target_hides_y_and_regenerates_config(
     assert labels == {"Dataset", "Chart type", "Source (from)", "Target (to)"}
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'networkgraph'" in app.code[0].value
+    assert '"type":"networkgraph"' in _config_text(app)
 
 
 def test_app_networkgraph_source_equals_target_shows_guard_warning(app):
@@ -9968,7 +10188,7 @@ def test_app_switch_to_organization_shows_manager_title_hides_y(app):
     }
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'organization'" in app.code[0].value
+    assert '"type":"organization"' in _config_text(app)
 
 
 def test_app_organization_kpi_shows_reports(app):
@@ -10045,9 +10265,9 @@ def test_app_organization_two_column_csv_draws_name_only(app):
     )  # Bo and Cy report to Ada; Ada (blank manager) is the root
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
-    assert "type: 'organization'" in js
-    assert "nodes" not in js  # name-only: no title cards, so no nodes array
+    js = _config_text(app)
+    assert '"type":"organization"' in js
+    assert '"nodes"' not in js  # name-only: no title cards, so no nodes array
 
 
 def test_app_organization_title_equals_manager_shows_guard_warning(app):
@@ -10079,7 +10299,7 @@ def test_app_switch_to_boxplot_shows_single_select_y_and_regenerates_config(app)
     assert not any(sb.label.startswith("Parent") for sb in app.selectbox)
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'boxplot'" in app.code[0].value
+    assert '"type":"boxplot"' in _config_text(app)
 
 
 def test_app_boxplot_kpi_shows_boxes(app):
@@ -10113,9 +10333,9 @@ def test_app_switch_to_waterfall_shows_single_select_y_and_regenerates_config(ap
     assert not any(sb.label.startswith("Parent") for sb in app.selectbox)
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
-    assert "type: 'waterfall'" in js
-    assert "isSum: true" in js  # the appended total reached the chart
+    js = _config_text(app)
+    assert '"type":"waterfall"' in js
+    assert '"isSum":true' in js  # the appended total reached the chart
 
 
 def test_app_waterfall_kpi_shows_steps_including_the_appended_total(app):
@@ -10186,9 +10406,9 @@ def test_app_switch_to_sunburst_shows_parent_control_and_regenerates_config(app)
     assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
-    assert "type: 'sunburst'" in js
-    assert "allowTraversingTree: true" in js  # the drill-in survived to the chart
+    js = _config_text(app)
+    assert '"type":"sunburst"' in js
+    assert '"allowTraversingTree":true' in js  # the drill-in survived to the chart
 
 
 def test_app_sunburst_parent_survives_a_node_change(app):
@@ -10316,10 +10536,10 @@ def test_app_switch_to_xrange_shows_end_control_and_regenerates_config(app):
     assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
-    assert "type: 'xrange'" in js
-    assert "x2:" in js  # the extent survived to the chart
-    assert "type: 'datetime'" in js  # ...and the ISO date strings became a time axis
+    js = _config_text(app)
+    assert '"type":"xrange"' in js
+    assert '"x2":' in js  # the extent survived to the chart
+    assert '"type":"datetime"' in js  # ...and the ISO date strings became a time axis
 
 
 def test_app_xrange_start_and_end_pickers_offer_only_coordinate_columns(app):
@@ -10457,7 +10677,7 @@ def test_app_switch_to_columnrange_shows_high_control_and_regenerates_config(app
     assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'columnrange'" in app.code[0].value
+    assert '"type":"columnrange"' in _config_text(app)
 
 
 def test_app_columnrange_low_and_high_pickers_offer_only_numeric_columns(app):
@@ -10544,7 +10764,7 @@ def test_app_switch_to_arearange_shows_high_control_and_regenerates_config(app):
     assert not _y_pills(app)
     _reveal_config(app)
     assert not app.exception
-    assert "type: 'arearange'" in app.code[0].value
+    assert '"type":"arearange"' in _config_text(app)
 
 
 def test_app_arearange_low_and_high_pickers_offer_only_numeric_columns(app):
@@ -10677,7 +10897,7 @@ def test_app_custom_title_flows_into_config(app):
     app.text_input(key="chart_title").set_value("My Title")
     _reveal_config(app)
     assert not app.exception
-    assert "My Title" in app.code[0].value
+    assert "My Title" in _config_text(app)
 
 
 def test_app_multiple_series_selected(app):
@@ -10685,7 +10905,7 @@ def test_app_multiple_series_selected(app):
     _y_pills(app)[0].set_value(["revenue", "cost"])
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
+    js = _config_text(app)
     assert "revenue" in js and "cost" in js
 
 
@@ -10802,13 +11022,11 @@ def test_app_style_reaches_the_generated_config(app):
     # config panel, which builds from the same cache layer as the chart).
     app.text_input(key="style_y_title").set_value("Revenue ($k)").run()
     app.number_input(key="style_reference_line").set_value(150.0).run()
-    next(t for t in app.toggle if "generated Highcharts config" in t.label).set_value(
-        True
-    ).run()
+    _reveal_config(app)
     assert not app.exception
-    js = "".join(app.code[0].value.split())
-    assert "text:'Revenue($k)'" in js
-    assert "plotLines:[{" in js and "value:150.0" in js
+    js = "".join(_config_text(app).split())
+    assert '"text":"Revenue($k)"' in js
+    assert '"plotLines":[{' in js and '"value":150.0' in js
 
 
 def test_app_x_selection_survives_a_family_switch(app):
@@ -10826,6 +11044,46 @@ def test_app_x_selection_survives_a_family_switch(app):
         next(sb for sb in app.selectbox if sb.label == "Category (X) axis").value
         == "cost"
     )
+
+
+def test_app_export_panel_offers_four_forms_with_downloads(app):
+    # The Export panel (plan #15): HTML snippet, HTML page, JS and JSON, each a code block with a
+    # download, plus the licence note. Nothing is built until the panel is opened.
+    assert not app.code
+    _reveal_config(app)
+    assert not app.exception
+    assert [code.language for code in app.code] == [
+        "html",
+        "html",
+        "javascript",
+        "json",
+    ]
+    names = [d.proto.url.rsplit("/", 1)[-1] for d in app.get("download_button")]
+    assert len(names) == 4
+    assert any("non-commercial" in caption.value for caption in app.caption)
+    json.loads(app.code[3].value)  # the JSON tab is real JSON
+
+
+def test_app_export_container_id_flows_and_a_bad_one_warns(app):
+    # The id box sets the <div> id the snippet and the JS use; an id the snippet cannot use is a
+    # warning from the builder, not a traceback.
+    _reveal_config(app)
+    app.text_input(key="export_container_id").set_value("sales-chart").run()
+    assert not app.exception
+    assert 'Highcharts.chart("sales-chart"' in _config_text(app)
+    assert 'id="sales-chart"' in app.code[0].value
+    app.text_input(key="export_container_id").set_value("my chart").run()
+    assert not app.exception
+    assert any("container id" in w.value for w in app.warning)
+
+
+def test_app_export_warns_when_the_export_is_large(app, monkeypatch):
+    # The snippet carries every row inline, so a big CSV makes a multi-MB paste. The threshold is
+    # lowered here rather than uploading megabytes: the app reads it at each run.
+    monkeypatch.setattr("highcharts_builder.EXPORT_SIZE_WARNING_BYTES", 100)
+    _reveal_config(app)
+    assert not app.exception
+    assert any("MB" in w.value and "every row" in w.value for w in app.warning)
 
 
 def test_app_x_selection_survives_a_label_only_chart_type_switch(app):
@@ -10986,7 +11244,7 @@ def test_app_generated_config_includes_brand_palette(app):
     # generated-config toggle is the visible proof once switched on.
     _reveal_config(app)
     assert not app.exception
-    assert DEFAULT_COLORS[0] in app.code[0].value
+    assert DEFAULT_COLORS[0] in _config_text(app)
 
 
 def _csv_bytes(num_numeric: int) -> bytes:
@@ -11161,12 +11419,12 @@ def test_app_switch_to_gauge_hides_the_x_control_and_shows_the_dial_controls(
     assert _y_pills(app)
     _reveal_config(app)
     assert not app.exception
-    assert f"type: '{chart_type}'" in app.code[0].value
+    assert f'"type":"{chart_type}"' in _config_text(app)
     # The solid gauge's pane is what resolves highcharts-more — without it the iframe is silently
     # blank (the retired export server's PNG rendered perfectly). The needle's pane is only
     # geometry (it resolves the module from chart.type alone), but both emit one, so the assertion
     # holds for the family.
-    assert "pane" in app.code[0].value
+    assert "pane" in _config_text(app)
 
 
 @pytest.mark.parametrize("chart_type", GAUGE_TYPES)
@@ -11205,7 +11463,7 @@ def test_app_gauge_dial_override_reaches_the_chart_and_survives_an_inert_rerun(
     app.number_input[1].set_value(1000.0).run()
     assert not app.exception
     _reveal_config(app)
-    assert "max:1000" in "".join(app.code[0].value.split())  # it reached the chart
+    assert '"max":1000.0' in _config_text(app)  # it reached the chart
     app.text_input[0].set_value("A different title").run()  # inert w.r.t. the dial
     assert not app.exception
     assert app.number_input[1].value == 1000.0  # the override stands
@@ -11310,8 +11568,8 @@ def test_app_switch_to_bullet_shows_goal_control_and_regenerates_config(app):
     assert not app.warning
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
-    assert "type: 'bullet'" in js
+    js = _config_text(app)
+    assert '"type":"bullet"' in js
     # The sample's own numbers reached the chart, which is what proves the config was regenerated
     # through the bullet branch rather than left over from the previous type.
     for actual in df["actual"]:
@@ -11505,8 +11763,8 @@ def test_app_switch_to_variwide_shows_width_control_and_regenerates_config(app):
 
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
-    assert "type: 'variwide'" in js
+    js = _config_text(app)
+    assert '"type":"variwide"' in js
     # Both channels reached the config, in the right slots — the check that a copied control
     # shape wired to `goal_col` would fail while every other assertion here still passed.
     assert "[62.0,21.0]" in "".join(js.split())
@@ -11619,8 +11877,8 @@ def test_app_switch_to_dumbbell_shows_after_control_and_regenerates_config(app):
 
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
-    assert "type: 'dumbbell'" in js
+    js = _config_text(app)
+    assert '"type":"dumbbell"' in js
     # Both readings reached the config in the right slots, and — the point of choosing a FALLING
     # row for this assertion — in the frame's order rather than sorted. DACH went 28.1 -> 21.5, so
     # a builder that normalized the pair would emit [21.5,28.1] here and every other assertion in
@@ -11769,11 +12027,11 @@ def test_app_switch_to_timeline_shows_the_date_control_and_regenerates_config(ap
 
     _reveal_config(app)
     assert not app.exception
-    js = app.code[0].value
-    assert "type: 'timeline'" in js
+    js = _config_text(app)
+    assert '"type":"timeline"' in js
     # The dates reached the chart as a TIME axis rather than as categories or raw integers.
-    assert "type: 'datetime'" in js
-    assert f"name: '{df['milestone'][0]}'" in js
+    assert '"type":"datetime"' in js
+    assert f'"name":"{df["milestone"][0]}"' in js
 
 
 def test_app_timeline_kpi_shows_events(app):
@@ -11812,7 +12070,7 @@ def test_app_timeline_kpi_shows_events(app):
 # parameters are `str | None`, so nothing else in the toolchain can tell them apart.
 _CACHE_LAYER = {  # cached wrapper -> the builder it must forward to
     "cached_chart_html": "build_chart_html",
-    "cached_chart_js": "make_chart",
+    "cached_chart_exports": "build_chart_exports",
 }
 
 
