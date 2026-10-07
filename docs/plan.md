@@ -11,7 +11,7 @@ plan completes one loop and stops there:
 
 ```text
 data in → pick chart → tweak it → take it out
-   ✓          ✓        #5 (+#6)  #13, #1, #2  (+ #8: fix the data without leaving the app)
+   ✓          ✓        #5 (+#6) #13, #15, #2  (+ #8: fix the data without leaving the app)
 ```
 
 Anything that does not serve that loop is deferred or dropped, with the reason kept so it
@@ -63,15 +63,17 @@ In build order. Numbers are stable IDs, not priorities.
 | 1st | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
 | 2nd | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
 | 3rd | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
-| 4th | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | S | planned |
-| 5th | 2 | [Export as Python / JSON](#2-export-as-python--json) | S | planned |
+| 4th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
+| 5th | 2 | [Export as Python](#2-export-as-python) | S | planned |
 | 6th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
+| — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
 | — | 9 | [Delimiter sniffing (Excel dropped)](#9-delimiter-sniffing) | S | deferred |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
 | — | 7 | [Data prep: aggregate, sort, top-N, filter](#7-data-prep) | M | deferred |
 | — | 10 | [New chart types](#10-new-chart-types) | M each | deferred |
+| — | 16 | [Switch the app's iframe to the JSON-built JS](#16-switch-the-apps-iframe-to-the-json-built-js) | M | deferred |
 | — | 14 | [Spike: run the app in the browser (stlite)](#14-spike-run-the-app-in-the-browser-stlite) | M (spike) | deferred |
 | — | 11 | [Compare charts side by side](#11-compare-charts-side-by-side) | L | dropped |
 
@@ -160,31 +162,88 @@ In build order. Numbers are stable IDs, not priorities.
     are part of the chart.
 - **Size:** M · **Status:** planned
 
-### 1. Download the chart as HTML
+### 15. Embeddable outputs: HTML, JS, JSON
 
-- **What & why:** After [#13](#13-client-side-export), images come from the chart's own
-  ☰ menu, and this is the app's **only** download button: the chart as a standalone page.
-  `build_chart_html` already returns one, so this is one `st.download_button` under the
-  chart. The HTML keeps hover, zoom and legend toggling, which an image loses.
-- **Touches:** `streamlit_app.py` (under the chart), one AppTest.
-- **Decided:** CDN-linked HTML only, so the file needs a network connection to open. An
-  inlined-JS variant (works offline) is out: it would ship Highcharts' JavaScript inside the
-  app, which is a large file to carry and a licence question. See the dependency rule under
-  [Direction](#direction-a-lightweight-chart-editor).
-- **Size:** S · **Status:** planned
+- **What & why:** Let a user take the chart *out* in the three forms other pages use, each
+  of which works when pasted somewhere else. Today none of them does:
+  - **HTML:** `build_chart_html` returns a full document (`<html>`, `<head>`, `<body>`),
+    which works as a standalone file or in an iframe but cannot be pasted into a page.
+  - **JS:** `to_js_literal` wraps the call in `document.addEventListener('DOMContentLoaded',
+    …)`. Pasted into a page that has already loaded (as most site editors insert content),
+    that event has already fired and the chart **never draws**, with no error. Its fixed
+    `'hc_chart'` id also collides when one page holds two charts.
+  - **JSON:** not produced. `json.dumps(build_options(...))` raises
+    `TypeError: EnforcedNullType is not JSON serializable` on any chart with a gap in its
+    data (checked with one `NaN`).
 
-### 2. Export as Python / JSON
+  The builder emits **no JavaScript callback functions**, so the options are pure data and
+  JSON loses nothing.
+- **Design:**
+  1. **JSON is the canonical output.** A pure `build_chart_json(...)` serializes the
+     options with `EnforcedNull` written as `null` and `allow_nan=False`, so a bare `inf` or
+     `NaN` raises instead of shipping.
+  2. **JS is built from the JSON**, not from `to_js_literal`: `Highcharts.chart(el, <json>)`.
+     JSON is valid JavaScript, so this output cannot hit either of the
+     [unquoted-string bugs](decisions.md#the-strings-highcharts-core-emits-unquoted). It
+     quotes the text correctly rather than editing it, so it does not break the rule against
+     changing what the user typed. It runs immediately, with no `DOMContentLoaded` wrapper.
+  3. **HTML has two variants from one function:** a **snippet** (script tags, a `<div>`
+     with a unique or user-chosen id, the JS above, and the `color-scheme` pin limited to
+     that chart so it cannot restyle the host page) and the **full page** (folded in from
+     [#1](#1-download-the-chart-as-html): the same snippet in a document skeleton, for a
+     standalone file). CDN-linked only, so both need a network connection to open; an
+     inlined-JS variant is out (a large file and a licence question, see the dependency rule
+     under [Direction](#direction-a-lightweight-chart-editor)).
+  4. **One Export panel in the app** replaces the "Show the generated Highcharts config"
+     toggle: tabs for HTML / JS / JSON / Python ([#2](#2-export-as-python)), each an
+     `st.code` block (it has a copy button) plus an `st.download_button`. The panel stays
+     behind a toggle so nothing is built until asked, the reason the current toggle exists.
+- **Touches:** `highcharts_builder.py` (`build_chart_json`, the snippet builder, and
+  `build_chart_html` rebuilt on top of them), `streamlit_app.py` (the Export panel and its
+  cached wrappers, forwarded by keyword like the renderer wrappers), tests, `CLAUDE.md`
+  (the public API block and the flow diagram).
+- **Tests:**
+  - A **sweep** over every supported type: the JSON output passes `json.loads`, and the
+    row-less and non-finite frames still serialize. Extend the existing sweeps rather than
+    writing per-type tests.
+  - The unquoted-string sweep's two cases, run against the new JS output, must come out
+    **quoted**. The test pinning the library bug in `to_js_literal` stays as it is: the bug
+    is still there, only this output no longer goes through it.
+  - **Verify by rendering:** paste the snippet into a plain page *after* load (inserted by a
+    script) and confirm it draws; put two snippets on one page and confirm both draw.
+- **Decisions:** see [below](#decisions-for-15).
+- **Size:** M · **Status:** planned
 
-- **What & why:** The config toggle shows JavaScript. Add (a) a copyable `make_chart(...)`
-  call that reproduces the current chart with the public API, and (b) the options as JSON.
-  This turns the app into a way to *learn* `highcharts-core`, not only to use it.
+#### Decisions for #15
+
+Settled on 2026-10-07:
+
+- **Script tags: check first.** The snippet loads the CDN scripts only if they are
+  missing, then draws, so pasting several snippets on one page is safe. The check has to
+  be **per module**, not only `window.Highcharts`: a sankey snippet pasted after a line
+  snippet finds Highcharts already loaded but still needs `modules/sankey.js`.
+- **JSON: standard-library `json`** over the `build_options` dict, with `EnforcedNull`
+  written as `null` and `allow_nan=False`. Not `chart.to_json()`. Charts still pass through
+  `highcharts-core` (`make_chart` validates them) everywhere else.
+- **The app's own iframe stays on `to_js_literal` for now.** Switching it is
+  [#16](#16-switch-the-apps-iframe-to-the-json-built-js), deferred, so #15 only changes the
+  exports.
+- **Container id: generated, overridable.** By default, a stable id derived from the
+  options (e.g. `hc-3f9a`), so the same chart always gets the same id; an optional text box
+  sets your own to match an existing `<div>`. Two *identical* charts on one page would share
+  an id, which is the case the override is for.
+
+### 2. Export as Python
+
+- **What & why:** Add a copyable `make_chart(...)` call that reproduces the current chart
+  with the public API, as the Python tab of [#15](#15-embeddable-outputs-html-js-json)'s
+  Export panel. This turns the app into a way to *learn* `highcharts-core`, not only to use
+  it. (The JSON half of this item moved to #15.)
 - **Touches:** a pure `python_snippet(...)` helper in `highcharts_builder.py` (testable:
-  `exec` the snippet against the sample frame and compare the options it produces), plus
-  `st.tabs` or a selector next to the config toggle.
-- **Open questions:** Should the JSON path go through `to_js_literal`, or through the
-  options dict? Watch the [unquoted-string](decisions.md#the-strings-highcharts-core-emits-unquoted)
-  cases: JSON serialization avoids them, and that difference is worth a test. Building this
-  after #5 means the snippet includes `style=ChartStyle(...)` from the start.
+  `exec` the snippet against the sample frame and compare the options it produces).
+- **Open questions:** Building this after #5 means the snippet includes
+  `style=ChartStyle(...)` from the start. Should the snippet embed the data, or assume a
+  `df` the user already has? Assuming `df` keeps it short; embedding it makes it runnable.
 - **Size:** S · **Status:** planned
 
 ### 8. Edit data in place
@@ -205,6 +264,11 @@ Folded into [#5](#5-style-controls) as one more `ChartStyle` field: a horizontal
 typed value via `yAxis.plotLines`, for cartesian and polar types. Its colour must alias an
 existing palette or chrome colour (no new colours). The open question carries over: should
 it be a fixed value, or computed (mean/median)? A fixed value is the lightweight answer.
+
+### 1. Download the chart as HTML
+
+Folded into [#15](#15-embeddable-outputs-html-js-json) as its **full page** variant. The
+decision made here carries over: CDN-linked only, no inlined Highcharts JavaScript.
 
 ## Deferred
 
@@ -235,7 +299,7 @@ it be a fixed value, or computed (mean/median)? A fixed value is the lightweight
 - **Why deferred:** It only works for sample datasets (an uploaded CSV cannot travel in a
   URL), and seeding the keyed pickers (`_KEYED_PICKERS`) from `st.query_params` before they
   are instantiated is the hardest widget-state work in the app. A lot of cost for the one
-  case where the data is already built in. #1 and #2 cover saving a chart.
+  case where the data is already built in. #15 and #2 cover saving a chart.
 
 ### 7. Data prep
 
@@ -255,6 +319,19 @@ it be a fixed value, or computed (mean/median)? A fixed value is the lightweight
 | `wordcloud` | pie (label + weight) | Needs a text-heavy sample. |
 | `streamgraph` | cartesian multi-series | Close to `areaspline`; the theme must be checked by rendering. |
 | `pareto` | column + derived line | Sorted bars plus a cumulative-% line. |
+
+### 16. Switch the app's iframe to the JSON-built JS
+
+- **Why deferred:** Split out of [#15](#15-embeddable-outputs-html-js-json) to keep that
+  item to the exports. Once #15 exists, the app's interactive iframe could draw from the
+  same JSON-built JS instead of `to_js_literal`. That would fix both
+  [unquoted-string bugs](decisions.md#the-strings-highcharts-core-emits-unquoted) in the app
+  itself, so one renderer would serve both the app and the exports.
+- **What it costs:** a render check across all 30 types in both browser colour schemes,
+  and the docs that describe the bugs as live in the app (`CLAUDE.md`'s "Two string shapes
+  the serializer emits UNQUOTED" convention) rewritten to say they are confined to
+  `to_js_literal`, which the app would no longer call.
+- **Size:** M · **Status:** deferred
 
 ### 14. Spike: run the app in the browser (stlite)
 
@@ -285,7 +362,7 @@ it be a fixed value, or computed (mean/median)? A fixed value is the lightweight
 
 - **Why dropped:** The largest structural change on the list (the sidebar *is* one chart's
   state, so this needs a list of chart specs in session state and the picker logic made
-  re-runnable), and the opposite of lightweight. Exporting (#13, #1, #2) is the lightweight way
+  re-runnable), and the opposite of lightweight. Exporting (#13, #15, #2) is the lightweight way
   to keep more than one chart.
 
 ---
