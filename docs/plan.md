@@ -106,7 +106,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | done (0.20.5) |
 | 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | done (0.20.6) |
 | 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | done (0.21.0) |
-| 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | planned |
+| 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | done (0.21.1) |
 | 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
 | 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
 | 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
@@ -161,43 +161,9 @@ rendering verified: [`decisions.md`](decisions.md#static-png-mode-and-its-retire
 
 ### 23. Host a public demo on Streamlit Community Cloud
 
-- **What & why:** A lightweight editor nobody can reach is half done. Deploy the app as a
-  **public, non-commercial demo** on Streamlit Community Cloud and link it from the README.
-  Local (`uv run streamlit run streamlit_app.py`) stays the documented way to run it, and
-  the only way for anyone who forks it.
-- **Decided (2026-10-07):** Community Cloud, non-commercial. It fits with almost no work:
-  the app reads no secrets and no environment variables, and its runtime set is three
-  packages. The rejected options, so they are not re-proposed without new information:
-  - **Local only:** safe, but leaves the editor loop finished with nowhere to use it. It
-    stays as the fallback, not the answer.
-  - **Static hosting via stlite ([#14](#14-spike-run-the-app-in-the-browser-stlite)):**
-    every visitor downloads tens of MB before the first chart, which works against
-    "lightweight", and it waits on an unrun spike. If that spike ever shows a fast enough
-    first load, it can replace this deployment later; it does not block it.
-- **Licence:** Highcharts JS and `highcharts-core` are free for personal and non-commercial
-  use, and a public deployment is still a use of them. This demo qualifies only while it
-  stays non-commercial (no ads, no paid tier, not a company product). If that changes, the
-  deployment comes down until a commercial licence is in place. The README's `## License`
-  section and `NOTICE` already put licensing on whoever deploys; the live-demo section says
-  the demo is non-commercial.
-- **Depends on:** [#13](#13-client-side-export), now done (0.21.0): with Static PNG mode
-  retired, the hosted app's only outside dependency is the Highcharts CDN, and no visitor's
-  render calls `export.highcharts.com`.
-- **Touches:** `README.md` (a live-demo link near the top and a short deploy section), and a
-  deploy config only if Community Cloud needs one.
-- **Check when building:**
-  - Whether Community Cloud installs from `pyproject.toml` + `uv.lock` directly. If it needs
-    a `requirements.txt`, that is a second copy of the dependency list:
-    [#12](#12-pin-the-runtime-dependency-set) must then pin the two together, or the copy
-    drifts.
-  - That the deployment runs on Python 3.12 (set in the app's advanced settings), the
-    interpreter the tests use.
-  - That the interactive chart loads inside Community Cloud's page (the CDN is fetched by
-    the viewer's browser, not the server, so this is a browser check).
-- **Known limit:** free apps sleep after a period of inactivity, so the first visitor after
-  a quiet spell waits for a cold start. Say so in the README rather than work around it.
-- **Shipping:** no new app behaviour, so a **patch** bump (see Shipping in the Legend).
-- **Size:** S · **Status:** planned
+Done in 0.21.1: live at <https://highcharts-studio.streamlit.app>, public and non-commercial. Why
+Community Cloud, the two options rejected, the licence condition and what was checked:
+[`decisions.md`](decisions.md#hosting-a-public-demo-on-community-cloud).
 
 ### 21. Pin the Highcharts JS version
 
