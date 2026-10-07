@@ -85,12 +85,14 @@ In build order. Numbers are stable IDs, not priorities.
 | Order | # | Feature | Size | Status |
 |---|---|---|---|---|
 | 1st | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
-| 2nd | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
-| 3rd | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
-| 4th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
-| 5th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
-| 6th | 2 | [Export as Python](#2-export-as-python) | S | planned |
-| 7th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
+| 2nd | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
+| 3rd | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
+| 4th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
+| 5th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
+| 6th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
+| 7th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
+| 8th | 2 | [Export as Python](#2-export-as-python) | S | planned |
+| 9th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
@@ -161,6 +163,55 @@ In build order. Numbers are stable IDs, not priorities.
   - Keep a server-side PNG option for users who can't run JS? No: the lightweight answer is
     to retire it entirely.
 - **Size:** S–M (mostly deletion, plus a render check) · **Status:** planned
+
+### 19. Date the real-world samples
+
+- **What & why:** 24 of the 26 samples are plainly invented. Two carry **real names with
+  undated figures**:
+  - *Company market cap (treemap)*: Apple 3400, Microsoft 3100, Nvidia 2900… in $ billions;
+  - *Country economics (bubble)*: GDP per capita, life expectancy and population for real
+    countries (they look like 2022–23 figures).
+
+  Inside the app that is harmless, but once a chart can be copied onto another page
+  ([#15](#15-embeddable-outputs-html-js-json)), its numbers travel with it and can be
+  published as if current. Keep the familiar names (they are what makes the two charts
+  readable) and say what the figures are: illustrative, and roughly when.
+- **Touches:** `sample_data.py` (the two `SAMPLES` labels and docstrings), and any doc that
+  names them.
+- **Constraint:** the date goes **outside** the parentheses, e.g.
+  *Company market cap, ~2024 (treemap)*. The test helper `_pick_sample` finds a type's
+  sample by the exact substring `"(treemap)"`, so *(treemap, illustrative ~2024)* would
+  break every test that uses it.
+- **Open questions:** Which year to state for each? Read the figures against a source
+  once, write the year they match, and put "illustrative" in the docstring rather than the
+  label (the label is narrow).
+- **Size:** S · **Status:** planned
+
+### 18. A stackable sample
+
+- **What & why:** #5's main new control is stacking, and no sample can show it honestly.
+  The only multi-series Tier 1 sample is *Monthly revenue vs cost*, and stacking it is
+  **meaningless**: cost is not a part of revenue, so the stacked total measures nothing (and
+  percent stacking is worse). Add a sample whose series **are** parts of a whole, e.g.
+  *Monthly revenue by channel*: a `month` column, then 3–4 channels (online, retail,
+  wholesale, partner) over 12 months. Stacked, it shows the total; percent-stacked, the mix.
+  It is the sample #5 is verified against by rendering, so it comes first.
+- **Touches:** `sample_data.py` (a new factory and `SAMPLES` entry, leading with the
+  category column per the [first-column rule](chart-types.md#the-sample-datasets)), the
+  sample tests, and the sample's rationale in `docs/chart-types.md`.
+- **Constraints:**
+  - **Added alongside the landing dataset, not replacing it.** Many tests read the first
+    sample (`next(iter(SAMPLES.values()))`) and the AppTests expect its `revenue` and `cost`
+    columns.
+  - **Its label must not capture another type's tests.** `_pick_sample` takes the *first*
+    `SAMPLES` key containing `"(column)"`, `"(area)"` and so on, so a label like
+    *(column)* would silently become the sample for every column test. Label it
+    *(stacked column/area)*, which matches no single type.
+- **Open questions:** Should a log-scale control (#5) get a sample too? Log only helps when
+  values span orders of magnitude, and the widest sample today (*Company market cap*) spans
+  about 9×. Either a second small sample, or test log scale on synthetic data only and
+  ship no sample for it (the lightweight answer).
+- **Size:** S · **Status:** planned
 
 ### 5. Style controls
 
@@ -249,6 +300,11 @@ Settled on 2026-10-07:
   two members.
 - **Help text per family.** The chart-type selectbox's help is one tooltip with 30 bullets
   today; it shows only the selected family's entries instead.
+- **Order the samples by family.** The Dataset dropdown lists 26 samples in the order they
+  were added. Reorder the `SAMPLES` registry to follow the six families, Basic first, so
+  the list reads in the same groups as the picker. *Monthly revenue vs cost* must stay the
+  **first** entry: it is the landing dataset, and tests read it as
+  `next(iter(SAMPLES.values()))`. A dict reorder, no other code.
 
 ### 15. Embeddable outputs: HTML, JS, JSON
 
