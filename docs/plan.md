@@ -17,6 +17,12 @@ data in → pick chart → tweak it → take it out
 Anything that does not serve that loop is deferred or dropped, with the reason kept so it
 is not re-proposed without new information.
 
+**Where it ends: 1.0 is the planned set.** When every `planned` item has shipped, the
+editor loop is complete and the next release is **1.0**. That gives the plan a finish line,
+and the Shipping rule's "while below 1.0" clause (see the [Legend](#legend)) a defined end.
+A new item joins the planned set only if 1.0 would be incomplete without it; anything else
+waits until after 1.0.
+
 **Kept out on purpose:**
 
 - **No new chart types for now.** Each costs the nine steps in
@@ -95,16 +101,18 @@ In build order. Numbers are stable IDs, not priorities.
 | Order | # | Feature | Size | Status |
 |---|---|---|---|---|
 | 1st | 20 | [Escape `</script>` in the chart's JS](#20-escape-script-in-the-charts-js) | S | planned |
-| 2nd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
-| 3rd | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | planned |
-| 4th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
-| 5th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
-| 6th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
-| 7th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
-| 8th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
-| 9th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
-| 10th | 2 | [Export as Python](#2-export-as-python) | S | planned |
-| 11th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
+| 2nd | 22 | [Large datasets in the label + value types](#22-large-datasets-in-the-label--value-types) | S–M | planned |
+| 3rd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
+| 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | planned |
+| 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
+| 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
+| 7th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
+| 8th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
+| 9th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
+| 10th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
+| 11th | 2 | [Export as Python](#2-export-as-python) | S | planned |
+| 12th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
+| — | 23 | [Decide where the app runs](#23-decide-where-the-app-runs) | — | idea |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
@@ -149,6 +157,46 @@ In build order. Numbers are stable IDs, not priorities.
   is emitted as code, not as a string, and is broken before this fix applies. #15's
   JSON-built JS has neither problem.
 - **Size:** S · **Status:** planned
+
+### 22. Large datasets in the label + value types
+
+- **What & why:** Probably a **bug today**, found 2026-10-07. Highcharts' `turboThreshold`
+  defaults to 1,000: past that many points, a series may only hold numbers or arrays, and a
+  series of point **objects** is refused (Highcharts error #12). The builder never sets
+  `turboThreshold`. Built from a 1,200-row frame, four types emit point objects past the
+  limit, the label + value types whose every point carries its own name:
+
+  | Types | Series data | At 1,200 rows |
+  |---|---|---|
+  | line, spline, area, areaspline, column, bar, radar, waterfall | numbers | fine |
+  | scatter, heatmap, boxplot | arrays | fine |
+  | **pie, treemap, funnel, pyramid** | **objects** (`{name, y}`) | **over the limit** |
+
+  So an uploaded CSV of over 1,000 rows most likely draws these four as a **blank chart
+  with no message**. Nothing in the suite gets near the limit: every sample is 60 rows or
+  fewer and the sweeps use small frames. [#8](#8-edit-data-in-place) and
+  [#15](#15-embeddable-outputs-html-js-json) both assume large data works, so this comes
+  early.
+- **Step one, verify by rendering:** a 1,200-row pie in the app, before any fix. Also probe
+  the types the quick check skipped because they need extra columns (sankey,
+  dependencywheel, networkgraph, organization, sunburst, xrange, timeline, bullet, variwide,
+  dumbbell, columnrange, arearange): any that emit objects have the same problem.
+- **Fix, to choose after rendering:**
+  - **Group the tail (likely):** keep the largest slices and fold the rest into one
+    "Other" point, with a caption saying how many were grouped. A 1,000-slice pie is
+    unreadable anyway, so this is the honest chart, and it keeps every embed small. Funnel
+    and pyramid are ordered stages, not parts to rank, so they may need a row cap with a
+    message instead.
+  - **Or set `turboThreshold: 0`** for the affected types: everything draws, slowly, and
+    the chart stays unreadable.
+- **Touches:** `highcharts_builder.py` (the four branches, and `count_marks` so the KPI
+  matches what is drawn), tests, `docs/chart-types.md` (each type's entry gains its
+  large-data policy).
+- **Tests:** a new **sweep**: every supported type built from a frame over the limit, and
+  no series may carry more than 1,000 point objects (unless the type sets
+  `turboThreshold`). Extend it as the existing sweeps are, not per type. Verify by breaking
+  it.
+- **Size:** S–M · **Status:** planned
 
 ### 12. Pin the runtime dependency set
 
@@ -531,6 +579,24 @@ Settled on 2026-10-07:
 - **Decided:** edit cells only (no adding or deleting rows, the lightweight answer), and
   edits reset when the dataset changes: they belong to the data they were made on.
 - **Size:** S · **Status:** planned
+
+## Ideas
+
+### 23. Decide where the app runs
+
+- **What & why:** No item says where the app is hosted. The README mentions deploying only
+  to warn about Highcharts licensing. A lightweight editor nobody can reach is half done.
+  The options:
+  - **Local only**, as today: `uv run streamlit run streamlit_app.py`. Nothing to decide
+    about licensing beyond the user's own use.
+  - **Streamlit Community Cloud:** free, and a fit (the app reads no secrets and needs no
+    environment variables). A public deployment is a public use of Highcharts, so the
+    licence question comes first.
+  - **Static hosting via stlite:** [#14](#14-spike-run-the-app-in-the-browser-stlite),
+    if its spike succeeds.
+- **Open questions (yours):** public, private or local only? And which Highcharts licence
+  covers a public deployment, if any?
+- **Size:** S once decided (a deploy config and a README section) · **Status:** idea
 
 ## Folded
 
