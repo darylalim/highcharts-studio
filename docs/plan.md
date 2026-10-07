@@ -102,7 +102,7 @@ In build order. Numbers are stable IDs, not priorities.
 |---|---|---|---|---|
 | 1st | 20 | [Escape `</script>` in the chart's JS](#20-escape-script-in-the-charts-js) | S | done (0.20.2) |
 | 2nd | 22 | [Large datasets (re-scoped: the networkgraph freeze)](#22-large-datasets) | S | done (0.20.3) |
-| 3rd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
+| 3rd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | done (0.20.4) |
 | 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | planned |
 | 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
 | 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
@@ -145,20 +145,9 @@ story: [`decisions.md`](decisions.md#large-data-the-turbothreshold-bug-that-was-
 
 ### 12. Pin the runtime dependency set
 
-- **What & why:** Turns the "no new runtime dependencies" rule into a test, so adding a
-  package is a deliberate change that has to edit a test, not something that slips in with
-  a feature. It goes first because it guards every feature after it.
-- **Touches:** `tests/test_packaging.py` only. Read `[project].dependencies` from
-  `pyproject.toml` with `tomllib` (standard library), strip each version specifier, and
-  assert the names are exactly `{"highcharts-core", "pandas", "streamlit"}`. The failure
-  message should point to the Direction section of this file. The `dev` group is
-  deliberately not pinned.
-- **Verify by breaking it:** add a fake dependency to a copy of `pyproject.toml`, run the
-  test alone, confirm it fails on the assertion, restore, and diff (the mutation procedure
-  in `CLAUDE.md`'s Run section).
-- **Decided:** names only, not the version floors. The floors are already explained in
-  `pyproject.toml`'s comments and move with every upgrade.
-- **Size:** S · **Status:** planned
+Done in 0.20.4: `test_runtime_dependencies_are_exactly_the_pinned_set` in
+`tests/test_packaging.py` pins the runtime `dependencies` by name, and its comments carry the
+reasoning (names only, the `dev` group left free, a duplicated entry caught too).
 
 ### 13. Client-side export
 
