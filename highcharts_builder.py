@@ -604,6 +604,16 @@ _NETWORKGRAPH_LINK_LENGTH = 80
 # per-link weights: node labels do not multiply with the edges (a hub node is labelled once however
 # many edges meet it), so a dense graph adds edges, not text.
 _NETWORKGRAPH_NODE_LABEL = {"enabled": True}
+# The most NODES a networkgraph will lay out; above it the builder refuses with a message
+# (`_networkgraph_edges`). Measured, not chosen (Highcharts 13.1.1, 2026-10-07): with
+# `enableSimulation` off the layout runs synchronously, and its cost grows roughly with the SQUARE
+# of the node count — 90 nodes 0.35s, 140 0.8s, 240 2.3s, 440 7.4s — so a 1,200-row CSV froze the
+# browser tab outright. Readability gives out first, though: at 240 nodes the labels already
+# overprint into an unreadable mesh. 150 keeps the layout under about a second and the chart
+# legible. Highcharts' `barnes-hut` approximation was measured too and rejected: it roughly halves
+# the time but does not change the curve (an estimated ~15s at 1,240 nodes), and it packs nodes
+# along the edges, which reads worse than the exact layout at every size tried.
+_NETWORKGRAPH_MAX_NODES = 150
 
 # Tukey's constant: a boxplot's whiskers reach the most extreme observation still within
 # 1.5 x IQR of the box, and anything past that is drawn as an individual outlier. Named
@@ -2122,6 +2132,38 @@ def _cycle_chain(loop: list[str], name_of: dict[str, str]) -> str:
     if len(labels) > _SUNBURST_CYCLE_PREVIEW + 1:
         labels = [*labels[:_SUNBURST_CYCLE_PREVIEW], "...", labels[-1]]
     return " → ".join(labels)
+
+
+def _networkgraph_edges(
+    df: pd.DataFrame, x_col: str, target_col: str
+) -> tuple[list[dict[str, str]], str | None]:
+    """A networkgraph's edges, or ``([], message)`` when they name too many nodes to lay out.
+
+    Returns ``(edges, None)`` normally. A row missing EITHER end can't be an edge, so it is
+    dropped (missing data, sankey's rule). Past ``_NETWORKGRAPH_MAX_NODES`` distinct nodes the
+    layout would freeze the viewer's browser tab, so instead of edges this returns the reason:
+    ``build_options`` raises it and the app shows it (through ``explain_networkgraph_error``), from
+    this one place, so the two can't drift — ``_sunburst_tree``'s split, for a size limit rather
+    than a contradiction.
+
+    Applies the ``x_col`` filter itself rather than relying on ``build_options``' up-front one, so
+    ``explain_networkgraph_error`` can hand it the RAW frame and still count exactly the nodes the
+    chart would draw. Node names are stringified as the build always did, so a node is counted
+    once however its two columns spell it.
+    """
+    edges = [
+        {"from": str(src), "to": str(dst)}
+        for src, dst in zip(df[x_col], df[target_col], strict=True)
+        if _label_ok(src) and _label_ok(dst)
+    ]
+    nodes = {end for edge in edges for end in edge.values()}
+    if len(nodes) > _NETWORKGRAPH_MAX_NODES:
+        return [], (
+            f"This network has {len(nodes):,} nodes, and a network graph is limited to "
+            f"{_NETWORKGRAPH_MAX_NODES}: past that its layout can freeze the browser and its "
+            "labels overprint into an unreadable mesh. Filter the data to fewer nodes."
+        )
+    return edges, None
 
 
 def _sunburst_tree(
@@ -3981,11 +4023,11 @@ def build_options(
         # is dropped as sankey drops a weightless link — no EnforcedNull, there is no slot to keep
         # aligned. The x_col (source) filter already ran up front (this is a label channel, unlike
         # gauge); target_col is this branch's own second label column, so it is checked here.
-        edges = [
-            {"from": str(src), "to": str(dst)}
-            for src, dst in zip(df[x_col], df[target_col], strict=True)
-            if _label_ok(src) and _label_ok(dst)
-        ]
+        # Too many nodes is not missing data but a chart that cannot be drawn usefully, so it
+        # raises — with the message `explain_networkgraph_error` hands the app.
+        edges, problem = _networkgraph_edges(df, x_col, target_col)
+        if problem:
+            raise ValueError(problem)
         return _themed(
             {
                 "chart": {"type": "networkgraph"},
@@ -5086,6 +5128,19 @@ def explain_tree_error(
     reach just by uploading a CSV — have to keep that true.
     """
     return _sunburst_tree(df, x_col, parent_col, value_col)[2]
+
+
+def explain_networkgraph_error(
+    df: pd.DataFrame, x_col: str, target_col: str
+) -> str | None:
+    """``None`` when a networkgraph's edges name few enough nodes to lay out; otherwise the
+    reason they don't — the very message ``build_options`` raises.
+
+    ``explain_tree_error``'s contract, for a size limit: an uploaded CSV of a few hundred edges
+    reaches it with no code at all, and the interactive path does NOT catch builder errors, so
+    the app must warn and stop rather than render a traceback.
+    """
+    return _networkgraph_edges(df, x_col, target_col)[1]
 
 
 def explain_xrange_error(

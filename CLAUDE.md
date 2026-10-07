@@ -89,8 +89,8 @@ dependencies are unauthenticated CDNs — `code.highcharts.com` (interactive) an
   Highcharts options `dict`, a `Chart`, and embeddable HTML or PNG bytes. Independently
   importable and unit-testable. It also owns three things that would otherwise drift from
   it: the **diagnosis** of its own failures (`explain_export_failure`, `explain_tree_error`,
-  `explain_xrange_error`, `explain_gauge_error` — so a message can't drift from the error
-  it stands in for; the first duck-types on `exc.response.status_code` rather than
+  `explain_xrange_error`, `explain_gauge_error`, `explain_networkgraph_error` — so a message
+  can't drift from the error it stands in for; the first duck-types on `exc.response.status_code` rather than
   importing `requests`, which this project never declares), the **options** its widgets
   offer (`picker_columns` — one sniff of the frame answering both coordinate pickers at once,
   with `coordinate_columns` / `date_columns` as thin wrappers over its two halves — the app

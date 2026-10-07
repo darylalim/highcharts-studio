@@ -90,8 +90,8 @@ Layers:
   which reveal a single-select Y
   and no extra control at all — waterfall also asserting that its Steps KPI counts
   the appended total, and sunburst that its Sectors KPI counts the appended root, and
-  that a CYCLIC uploaded CSV — the one builder error a user can reach by uploading a
-  file, since the interactive path does not catch — warns and stops rather than
+  that a CYCLIC uploaded CSV — a builder error a user can reach by uploading a
+  file, and the interactive path does not catch — warns and stops rather than
   rendering a traceback), title, and series, revealing
   the generated Highcharts config
   behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
@@ -3040,6 +3040,60 @@ def test_networkgraph_count_marks_counts_drawable_edges():
     # type is unweighted). The KPI's "Links" reads this. A row missing either node drops.
     df = pd.DataFrame({"src": ["A", None, "C", "D"], "dst": ["B", "Y", None, "E"]})
     assert count_marks(df, "networkgraph", "src", [], target_col="dst") == 2
+
+
+def _star_edges(n_nodes: int) -> pd.DataFrame:
+    """An edge list naming exactly ``n_nodes`` distinct nodes: one hub, every other node a spoke."""
+    return pd.DataFrame(
+        {"src": [f"n{i}" for i in range(1, n_nodes)], "dst": ["hub"] * (n_nodes - 1)}
+    )
+
+
+def test_networkgraph_refuses_a_graph_past_its_node_limit():
+    # A networkgraph lays itself out synchronously (enableSimulation is off), at a cost that grows
+    # roughly with the SQUARE of its nodes: a 1,200-row CSV froze the browser tab outright, and by
+    # ~240 nodes the labels are already an unreadable mesh. So past the limit the builder refuses
+    # with a message rather than emit a chart that hangs the viewer's tab. The limit counts NODES,
+    # not rows: the layout's cost is in the nodes, and a star has one fewer edge than it has nodes.
+    from highcharts_builder import _NETWORKGRAPH_MAX_NODES
+
+    at_limit = _star_edges(_NETWORKGRAPH_MAX_NODES)
+    opts = build_options(at_limit, "networkgraph", "src", [], target_col="dst")
+    assert len(opts["series"][0]["data"]) == _NETWORKGRAPH_MAX_NODES - 1
+
+    past = _star_edges(_NETWORKGRAPH_MAX_NODES + 1)
+    with pytest.raises(ValueError, match=f"limited to {_NETWORKGRAPH_MAX_NODES}"):
+        build_options(past, "networkgraph", "src", [], target_col="dst")
+    # The KPI runs ABOVE the app's guard, so count_marks must stay total on the refused graph.
+    assert count_marks(past, "networkgraph", "src", [], target_col="dst") == len(past)
+
+
+def test_networkgraph_node_limit_counts_only_drawable_nodes():
+    # Rows the chart would drop (a missing end) name no node, so they cannot push a graph over
+    # the limit — the limit is about what would be laid out, not about the raw frame.
+    from highcharts_builder import _NETWORKGRAPH_MAX_NODES, explain_networkgraph_error
+
+    df = _star_edges(_NETWORKGRAPH_MAX_NODES)
+    padded = pd.concat(
+        [df, pd.DataFrame({"src": ["extra1", None], "dst": [None, "extra2"]})],
+        ignore_index=True,
+    )
+    assert explain_networkgraph_error(padded, "src", "dst") is None
+    build_options(padded, "networkgraph", "src", [], target_col="dst")  # does not raise
+
+
+def test_explain_networkgraph_error_is_the_message_build_options_raises():
+    # The app's warning and the builder's exception come from ONE place
+    # (`_networkgraph_edges`), so they cannot say different things.
+    from highcharts_builder import _NETWORKGRAPH_MAX_NODES, explain_networkgraph_error
+
+    past = _star_edges(_NETWORKGRAPH_MAX_NODES + 1)
+    message = explain_networkgraph_error(past, "src", "dst")
+    assert message and f"{_NETWORKGRAPH_MAX_NODES + 1:,} nodes" in message
+    with pytest.raises(ValueError) as raised:
+        build_options(past, "networkgraph", "src", [], target_col="dst")
+    assert str(raised.value) == message
+    assert explain_networkgraph_error(_star_edges(3), "src", "dst") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -9540,6 +9594,26 @@ def test_app_networkgraph_plots_a_csv_with_no_numeric_columns_at_all(app):
     assert "no numeric columns" in app.error[0].value
 
 
+def test_app_networkgraph_past_its_node_limit_warns_instead_of_freezing(app):
+    # An ordinary uploaded edge list of a few hundred rows reaches the node limit with no code at
+    # all. The interactive path does not catch builder errors, so the app stops on the builder's own
+    # message first; without that guard this page would be a traceback (and, before the limit, a
+    # browser tab frozen by the layout).
+    from highcharts_builder import _NETWORKGRAPH_MAX_NODES
+
+    rows = "\n".join(f"n{i},hub" for i in range(1, _NETWORKGRAPH_MAX_NODES + 1))
+    csv = f"src,dst\n{rows}\n".encode()
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("big.csv", csv, "text/csv")).run()
+    chart_type = next(sb for sb in app.selectbox if sb.label == "Chart type")
+    chart_type.set_value("networkgraph").run()
+    assert not app.exception  # NOT a traceback
+    assert app.warning
+    assert f"limited to {_NETWORKGRAPH_MAX_NODES}" in app.warning[0].value
+    # ...and the KPI still reports the links in the data, above the warning.
+    assert _metrics(app)["Links"] == f"{_NETWORKGRAPH_MAX_NODES:,}"
+
+
 def test_app_networkgraph_kpi_shows_links(app):
     # Networkgraph is one series of edges, so — like sankey — the KPI swaps "Series plotted"
     # (which would read a bare 1) for "Links" = the rows that become edges. The default dataset
@@ -9855,7 +9929,7 @@ def test_app_sunburst_a_contradictory_tree_reads_zero_sectors(app):
 
 
 def test_app_sunburst_a_cyclic_csv_warns_instead_of_crashing(app):
-    # The one BUILDER error a user can reach just by uploading a file. The interactive path
+    # The first BUILDER error a user could reach just by uploading a file. The interactive path
     # doesn't catch, so the app has to stop on it first — and the KPI row runs ABOVE that
     # guard, which is why count_marks returns 0 on a contradictory tree rather than raising.
     # If it raised, this page would be a traceback instead of an explanation.

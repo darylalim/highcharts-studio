@@ -101,7 +101,7 @@ In build order. Numbers are stable IDs, not priorities.
 | Order | # | Feature | Size | Status |
 |---|---|---|---|---|
 | 1st | 20 | [Escape `</script>` in the chart's JS](#20-escape-script-in-the-charts-js) | S | done (0.20.2) |
-| 2nd | 22 | [Large datasets in the label + value types](#22-large-datasets-in-the-label--value-types) | S–M | planned |
+| 2nd | 22 | [Large datasets (re-scoped: the networkgraph freeze)](#22-large-datasets) | S | done (0.20.3) |
 | 3rd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
 | 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | planned |
 | 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
@@ -113,6 +113,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
 | 12th | 2 | [Export as Python](#2-export-as-python) | S | planned |
 | 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
+| — | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | idea |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
@@ -134,45 +135,13 @@ Done in 0.20.2. The reasoning, the tests, and what rendering showed (Highcharts 
 markup as its own restricted HTML, which #15 inherits) are in
 [`decisions.md`](decisions.md#script-in-user-text-an-encoding-not-an-edit).
 
-### 22. Large datasets in the label + value types
+### 22. Large datasets
 
-- **What & why:** Probably a **bug today**, found 2026-10-07. Highcharts' `turboThreshold`
-  defaults to 1,000: past that many points, a series may only hold numbers or arrays, and a
-  series of point **objects** is refused (Highcharts error #12). The builder never sets
-  `turboThreshold`. Built from a 1,200-row frame, four types emit point objects past the
-  limit, the label + value types whose every point carries its own name:
-
-  | Types | Series data | At 1,200 rows |
-  |---|---|---|
-  | line, spline, area, areaspline, column, bar, radar, waterfall | numbers | fine |
-  | scatter, heatmap, boxplot | arrays | fine |
-  | **pie, treemap, funnel, pyramid** | **objects** (`{name, y}`) | **over the limit** |
-
-  So an uploaded CSV of over 1,000 rows most likely draws these four as a **blank chart
-  with no message**. Nothing in the suite gets near the limit: every sample is 60 rows or
-  fewer and the sweeps use small frames. [#8](#8-edit-data-in-place) and
-  [#15](#15-embeddable-outputs-html-js-json) both assume large data works, so this comes
-  early.
-- **Step one, verify by rendering:** a 1,200-row pie in the app, before any fix. Also probe
-  the types the quick check skipped because they need extra columns (sankey,
-  dependencywheel, networkgraph, organization, sunburst, xrange, timeline, bullet, variwide,
-  dumbbell, columnrange, arearange): any that emit objects have the same problem.
-- **Fix, to choose after rendering:**
-  - **Group the tail (likely):** keep the largest slices and fold the rest into one
-    "Other" point, with a caption saying how many were grouped. A 1,000-slice pie is
-    unreadable anyway, so this is the honest chart, and it keeps every embed small. Funnel
-    and pyramid are ordered stages, not parts to rank, so they may need a row cap with a
-    message instead.
-  - **Or set `turboThreshold: 0`** for the affected types: everything draws, slowly, and
-    the chart stays unreadable.
-- **Touches:** `highcharts_builder.py` (the four branches, and `count_marks` so the KPI
-  matches what is drawn), tests, `docs/chart-types.md` (each type's entry gains its
-  large-data policy).
-- **Tests:** a new **sweep**: every supported type built from a frame over the limit, and
-  no series may carry more than 1,000 point objects (unless the type sets
-  `turboThreshold`). Extend it as the existing sweeps are, not per type. Verify by breaking
-  it.
-- **Size:** S–M · **Status:** planned
+Done in 0.20.3, **re-scoped** after rendering. The premise (pie, treemap, funnel and pyramid
+draw blank past 1,000 rows, Highcharts' `turboThreshold`) was disproved: since Highcharts 11.4.4
+they draw. What rendering found instead was a networkgraph that froze the tab, now refused past
+150 nodes. The readability half went to [#24](#24-group-a-big-pies-tail-into-other). The whole
+story: [`decisions.md`](decisions.md#large-data-the-turbothreshold-bug-that-was-not-there).
 
 ### 12. Pin the runtime dependency set
 
@@ -304,7 +273,10 @@ markup as its own restricted HTML, which #15 inherits) are in
     `offline-exporting`, `accessibility`) must resolve. Check from a **browser**: on
     2026-10-07 the CDN answered `403` to scripted requests from this machine for every URL,
     the unversioned `highcharts.js` the app loads today included, so a script cannot settle
-    it.
+    it. (The `403` is `Missing Referer`: the CDN refuses a request with no `Referer` header.)
+  - **A floor, found by [#22](#22-large-datasets):** pin **11.4.4 or later**. Up to 11.4.3 a
+    series of point objects past `turboThreshold` drew blank, and 11 of the types emit point
+    objects ([why](decisions.md#large-data-the-turbothreshold-bug-that-was-not-there)).
 - **Size:** S · **Status:** planned
 
 ### 19. Date the real-world samples
@@ -595,6 +567,22 @@ Settled on 2026-10-07:
 - **Decided:** edit cells only (no adding or deleting rows, the lightweight answer), and
   edits reset when the dataset changes: they belong to the data they were made on.
 - **Size:** S · **Status:** planned
+
+## Ideas
+
+### 24. Group a big pie's tail into "Other"
+
+- **What & why:** Split out of [#22](#22-large-datasets). A pie, treemap, funnel or pyramid of
+  1,200 rows draws, but cannot be read: the 1,200-slice pie rendered on 2026-10-07 is a dark disc,
+  because the slices are so thin that their borders (painted the background colour) cover most of
+  the fill. Keep the largest slices and fold the rest into one "Other" point, with a caption saying
+  how many were grouped. Funnel and pyramid are ordered stages, not parts to rank, so they may need
+  a row cap with a message instead.
+- **Why an idea, not planned:** nothing breaks, so 1.0 is not incomplete without it (the bar in
+  [Direction](#direction-a-lightweight-chart-editor)).
+- **Open questions:** how many slices to keep (a fixed number, or a share of the total)? Should
+  `count_marks` report the drawn slices or the rows?
+- **Size:** S–M · **Status:** idea
 
 ## Folded
 
