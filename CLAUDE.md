@@ -35,6 +35,8 @@ sample_data.py / CSV upload
   -> Chart.from_options()    via make_chart()
   -> build_chart_html()      iframe, Highcharts from the CDN; its ☰ menu draws
                              PNG/JPEG/SVG downloads in the browser
+  -> build_chart_exports()   the Export panel: JSON (stdlib json over the options dict),
+                             the JS call, an HTML snippet and a full page
 ```
 
 ## Quick start
@@ -61,7 +63,8 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
   wrappers, a KPI metric row (its third metric adapts via `MARK_METRICS` — see
   [Chart types](#chart-types)), the chart embed (its ☰ menu downloads PNG/JPEG/SVG, drawn in
   the browser; there is no render-mode selector since the Static PNG mode was retired, see
-  [Conventions](#conventions)), and a toggle revealing the generated Highcharts config (JS). The
+  [Conventions](#conventions)), and the **Export** panel behind a toggle (HTML snippet, HTML
+  page, JS and JSON tabs, each with a download, from `build_chart_exports`). The
   **no-plottable-columns gate** runs *below* the chart-type selectbox and is
   **type-aware**: xrange's start/end are coordinates and may be dates, and a date column
   is object dtype, so a canonical Gantt CSV has no numeric columns at all and a
@@ -217,7 +220,19 @@ html = build_chart_html(df, chart_type, x_col, y_cols, height=height, title=titl
 
 # downloads: none — every chart carries Highcharts' ☰ menu (`_EXPORTING`), which draws
 # PNG/JPEG/SVG in the browser with the export-server fallback off
+
+# embeds: the chart for other pages, all four forms from one build_options call
+exports = build_chart_exports(df, chart_type, x_col, y_cols, container_id=None)
+exports.json, exports.js, exports.html_snippet, exports.html_page
 ```
+
+The exports are serialized by the standard library's `json`, not `to_js_literal`, so they are
+immune to both strings highcharts-core emits unquoted, and `<`, `>`, `&` are written as `\u003c`
+etc. so user text cannot close the `<script>` a snippet is pasted into. The app's own iframe still
+uses `to_js_literal` (switching it is plan #16).
+`test_no_option_the_builder_sets_is_silently_dropped` keeps the two paths from drawing different
+charts: it fails on any key the builder sets that highcharts-core drops on the way to the JS, which
+is how the treemap tile border went unapplied until 0.25.0.
 
 Neither takes a mode flag: `_themed` applies the dark chrome unconditionally, because
 `.streamlit/config.toml` is a single `[theme]` and every viewer therefore gets the dark

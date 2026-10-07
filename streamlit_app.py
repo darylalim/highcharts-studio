@@ -19,6 +19,7 @@ from highcharts_builder import (
     BULLET_TYPES,
     CHART_FAMILIES,
     DUMBBELL_TYPES,
+    EXPORT_SIZE_WARNING_BYTES,
     FUNNEL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
@@ -35,6 +36,7 @@ from highcharts_builder import (
     X_IN_Y_GUARD_TYPES,
     XRANGE_TYPES,
     ChartStyle,
+    build_chart_exports,
     build_chart_html,
     count_marks,
     explain_gauge_error,
@@ -43,7 +45,6 @@ from highcharts_builder import (
     explain_xrange_error,
     gauge_dial,
     log_scale_ok,
-    make_chart,
     picker_columns,
     style_controls_for,
 )
@@ -442,12 +443,13 @@ def cached_chart_html(
     )
 
 
-@st.cache_data(show_spinner=False, max_entries=128)
-def cached_chart_js(
+@st.cache_data(show_spinner="Building the export…", max_entries=64)
+def cached_chart_exports(
     df,
     chart_type,
     x_col,
     y_cols,
+    height,
     title,
     size_col,
     target_col,
@@ -461,14 +463,17 @@ def cached_chart_js(
     agg,
     dial,
     style,
-) -> str:
-    # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
-    # literal string for a built chart.
-    return make_chart(  # ty: ignore[invalid-return-type]
+    container_id,
+):
+    # All four export forms from ONE build (plan #15): the panel shows them all, so caching them
+    # together is one cache entry and one df hash per chart, not four.
+    return build_chart_exports(
         df,
         chart_type,
         x_col,
         list(y_cols),
+        container_id=container_id,
+        height=height,
         title=title,
         size_col=size_col,
         target_col=target_col,
@@ -482,7 +487,7 @@ def cached_chart_js(
         agg=agg,
         dial=dial,
         style=style,
-    ).to_js_literal()
+    )
 
 
 # The KPI's mark count, cached for the same reason the renderers are — and it is the same WORK, not
@@ -1567,33 +1572,111 @@ with left.container(border=True, height="stretch"):
         "Use the chart's ☰ menu to download it as PNG, JPEG or SVG."
     )
 
-    # Gate the generated-config panel behind a toggle so cached_chart_js only
-    # builds (and re-hashes df) when the user actually asks for it. A plain
-    # st.expander re-runs its body on every rerun even while collapsed (Streamlit
-    # only hides it client-side): it would re-hash df for the cache lookup and
-    # re-render st.code each rerun, rebuilding the JS whenever the cache key (chart
-    # type / columns / title / theme — note height is not a key) changes. An
-    # expander with on_change="rerun" + `.open` would also skip that, but AppTest
-    # can't open it — so the toggle (the performance reference's alternative) keeps
-    # the config both cheap and observable to the headless tests.
-    if st.toggle(":material/code: Show the generated Highcharts config (JavaScript)"):
-        chart_js = cached_chart_js(
-            df,
-            chart_type,
-            x_col,
-            tuple(y_cols),
-            title,
-            size_col=size_col,
-            target_col=target_col,
-            parent_col=parent_col,
-            end_col=end_col,
-            high_col=high_col,
-            title_col=title_col,
-            goal_col=goal_col,
-            width_col=width_col,
-            after_col=after_col,
-            agg=agg,
-            dial=dial,
-            style=style,
+    # The Export panel (plan #15): the chart in the four forms other pages take. It replaced the
+    # "show the generated config" toggle and keeps its reason for being a toggle: nothing is built
+    # (and df is not re-hashed for the cache lookup) until someone asks. An st.expander would run
+    # its body on every rerun even while collapsed, and AppTest cannot open one.
+    if st.toggle(":material/ios_share: Export this chart (HTML, JS, JSON)"):
+        container_id = st.text_input(
+            "Container id (optional)",
+            key="export_container_id",
+            placeholder="generated from the chart",
+            help=(
+                "The id of the `<div>` the chart draws into. Leave it empty for an id generated "
+                "from the chart (the same chart always gets the same one); set it to match a "
+                "`<div>` already on your page, or to tell two identical charts apart."
+            ),
+        ).strip()
+        try:
+            exports = cached_chart_exports(
+                df,
+                chart_type,
+                x_col,
+                tuple(y_cols),
+                height,
+                title,
+                size_col=size_col,
+                target_col=target_col,
+                parent_col=parent_col,
+                end_col=end_col,
+                high_col=high_col,
+                title_col=title_col,
+                goal_col=goal_col,
+                width_col=width_col,
+                after_col=after_col,
+                agg=agg,
+                dial=dial,
+                style=style,
+                container_id=container_id or None,
+            )
+        except (
+            ValueError
+        ) as exc:  # an id the snippet could not use; the builder says why
+            st.warning(str(exc), icon=":material/warning:")
+            st.stop()
+        largest = max(
+            len(text.encode()) for text in (exports.html_page, exports.js, exports.json)
         )
-        st.code(chart_js, language="javascript")
+        if largest > EXPORT_SIZE_WARNING_BYTES:
+            st.warning(
+                f"This export is {largest / 1_000_000:.1f} MB: it carries every row of data "
+                "inline, which can slow the page you paste it into or exceed a CMS field limit.",
+                icon=":material/warning:",
+            )
+        st.caption(
+            "Highcharts is free for personal and non-commercial use; a commercial site needs "
+            "its own Highcharts licence. This app's licence covers the app, not your page."
+        )
+        snippet_tab, page_tab, js_tab, json_tab = st.tabs(
+            ["HTML snippet", "HTML page", "JS", "JSON"]
+        )
+        with snippet_tab:
+            st.caption(
+                "Paste into any page: it loads Highcharts only if the page lacks it, then draws."
+            )
+            st.code(exports.html_snippet, language="html")
+            st.download_button(
+                "Download snippet",
+                exports.html_snippet,
+                file_name=f"{chart_type}-chart-snippet.html",
+                mime="text/html",
+                icon=":material/download:",
+            )
+        with page_tab:
+            st.caption(
+                "A standalone page: open it in a browser (it needs a connection)."
+            )
+            st.code(exports.html_page, language="html")
+            st.download_button(
+                "Download page",
+                exports.html_page,
+                file_name=f"{chart_type}-chart.html",
+                mime="text/html",
+                icon=":material/download:",
+            )
+        with js_tab:
+            st.caption(
+                f"The chart call alone, for a page that already loads Highcharts "
+                f"({', '.join(url.rsplit('/', 1)[1] for url in exports.modules)}) and has a "
+                f'`<div id="{exports.container_id}">`.'
+            )
+            st.code(exports.js, language="javascript")
+            st.download_button(
+                "Download JS",
+                exports.js,
+                file_name=f"{chart_type}-chart.js",
+                mime="text/javascript",
+                icon=":material/download:",
+            )
+        with json_tab:
+            st.caption(
+                "The chart's Highcharts options: `Highcharts.chart(id, options)` takes them."
+            )
+            st.code(exports.json, language="json")
+            st.download_button(
+                "Download JSON",
+                exports.json,
+                file_name=f"{chart_type}-chart.json",
+                mime="application/json",
+                icon=":material/download:",
+            )
