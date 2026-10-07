@@ -6,10 +6,10 @@ application and its helpers). It does NOT relicense, and does NOT grant you any
 rights to, the third-party components this project depends on at runtime. Two of
 them are proprietary and separately licensed:
 
-  * Highcharts JS (loaded from the Highcharts CDN) and the Highcharts export
-    server are proprietary software owned by Highsoft AS. They are free for
-    personal and non-commercial use; commercial use requires a paid Highcharts
-    license obtained from Highsoft.
+  * Highcharts JS (loaded from the Highcharts CDN, including the exporting
+    modules that draw chart downloads in the browser) is proprietary software
+    owned by Highsoft AS. It is free for personal and non-commercial use;
+    commercial use requires a paid Highcharts license obtained from Highsoft.
 
   * highcharts-core (the "Highcharts for Python" toolkit) is proprietary
     software governed by the Highcharts for Python Toolkit License, owned by

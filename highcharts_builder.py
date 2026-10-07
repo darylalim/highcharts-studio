@@ -1,7 +1,8 @@
 """Build Highcharts (highcharts-core) charts from pandas DataFrames.
 
-Produces either self-contained HTML for embedding in Streamlit with
-``st.iframe``, or PNG bytes rendered via the Highcharts export server.
+Produces self-contained HTML for embedding in Streamlit with ``st.iframe``. Each
+chart carries Highcharts' ☰ export menu, which draws PNG/JPEG/SVG downloads in the
+browser (see ``_EXPORTING``); nothing is rendered server-side.
 
 This module is deliberately Streamlit-free so it can be imported and unit
 tested on its own. ``streamlit_app.py`` wraps it with the UI and caching.
@@ -220,9 +221,9 @@ BULLET_TYPES = ("bullet",)  # a measure bar read against a goal crossbar, per ca
 # against, and you read bar-vs-crossbar as two lengths compared, while a width is not compared to
 # the height at all — it multiplies it. `title_col`'s and `goal_col`'s precedent a third time: the
 # dtype and the picker source match an existing kwarg exactly, and the ROLE is what differs. The
-# cost is stated plainly because it is the largest single consequence of the call — variwide TOUCHES
-# THE CACHE LAYER (three wrappers, three call sites, a `_FORWARDED` entry), which arearange and
-# dependencywheel escaped by reusing. Buying that back here would mean the lie.
+# cost is stated plainly because it is the largest single consequence of the call — variwide
+# TOUCHES THE CACHE LAYER (a wrapper and a call site per renderer, plus a `_FORWARDED` entry),
+# which arearange and dependencywheel escaped by reusing. Buying that back here would mean the lie.
 #
 # It joins `X_IN_Y_GUARD_TYPES` (its x_col is a genuine category axis — the bars stand ON it, drawn
 # vertically) and NOT `MAGNITUDE_RANGE_TYPES`, which binds five sites where columnrange and
@@ -243,11 +244,11 @@ BULLET_TYPES = ("bullet",)  # a measure bar read against a goal crossbar, per ca
 # funnel and bullet — and needs no _MODULE_LOAD_ORDER entry: variwide.js requires only `highcharts`.
 #
 # The kwarg is `width_col` and never `width=`, which is not merely the `_col` house suffix doing its
-# job: `build_chart_png` already carries a `width: int | None` — the exported IMAGE's pixel width,
-# which means something completely different and got there first. That is the `dial`-not-`scale=`
-# collision a second time (see the gauge family), and it is worth naming rather than leaving to the
-# suffix, because these two sit in the SAME signature and both are about how wide something is. One
-# widens the picture; the other widens a bar inside it.
+# job: when this kwarg arrived, `build_chart_png` (retired in 0.21.0 with the Static PNG mode)
+# already carried a `width: int | None` — the exported IMAGE's pixel width, which meant something
+# completely different and got there first. That was the `dial`-not-`scale=` collision a second
+# time (see the gauge family). The name stays: one widens the picture; the other widens a bar
+# inside it, and a future image-width parameter should not have to fight a column kwarg for it.
 VARIWIDE_TYPES = ("variwide",)  # bars whose WIDTH is a second magnitude
 # DUMBBELL: columnrange's data SHAPE (a category plus two magnitudes) read a FOURTH way, and — as
 # with the three before it — the reading is the whole of the type. The four side by side, because
@@ -274,8 +275,8 @@ VARIWIDE_TYPES = ("variwide",)  # bars whose WIDTH is a second magnitude
 # these two share one channel and one unit. `title_col`'s, `goal_col`'s and `width_col`'s precedent
 # a fourth time: the dtype and the picker source match an existing kwarg exactly, and the ROLE is
 # what differs. The cost is stated rather than buried, as variwide's is — dumbbell TOUCHES THE
-# CACHE LAYER (three wrappers, three call sites, a `_FORWARDED` entry), which arearange and
-# dependencywheel escaped by reusing. Buying that back here would mean the lie.
+# CACHE LAYER (a wrapper and a call site per renderer, plus a `_FORWARDED` entry), which arearange
+# and dependencywheel escaped by reusing. Buying that back here would mean the lie.
 #
 # That the pair is ORDERED is not a design preference but a RENDERED fact, and it is what makes the
 # type a fourth reading rather than a columnrange re-skin. Highcharts paints `lowColor` onto the
@@ -301,16 +302,17 @@ VARIWIDE_TYPES = ("variwide",)  # bars whose WIDTH is a second magnitude
 #
 # Prints NOTHING in the mark and needs no gate constant — xrange's rule reached from xrange's OWN
 # premise, unlike variwide, where that premise is false: both of a dumbbell's numbers land on a
-# real, ticked, gridlined y axis that renders in the Static PNG too, and the only other identity,
-# the category name, is already on the X axis. Needs NO `_themed` hook, and that was MEASURED
-# rather than inferred from the `highcharts-more` bar kinship (waterfall is the standing proof the
-# inference is unsound): its markers carry `stroke: var(--highcharts-background-color)` at
-# `stroke-width: 0`, so the white ring every member of the border-dissolve tuple exists to remove is
-# declared but never painted. Pulls in `modules/dumbbell` AND `highcharts-more` from `chart.type`
-# alone — the guess the round-trip confirms here, unlike columnrange/funnel/bullet/variwide, where
-# it corrects it — and needs no _MODULE_LOAD_ORDER entry: verified that highcharts-core emits the
-# prerequisite first both with and without a `plotOptions.dumbbell` key, which is the walk order
-# that reverses for dependency-wheel and organization.
+# real, ticked, gridlined y axis that renders in an exported image too, and the only other
+# identity, the category name, is already on the X axis. Needs NO `_themed` hook, and that was
+# MEASURED rather than inferred from the `highcharts-more` bar kinship (waterfall is the standing
+# proof the inference is unsound): its markers carry `stroke: var(--highcharts-background-color)`
+# at `stroke-width: 0`, so the white ring every member of the border-dissolve tuple exists to
+# remove is declared but never painted. Pulls in `modules/dumbbell` AND `highcharts-more` from
+# `chart.type` alone — the guess the round-trip confirms here, unlike
+# columnrange/funnel/bullet/variwide, where it corrects it — and needs no _MODULE_LOAD_ORDER entry:
+# verified that highcharts-core emits the prerequisite first both with and without a
+# `plotOptions.dumbbell` key, which is the walk order that reverses for dependency-wheel and
+# organization.
 DUMBBELL_TYPES = (
     "dumbbell",
 )  # two markers per category, joined: a before and an after
@@ -467,11 +469,11 @@ NODE_LINK_TYPES = WEIGHTED_NODE_LINK_TYPES + NETWORKGRAPH_TYPES + ORGANIZATION_T
 # networkgraph.)
 UNWEIGHTED_NODE_LINK_TYPES = NETWORKGRAPH_TYPES + ORGANIZATION_TYPES
 
-# Default series palette, applied to every chart so both render modes (iframe
-# and static PNG) share one look that matches the Streamlit theme in
+# Default series palette, applied to every chart so the chart and its downloads share
+# one look that matches the Streamlit theme in
 # .streamlit/config.toml. It is that theme's `chartCategoricalColors` copied by hand:
 # Streamlit applies those to its own Vega/Plotly charts, and this app has none — every
-# chart is Highcharts, in an iframe or a server-side PNG that no theme CSS reaches — so
+# chart is Highcharts, in an iframe that no theme CSS reaches — so
 # the palette has to be restated here. The copy is guarded mechanically by
 # test_theme_colors_stay_in_sync_with_config, not by this comment.
 #
@@ -575,7 +577,7 @@ _HEATMAP_NULL = _DARK_CHROME["grid"]
 _HEATMAP_DATALABEL_MAX_CELLS = 50
 
 # A sankey labels each link with its weight, printing the value IN the mark as pie,
-# heatmap, and treemap do — so the Static-PNG mode, which has no hover tooltip,
+# heatmap, and treemap do — so an exported image, which has no hover tooltip,
 # still shows the numbers. The label must ride on each link POINT: highcharts-core
 # drops `plotOptions.sankey.dataLabels.nodeFormat` (as it drops `tooltip.nodeFormat`),
 # and the `format` that does survive there applies to nodes and links alike — so
@@ -586,12 +588,14 @@ _SANKEY_DATALABEL_MAX_LINKS = 30
 _SANKEY_LINK_LABEL = {"enabled": True, "format": "{point.weight}"}
 
 # A networkgraph is laid out by a FORCE SIMULATION, and `enableSimulation` is the one setting the
-# whole type turns on: it must be FALSE, and that is measured, not chosen. With it TRUE the export
-# server rasterizes the graph mid-run — every node collapsed into an unreadable knot at the centre,
-# no labels legible (verified by rendering the PNG). With it FALSE Highcharts runs the layout steps
-# synchronously and draws the settled positions, which renders identically in the iframe and the
-# PNG — the `_LIGHT_COLOR_SCHEME_CSS` doctrine (make the two render modes agree), reached here from
-# the layout rather than from a CSS default. `verlet` integration settles a small graph cleanly;
+# whole type turns on: it must be FALSE, and that is measured, not chosen. With it TRUE the (since
+# retired) export server rasterized the graph mid-run — every node collapsed into an unreadable
+# knot at the centre, no labels legible (verified by rendering its PNG). With it FALSE Highcharts
+# runs the layout steps synchronously and draws the settled positions, so the chart is the same
+# picture every time it is drawn — on screen and in the browser's own export, which re-renders it —
+# the `_LIGHT_COLOR_SCHEME_CSS` doctrine (one chart, one picture), reached here from the layout
+# rather than from a CSS default. Synchronous also means the layout's cost is paid up front, which
+# is why `_NETWORKGRAPH_MAX_NODES` exists. `verlet` integration settles a small graph cleanly;
 # `linkLength` is the resting distance between two joined nodes, in px, and sets the graph's scale.
 _NETWORKGRAPH_LINK_LENGTH = 80
 # Its nodes are labelled by name — the ONLY thing identifying a node, since a networkgraph has
@@ -909,9 +913,10 @@ _TIMELINE_NOT_A_DATE = (
 # inversions, all measured on the round-trip and by rendering, never inferred:
 #
 #   * the MODULE. A solid gauge resolves `highcharts-more` ONLY from its `pane` — which is why
-#     that key is load-bearing there, and why dropping it draws an empty SVG in the browser while
-#     the export server renders perfectly. A needle resolves it from `chart.type` ALONE (verified
-#     against the pane, plotOptions and a bare series type in isolation). So the needle's pane is
+#     that key is load-bearing there, and why dropping it draws an empty SVG in the browser (the
+#     retired export server rendered it perfectly, which is how it hid). A needle resolves it
+#     from `chart.type` ALONE (verified against the pane, plotOptions and a bare series type in
+# isolation). So the needle's pane is
 #     GEOMETRY, not plumbing, and the scariest trap in the family simply does not exist here.
 #   * the HUE. On a solid gauge a series-level `color` serializes perfectly and reaches NOTHING
 #     (the arc reads the point, because `colorByPoint: true` is a default highcharts-core cannot
@@ -1036,10 +1041,10 @@ _NEEDLE_DIAL: dict[str, object] = {
 #
 # Left unset, Highcharts pegs such a needle EXACTLY ON the final tick — pixel-identical to a true
 # reading of 50 (verified by rendering: the needle sits on the 50 and there is nothing anywhere to
-# say otherwise). That is a confident, plausible, wrong chart, and the Static PNG has no tooltip to
-# contradict it. It is also the ONE place the two gauges would disagree: a solid gauge in the same
-# state fills its arc and PRINTS "north: 436" in the hub, so its reader is told; a needle prints
-# nothing in the mark, so its reader is not. The family must not be honest in one branch and
+# say otherwise). That is a confident, plausible, wrong chart, and an exported image has no tooltip
+# to contradict it. It is also the ONE place the two gauges would disagree: a solid gauge in the
+# same state fills its arc and PRINTS "north: 436" in the hub, so its reader is told; a needle
+# prints nothing in the mark, so its reader is not. The family must not be honest in one branch and
 # mute in the other.
 #
 # Overshoot is the instrument's own answer, and it needs no words: the needle swings PAST the last
@@ -1091,20 +1096,60 @@ _GAUGE_BAD_DIAL = (
 #    (`plotOptions.boxplot.fillColor`, which highcharts-core cannot express at all — see
 #    the boxplot branch), so its boxes would be filled differently per browser.
 #
-# The export server already rasterizes with the LIGHT resolution, so pinning the chart's
-# own root to `only light` makes the iframe agree with the PNG in both themes and leaves
-# `_themed` as the single source of truth for dark mode. It must target `.highcharts-root`
+# The (since retired) export server rasterized with the LIGHT resolution, and pinning the chart's
+# own root to `only light` made the iframe agree with its PNG in both themes. The pin stays for the
+# reason that outlived the server: it leaves `_themed` as the single source of truth for dark mode,
+# whatever the viewer's browser prefers. It must target `.highcharts-root`
 # (the `<svg>`), NOT `html`: Highcharts declares `color-scheme: light dark` on
 # `.highcharts-container` (the div between `html` and the `<svg>`; verified against
 # Highcharts 13), and since `color-scheme` inherits, that container value shadows any
 # `html`-level rule for the whole SVG subtree. The pin therefore has to sit at or below
-# the container — `.highcharts-root` is the `<svg>` directly under it — to win. Note this
-# reaches the iframe only: the export server renders
-# the extracted SVG server-side, where no CSS of ours applies (and neither `chart.style`
-# nor `ExportServer.global_options` is an escape hatch — the former is applied with
-# `elem.style[key]`, which ignores custom properties, and the latter is coerced through
-# the same model that drops `fillColor`).
+# the container — `.highcharts-root` is the `<svg>` directly under it — to win. (When the
+# export server existed, this CSS could not reach it — it rendered the extracted SVG server-side
+# — and neither `chart.style` nor `ExportServer.global_options` was an escape hatch. The
+# browser's own export now re-renders the chart in the page, where it does apply: all 30 types'
+# downloads came out dark on 2026-10-07.)
 _LIGHT_COLOR_SCHEME_CSS = ".highcharts-root{color-scheme:only light}"
+
+# Client-side export: Highcharts' exporting + offline-exporting modules draw the file IN THE
+# BROWSER, so the app needs no export server. Two settings carry the design:
+# - `fallbackToExportServer: False`. Left on, any export the browser cannot do is quietly sent to
+#   export.highcharts.com, bringing back the remote service this removes. Off, a failure reports.
+# - Three menu items, PNG/JPEG/SVG. Highcharts' default menu also offers PDF, which needs
+#   `exporting.libURL` (no default since Highcharts 13) to load jsPDF; with the fallback off it
+#   could only fail. Print and full-screen are left out too: this is a download menu.
+# - `sourceWidth: 800`. The export re-lays the chart out at its own width, and with no pixel
+#   width to read (the container is `width:100%`) Highcharts falls back to 600px: rendered on
+#   2026-10-07, the landing chart came out 1200x960. Highcharts lays text out at the width it is
+#   given and TRUNCATES labels at 600 ("Incorporat"), which no rescaling undoes, so this is the
+#   same fix the retired export-server path needed (its `CHART_PNG_WIDTH = 800`). The height needs
+#   nothing: it reads the container's pixel height.
+# `scale: 2` makes a PNG/JPEG at twice that size (1600px wide), as the old export path did.
+_EXPORT_WIDTH = 800
+_EXPORTING = {
+    "enabled": True,
+    "fallbackToExportServer": False,
+    "local": True,
+    "scale": 2,
+    "sourceWidth": _EXPORT_WIDTH,
+}
+_EXPORT_MENU_ITEMS = ["downloadPNG", "downloadJPEG", "downloadSVG"]
+
+
+def _export_buttons() -> dict:
+    """The ☰ button's menu, as a fresh dict per chart (nothing shares a mutable list)."""
+    return {"contextButton": {"menuItems": list(_EXPORT_MENU_ITEMS)}}
+
+
+# The one piece of chart chrome themed in CSS rather than in options: the ☰ button's hover and
+# pressed fill (see the export block in `_themed` for why options cannot express it). Highcharts
+# sets the fill as an SVG attribute, which any CSS `fill` overrides. The button is hidden in an
+# exported image, so this cannot make the screen and the downloaded file disagree.
+_EXPORT_BUTTON_CSS = (
+    ".highcharts-contextbutton:hover .highcharts-button-box,"
+    ".highcharts-contextbutton.highcharts-button-pressed .highcharts-button-box"
+    f"{{fill:{_DARK_CHROME['grid']}}}"
+)
 
 
 def _themed(options: dict) -> dict:
@@ -1121,13 +1166,34 @@ def _themed(options: dict) -> dict:
     """
     t = _DARK_CHROME
     options["chart"]["backgroundColor"] = t["bg"]
+    # The export menu (the ☰ button) on every chart, drawing PNG/JPEG/SVG in the browser.
+    # Setting `exporting` is also what makes get_script_tags pull in modules/exporting and
+    # modules/offline-exporting. See `_EXPORTING` for why the menu holds three items and the
+    # fallback is off.
+    options["exporting"] = {**_EXPORTING, "buttons": _export_buttons()}
+    # The menu and its button default to `var(--highcharts-background-color)`, which the
+    # color-scheme pin resolves to WHITE: a white menu and a white button on the dark chart.
+    # Themed here like the rest of the chrome. The button's HOVER fill cannot be: highcharts-core
+    # types `buttonOptions.theme.states` with the SERIES state model, which has no `fill`, and
+    # serializes the dict as a JS string Highcharts ignores. That one value is set by
+    # `_EXPORT_BUTTON_CSS` in `build_chart_html` instead (the button never appears in an export).
+    options["navigation"] = {
+        "buttonOptions": {
+            "symbolFill": t["muted"],
+            "symbolStroke": t["muted"],
+            "theme": {"fill": t["bg"], "stroke": t["bg"]},
+        },
+        "menuStyle": {"background": t["bg"], "border": f"1px solid {t['axis']}"},
+        "menuItemStyle": {"color": t["text"]},
+        "menuItemHoverStyle": {"background": t["grid"], "color": t["text"]},
+    }
     options["title"] = {**options.get("title", {}), "style": {"color": t["text"]}}
     legend = options.setdefault("legend", {})
     legend["itemStyle"] = {"color": t["text"]}
     legend["itemHoverStyle"] = {"color": t["muted"]}
     # The tooltip is lazily rendered by Highcharts and defaults to a light box, so
     # in dark mode it floats light-on-dark on hover unless themed here (config.toml
-    # can't reach it inside the iframe/PNG). Merge so the pie path's pointFormat
+    # can't reach it inside the iframe). Merge so the pie path's pointFormat
     # survives.
     options["tooltip"] = {
         **options.get("tooltip", {}),
@@ -1172,8 +1238,8 @@ def _themed(options: dict) -> dict:
         # the other bar-shaped type, and which needs the opposite treatment. That was
         # MEASURED, not inferred from the shared bar base class: waterfall is the standing
         # proof the inference is unsound, since its border turned out to be a fixed
-        # #333333. Pixel-scanning a dark-mode xrange PNG off the export server puts its
-        # default border at pure #ffffff -- the background var, exactly column/bar's case.
+        # #333333. Pixel-scanning a dark-mode xrange PNG off the (since retired) export server put
+        # its default border at pure #ffffff -- the background var, exactly column/bar's case.
         # Matching it to the dark background dissolves the ring where a bar meets the
         # background while KEEPING a visible 1px seam between two bars that abut within one
         # lane (they are then separated by background, not by white) -- which is precisely
@@ -1350,8 +1416,8 @@ def _plottable(value) -> bool:
     either, and it can't even be *serialized*. ``to_js_literal`` renders a Python ``inf``
     as the bare token ``inf``, which is not a JavaScript identifier (JS spells it
     ``Infinity``), so the whole ``Highcharts.chart(...)`` call dies with a ReferenceError
-    and the iframe renders blank; the export server, handed the same value as the
-    non-standard JSON literal ``Infinity``, rejects the payload with a 400. So a
+    and the iframe renders blank (and the retired export server, handed the non-standard
+    JSON literal ``Infinity``, rejected the payload with a 400). So a
     non-finite number is treated exactly as a missing one — a gap for the types that keep
     a slot (via ``_num``), a dropped row for the types that drop one (pie, treemap,
     scatter, bubble, sankey's weight). A ``float()`` that raises on a non-numeric cell
@@ -2687,7 +2753,7 @@ def _tooltip_label(name: str) -> str:
 
 
 def _in_mark_labels(fmt: str, **extra: object) -> dict[str, object]:
-    """Value labels printed IN the mark, so the Static-PNG mode (which has no hover
+    """Value labels printed IN the mark, so an exported image (which has no hover
     tooltip) still shows the numbers. "contrast" text + outline is computed against the
     FILL the label sits on, not the chart background, so -- unlike pie's labels -- it needs
     no dark-mode flip."""
@@ -2778,7 +2844,7 @@ def build_options(
       edge, from the node named in ``x_col`` to the node named in ``target_col`` (reused from
       sankey; there is no weight, so ``y_cols`` is EMPTY — the mirror of the gauge family's
       absent ``x_col``). A row missing either end is dropped, like sankey's. Nodes are laid out
-      by a force simulation drawn with ``enableSimulation`` OFF (so the iframe and the static PNG
+      by a force simulation drawn with ``enableSimulation`` OFF (so the chart and its download
       settle to the same picture), labelled by name, and painted one brand hue — a networkgraph
       neither cycles the palette across nodes nor lets a node carry its own color. Pulls in the
       ``modules/networkgraph`` module (from ``chart.type`` alone; not ``highcharts-more``).
@@ -3036,17 +3102,17 @@ def build_options(
         # columnrange's low-is-high, a fifth time. It has to be a guard rather than a tolerated
         # oddity because it fails SILENTLY in this type's own idiom, and worse than the other four
         # do: they produce a visibly broken chart (a row of hairlines, a collapsed band), while
-        # this one produces a PERFECT chart making a FALSE CLAIM — every bar landing exactly on
-        # its own crossbar, so the chart reports that every category hit its target precisely, in
-        # the one register the type exists to answer, with no tooltip at all in the Static PNG to
+        # this one produces a PERFECT chart making a FALSE CLAIM — every bar landing exactly on its
+        # own crossbar, so the chart reports that every category hit its target precisely, in the
+        # one register the type exists to answer, with no tooltip at all in an exported image to
         # contradict it. That is the split this module draws: a COSMETIC collision warns (see
         # organization's Title, whose `title_col` is optional, has a "(no titles)" escape, and
-        # mislabels boxes while the hierarchy it draws stays true); a CLAIM-FABRICATING one
-        # between two REQUIRED columns raises. This is the collision X_IN_Y_GUARD_TYPES cannot
-        # express (goal_col isn't in y_cols), so it lives here; the OTHER collision, x_col ==
-        # measure, that rule DOES express, since a bullet's x_col is a real category X axis.
-        # `y_cols[0]` is safe: the empty-y_cols guard above runs first (a bullet is not an
-        # UNWEIGHTED node-link type, so an empty selection raises there).
+        # mislabels boxes while the hierarchy it draws stays true); a CLAIM-FABRICATING one between
+        # two REQUIRED columns raises. This is the collision X_IN_Y_GUARD_TYPES cannot express
+        # (goal_col isn't in y_cols), so it lives here; the OTHER collision, x_col == measure, that
+        # rule DOES express, since a bullet's x_col is a real category X axis. `y_cols[0]` is safe:
+        # the empty-y_cols guard above runs first (a bullet is not an UNWEIGHTED node-link type, so
+        # an empty selection raises there).
         raise ValueError(
             f"The measure column {y_cols[0]!r} cannot also be the goal column for a "
             f"bullet chart"
@@ -3249,7 +3315,7 @@ def build_options(
                 "colors": colors,
                 "title": {"text": title},
                 # The scale is INVISIBLE on the chart — a 360° activity gauge has nowhere to put
-                # an axis — so an arc's fraction cannot be decoded from a downloaded PNG, which
+                # an axis — so an arc's fraction cannot be decoded from a downloaded image, which
                 # has no tooltip either. Print it, with the aggregation: "436" means nothing
                 # until you know it is a sum of eight weeks rather than one week's reading.
                 "subtitle": {"text": f"{agg} · dial {low:g} – {high:g}"},
@@ -3258,10 +3324,10 @@ def build_options(
                 # against each candidate in isolation: not the series type, not
                 # plotOptions.solidgauge, not a series radius, not yAxis.stops — and a solid
                 # gauge WITHOUT highcharts-more draws an EMPTY SVG in the browser: zero series
-                # paths, no Highcharts error band, no Python-side error, a silently blank chart.
-                # The export server rasterizes it regardless, so dropping the pane would make the
-                # two render modes silently DISAGREE — the class of bug `_LIGHT_COLOR_SCHEME_CSS`
-                # exists to close. Pinned by a test on `get_script_tags`.
+                # paths, no Highcharts error band, no Python-side error, a silently blank chart
+                # (and so a blank download, since the export re-renders it in the browser). The
+                # retired export server rasterized it regardless, which is how the trap hid: the
+                # two render modes silently DISAGREED. Pinned by a test on `get_script_tags`.
                 "pane": {
                     "startAngle": 0,
                     "endAngle": 360,  # a full circle: the arc's ANGLE is the value's fraction
@@ -3287,7 +3353,7 @@ def build_options(
                 # ring whose column is empty draws no arc AND no data label (Highcharts skips a
                 # null point's label entirely), so the legend is the only thing that NAMES it;
                 # and past the label gate it is the only thing naming any ring at all, since a
-                # gauge has no axis and the Static PNG has no tooltip. Its swatch is the series
+                # gauge has no axis and an exported image has no tooltip. Its swatch is the series
                 # `color` — the one job that property can still do here.
                 "legend": {"enabled": True},
                 # The tooltip is PER SERIES (each ring carries its own `tooltip.pointFormat`, see
@@ -3305,9 +3371,10 @@ def build_options(
                         "stickyTracking": False,  # one point per series: hover the ring you mean
                         # NOT `_in_mark_labels`: that helper exists for `color: contrast`,
                         # computed against the FILL a label sits on — and these sit in the empty
-                        # hub, on no fill at all. `useHTML` is pinned False because the export
-                        # server silently drops HTML labels, and the two render modes would
-                        # disagree again. `allowOverlap` is pinned True because Highcharts
+                        # hub, on no fill at all. `useHTML` is pinned False because the retired
+                        # export server silently dropped HTML labels; it stays False so the label
+                        # lives in the SVG the browser's export copies. `allowOverlap` is pinned
+                        # True because Highcharts
                         # otherwise HIDES a colliding label by rendering the <text> and turning
                         # it invisible — the element stays in the DOM, so every assertion about
                         # it still passes while a ring's value is simply absent from the chart.
@@ -3430,10 +3497,11 @@ def build_options(
                 "subtitle": {"text": agg},
                 # GEOMETRY, not plumbing — and that is the family's sharpest inversion. The solid
                 # gauge's pane is what resolves `highcharts-more`, so dropping it there blanks the
-                # iframe while the PNG renders perfectly. A needle resolves the module from
-                # `chart.type` alone (verified against the pane, `plotOptions` and a bare series
-                # type, each in isolation), so this key could be deleted and the chart would still
-                # DRAW — just as a full circle with a disc behind it.
+                # iframe (the retired export server's PNG rendered perfectly, hiding it). A needle
+                # resolves the module from `chart.type` alone (verified against the pane,
+                # `plotOptions` and a bare series type, each in isolation), so this key could be
+                # deleted and the chart would still DRAW — just as a full circle with a disc behind
+                # it.
                 #
                 # It says WHAT the dial is and NOTHING about where to put it: no `size` (silently
                 # dropped by highcharts-core) and no `center` (unsteerable without it). See
@@ -3516,7 +3584,7 @@ def build_options(
                         # swings PAST the last tick instead of pegging exactly on it, where it would
                         # be pixel-identical to a true reading of the maximum. See the constant —
                         # this is the one place the two gauges would otherwise disagree, and the
-                        # only reading a Static PNG could not contradict.
+                        # only reading an exported image could not contradict.
                         "overshoot": _NEEDLE_OVERSHOOT_DEGREES,
                         "stickyTracking": False,  # one point per series: hover the needle you mean
                         # NOTHING IS PRINTED IN THE MARK, and this type needs no gate constant
@@ -3524,7 +3592,7 @@ def build_options(
                         # that DO print a value in the mark print it because it can be read against
                         # no axis (an angle, an area, a link's width, a bar floating above an
                         # invisible running total). A needle's reading is an ANGLE AGAINST A DRAWN
-                        # AXIS that renders in the Static PNG too — that IS the type — and its
+                        # AXIS that renders in an exported image too — that IS the type — and its
                         # identity is in the legend, which it carries anyway to name an empty
                         # column. There is nothing left for a label to say that the chart does not
                         # already show.
@@ -3646,8 +3714,8 @@ def build_options(
                 # NO `labels.format` here, EVER, and this is the type most likely in the module
                 # to reach for one. highcharts-core emits `xAxis.labels.format` UNQUOTED:
                 # `{"format": "{value:%b %Y}"}` serializes as `format: {value:%b %Y}`, which is
-                # not JavaScript. The iframe dies on a blank page while the export server renders
-                # the PNG perfectly — a divergence no options-dict test can see.
+                # not JavaScript. The iframe dies on a blank page (and the retired export server,
+                # built from JSON, rendered the PNG perfectly) — no options-dict test can see it.
                 #
                 # And the rule is about the VALUE, not the key, which is the part that makes it a
                 # trap rather than a footnote: a string that opens `{`, closes `}` and carries
@@ -3834,7 +3902,7 @@ def build_options(
                         "colorByPoint": True,
                         # Label each tile with its name AND value on two lines.
                         # Like pie ("{name}: {y}") and heatmap ("{value}"), the
-                        # value is printed IN the mark, so the Static-PNG mode
+                        # value is printed IN the mark, so an exported image
                         # (which has no hover tooltip) still shows the numbers, not
                         # just relative areas. Two lines rather than one keeps it
                         # from crowding narrow tiles; Highcharts hides any label
@@ -3886,7 +3954,7 @@ def build_options(
                 # `{point.percentage}` is a funnel point's SHARE OF THE STAGE TOTAL (pie
                 # semantics, inherited — NOT a conversion rate against the first stage), so it is
                 # labelled "of total" rather than left to be misread as attrition. The value is
-                # printed IN the tooltip and beside the stage name so the Static-PNG mode (no
+                # printed IN the tooltip and beside the stage name so an exported image (no
                 # hover) still shows the numbers, as pie/treemap do.
                 "tooltip": {
                     "headerFormat": "",
@@ -3951,12 +4019,13 @@ def build_options(
         if chart_type in SANKEY_TYPES and len(links) <= _SANKEY_DATALABEL_MAX_LINKS:
             # Per-link weight labels are a SANKEY choice, NOT a shared one — the one place the
             # wheel diverges from the flow beyond the type string, and it was found only by
-            # RENDERING (the waterfall-vs-column/bar lesson). On a sankey each label sits neatly
-            # ON its link; on a dependencywheel the links anchor on the RING, and Highcharts
-            # stacks their labels in a clipped, overlapping column off the LEFT of the wheel
-            # (verified in both render modes), so a wheel shows its weights via ribbon WIDTH plus
-            # the hover/node tooltip instead — which is the canonical dependency-wheel presentation.
-            # The node NAMES (the series-level dataLabels below) render cleanly on the ring for both.
+            # RENDERING (the waterfall-vs-column/bar lesson). On a sankey each label sits neatly ON
+            # its link; on a dependencywheel the links anchor on the RING, and Highcharts stacks
+            # their labels in a clipped, overlapping column off the LEFT of the wheel (verified in
+            # both of the then render modes), so a wheel shows its weights via ribbon WIDTH plus
+            # the hover/node tooltip instead — which is the canonical dependency-wheel
+            # presentation. The node NAMES (the series-level dataLabels below) render cleanly on
+            # the ring for both.
             for link in links:
                 # dict() copies the module constant so nothing downstream can mutate
                 # it, as _HEATMAP_GRADIENT is copied for _themed.
@@ -4066,9 +4135,9 @@ def build_options(
                         # the mapping is pinned rather than inherited.
                         "keys": ["from", "to"],
                         # enableSimulation MUST be False — see `_NETWORKGRAPH_LINK_LENGTH`: with it
-                        # True the export server rasterizes the graph mid-simulation as an
-                        # unreadable central knot, while False settles it identically in both render
-                        # modes. `verlet` integration converges a small graph cleanly.
+                        # True the retired export server rasterized the graph mid-simulation as an
+                        # unreadable central knot, while False settles it identically every time
+                        # it is drawn, on screen or in a download. `verlet` integration converges a small graph cleanly.
                         "layoutAlgorithm": {
                             "enableSimulation": False,
                             "integration": "verlet",
@@ -4369,12 +4438,12 @@ def build_options(
                         # _to_untrimmed_dict, since BoxPlotOptions models no such
                         # property. Setting either here would look like it worked and
                         # change nothing in the emitted JS (the trap sankey's top-level
-                        # tooltip.nodeFormat sets), and there is no side door: the export
-                        # server's `global_options` is coerced through the very same
-                        # model. So the fill falls back to Highcharts' own default,
-                        # `var(--highcharts-background-color)` — which resolves to white
-                        # on the export server, and which _LIGHT_COLOR_SCHEME_CSS pins to
-                        # white in the iframe so the two render modes agree.
+                        # tooltip.nodeFormat sets), and there was no side door: the
+                        # retired export server's `global_options` was coerced through the
+                        # very same model. So the fill falls back to Highcharts' own default,
+                        # `var(--highcharts-background-color)` — which
+                        # _LIGHT_COLOR_SCHEME_CSS pins to white in the iframe, so it does not
+                        # follow the viewer's browser.
                         "colorByPoint": True,
                         # The box tooltip lives HERE, not at the top level, for two
                         # reasons. It scopes this format to the boxes, leaving the linked
@@ -4443,7 +4512,7 @@ def build_options(
         }
         if len(steps) <= _WATERFALL_DATALABEL_MAX_STEPS:
             # Print each delta IN its bar, as pie, heatmap, treemap and sankey print their
-            # values — so the Static-PNG mode, which has no hover tooltip, still shows the
+            # values — so an exported image, which has no hover tooltip, still shows the
             # numbers. This is where waterfall parts company with column/bar, which
             # deliberately carry no labels: their bars stand on the axis, so a height IS a
             # value, while a waterfall's bar floats at the running total and encodes its
@@ -4662,7 +4731,7 @@ def build_options(
                         # be read against no axis — an angle, an area,
                         # a link's width, a bar floating above an invisible running total. An
                         # xrange bar's two ends BOTH land on a real, ticked, gridlined x axis
-                        # that renders in the Static PNG too: it is column/bar's case ("their
+                        # that renders in an exported image too: it is column/bar's case ("their
                         # bars stand on the axis"), not waterfall's. And there is no second
                         # identity left to print — the lane name IS the y-axis category, which
                         # is exactly what labelling the bar would repeat (verified by
@@ -4728,7 +4797,7 @@ def build_options(
                 },
                 # No dataLabels, and no gate constant either — xrange's rule, reached from
                 # xrange's premise. Both ends land on a real, ticked, gridlined y axis that
-                # renders in the Static PNG too (column/bar's case, not waterfall's bar floating
+                # renders in an exported image too (column/bar's case, not waterfall's bar floating
                 # above an invisible running total), and the only other identity — the category
                 # name — is already on the X axis. There is nothing left to print in the mark.
                 "series": [{"name": f"{low_col}–{high_col}", "data": points}],
@@ -4766,20 +4835,21 @@ def build_options(
         return _themed(
             {
                 # Drawn VERTICALLY — no `chart.inverted` — unlike the horizontal form the textbook
-                # bullet uses. Both orientations render correctly in both modes and both themes, so
-                # unlike most geometry calls in this module this one was NOT decided by looking,
-                # and says so rather than borrowing the authority of a render it did not need. It
-                # is decided by the two comments it would otherwise falsify: X_IN_Y_GUARD_TYPES
-                # admits bullet on the sentence "its x_col is a genuine category X axis, the bars
-                # stand ON it, drawn vertically", and `_themed`'s border tuple admits it as the
-                # fifth bar-shaped type measured to ring white. Inverting would leave both true in
-                # the options tree and false on the page — the exact divergence class this module
-                # catches by rendering. Inverting buys room for long category labels, which is a
-                # property of the DATASET rather than of the type, and which this app already
-                # answers with the user's own column-vs-bar lever; a second, type-baked answer to
-                # the same question is the steering the pane-`size` lesson says to stop doing.
-                # (The one INVERTED type here, organization, is inverted because its domain forces
-                # it — a hierarchy flows down. A bullet's sideways convention is a convention.)
+                # bullet uses. Both orientations rendered correctly in both (then) render modes and
+                # both themes, so unlike most geometry calls in this module this one was NOT
+                # decided by looking, and says so rather than borrowing the authority of a render
+                # it did not need. It is decided by the two comments it would otherwise falsify:
+                # X_IN_Y_GUARD_TYPES admits bullet on the sentence "its x_col is a genuine category
+                # X axis, the bars stand ON it, drawn vertically", and `_themed`'s border tuple
+                # admits it as the fifth bar-shaped type measured to ring white. Inverting would
+                # leave both true in the options tree and false on the page — the exact divergence
+                # class this module catches by rendering. Inverting buys room for long category
+                # labels, which is a property of the DATASET rather than of the type, and which
+                # this app already answers with the user's own column-vs-bar lever; a second,
+                # type-baked answer to the same question is the steering the pane-`size` lesson
+                # says to stop doing. (The one INVERTED type here, organization, is inverted
+                # because its domain forces it — a hierarchy flows down. A bullet's sideways
+                # convention is a convention.)
                 #
                 # NOTE what is deliberately absent: `yAxis.plotBands`. The qualitative
                 # poor/average/good bands every bullet demo draws are a business judgement, and the
@@ -4867,13 +4937,13 @@ def build_options(
                         },
                         # No dataLabels, and no gate constant either — xrange's rule reached from
                         # xrange's premise, exactly as columnrange reached it. A bullet's bar
-                        # stands on a real, ticked, gridlined y axis that renders in the Static PNG
-                        # too (column/bar's case, not waterfall's bar floating above an invisible
-                        # running total); its goal is DRAWN on that same axis rather than printed;
-                        # and the only other identity, the category name, is already on the X axis.
-                        # A bullet's dataLabels default OFF (column/bar's behaviour, not a gauge's,
-                        # which default ON and must be disabled explicitly), so the omitted key IS
-                        # the gate.
+                        # stands on a real, ticked, gridlined y axis that renders in an exported
+                        # image too (column/bar's case, not waterfall's bar floating above an
+                        # invisible running total); its goal is DRAWN on that same axis rather than
+                        # printed; and the only other identity, the category name, is already on
+                        # the X axis. A bullet's dataLabels default OFF (column/bar's behaviour,
+                        # not a gauge's, which default ON and must be disabled explicitly), so the
+                        # omitted key IS the gate.
                     }
                 },
                 # The series IS the measure — the goal is an annotation on it, not a co-equal end
@@ -5062,11 +5132,11 @@ def build_options(
                 },
                 # No dataLabels, and no gate constant either — xrange's rule reached from xrange's
                 # OWN premise (unlike variwide, where it is false): both numbers land on a real,
-                # ticked, gridlined y axis that renders in the Static PNG too, and the only other
-                # identity, the category name, is already on the X axis. A dumbbell's dataLabels
-                # default OFF (column/bar's behaviour, not a gauge's), so the omitted key IS the
-                # gate. Printing them would also collide head-on: two labels per category, at the
-                # two ends of a connector that is often shorter than the text.
+                # ticked, gridlined y axis that renders in an exported image too, and the only
+                # other identity, the category name, is already on the X axis. A dumbbell's
+                # dataLabels default OFF (column/bar's behaviour, not a gauge's), so the omitted
+                # key IS the gate. Printing them would also collide head-on: two labels per
+                # category, at the two ends of a connector that is often shorter than the text.
                 "series": [{"name": f"{before_col}→{after_col}", "data": points}],
             },
         )
@@ -5121,12 +5191,13 @@ def explain_tree_error(
     doesn't — the very message ``build_options`` raises.
 
     The app renders this as a warning and stops, so the two can never say different things
-    (the ``X_IN_Y_GUARD_TYPES`` named-once rule, and the ``explain_export_failure`` precedent:
-    the builder owns the relationship, so the builder owns the diagnosis).
+    (the ``X_IN_Y_GUARD_TYPES`` named-once rule, and the precedent of the retired
+    ``explain_export_failure``: the builder owns the relationship, so the builder owns the
+    diagnosis).
 
-    Needed because the interactive path does NOT catch builder errors. Nothing the UI can
-    select makes any other type raise, and sunburst's tree guards — the one failure a user can
-    reach just by uploading a CSV — have to keep that true.
+    Needed because the interactive path does NOT catch builder errors, and a malformed tree is
+    reachable just by uploading a CSV. It was the first such error; xrange's, gauge's and
+    networkgraph's guards each followed with an ``explain_*`` of their own, for the same reason.
     """
     return _sunburst_tree(df, x_col, parent_col, value_col)[2]
 
@@ -5564,13 +5635,14 @@ def make_chart(
 # walks the chart's `plotOptions.<type>` (which pulls only the dependent module) BEFORE its
 # `series.<type>` (which pulls `modules/sankey` first), so it emits the dependent AHEAD of its
 # prerequisite — the reverse of what the browser needs. Loaded first, the dependent throws "Cannot
-# read properties of undefined (reading 'prototype')" and Highcharts reports the series type missing
-# (error #17), leaving the iframe BLANK. The export server (the Static PNG path) loads every module
-# regardless of order, so ONLY the interactive path hits this — the `_LIGHT_COLOR_SCHEME_CSS`
-# two-render-modes-must-agree rule, and the solidgauge-pane trap one function up, in mirror: there a
-# MISSING module blanks the iframe, here a MISORDERED one does. A LIST of (prerequisite, dependent)
-# pairs — the generalization the single dependency-wheel edge's own comment predicted the day a
-# second such edge (organization) arrived, the way GAUGE_TYPES split only once a second gauge did.
+# read properties of undefined (reading 'prototype')" and Highcharts reports the series type
+# missing (error #17), leaving the iframe BLANK — and its download with it, since the export
+# re-renders the chart in the same page. The retired export server loaded every module regardless
+# of order, which is how this hid behind a perfect PNG; the solidgauge-pane trap one function up is
+# its mirror: there a MISSING module blanks the iframe, here a MISORDERED one does. A LIST of
+# (prerequisite, dependent) pairs — the generalization the single dependency-wheel edge's own
+# comment predicted the day a second such edge (organization) arrived, the way GAUGE_TYPES split
+# only once a second gauge did.
 _SANKEY_MODULE = "modules/sankey.js"
 _MODULE_LOAD_ORDER = (
     (_SANKEY_MODULE, "modules/dependency-wheel.js"),
@@ -5585,7 +5657,8 @@ _MODULE_LOAD_ORDER = (
 # ship. 13.1.1 is the release the app was already drawing with when it was pinned (2026-10-07), so
 # pinning changed no chart. The FLOOR is 11.4.4: up to 11.4.3 a series of point OBJECTS past
 # `turboThreshold` drew blank, and 11 of the types emit them (see docs/decisions.md, "Large data").
-# The export server (the Static PNG path) runs its own Highcharts and is not affected by this.
+# It covers every chart the app draws: since 0.21.0 the downloads are drawn by the same pinned
+# release in the browser (the exporting modules come through `get_script_tags` like any other).
 HIGHCHARTS_JS_VERSION = "13.1.1"
 _HIGHCHARTS_CDN = "https://code.highcharts.com/"
 
@@ -5721,16 +5794,16 @@ def build_chart_html(
 
     # For a SOLID gauge this resolves highcharts-more as well as modules/solid-gauge — and it does
     # so only because the options tree carries a `pane`. Without highcharts-more the chart renders
-    # as an empty SVG here while the PNG path below renders perfectly (see the gauge branch).
+    # as an empty SVG here — and so does its download (see the gauge branch).
     #
     # The NEEDLE gauge is the standing proof that the second sentence does not generalize: it
     # resolves highcharts-more from `chart.type` ALONE, so its pane is geometry and nothing hangs
     # on it. Two sibling types, the same module, resolved by different keys — which is precisely
     # why this comment names solidgauge rather than "a gauge". Whoever reads it next will be
-    # holding one of the two, and the wrong half is a silently blank iframe beside a perfect PNG.
+    # holding one of the two, and the wrong half is a silently blank chart.
     #
-    # `_order_script_tags` then fixes the OTHER way a resolved module blanks this iframe while the
-    # PNG renders: a dependencywheel needs modules/sankey.js loaded BEFORE modules/dependency-
+    # `_order_script_tags` then fixes the OTHER way a resolved module blanks this iframe: a
+    # dependencywheel needs modules/sankey.js loaded BEFORE modules/dependency-
     # wheel.js (the latter extends the former), but get_script_tags emits them reversed. See
     # `_order_script_tags`.
     # get_script_tags(as_str=True) returns str, but the stub types it list[str] | str — the
@@ -5756,120 +5829,10 @@ def build_chart_html(
 <head>
   <meta charset="utf-8"/>
   {script_tags}
-  <style>{_LIGHT_COLOR_SCHEME_CSS}html,body{{margin:0;background:{body_bg};font-family:-apple-system,Segoe UI,Roboto,sans-serif}}</style>
+  <style>{_LIGHT_COLOR_SCHEME_CSS}{_EXPORT_BUTTON_CSS}html,body{{margin:0;background:{body_bg};font-family:-apple-system,Segoe UI,Roboto,sans-serif}}</style>
 </head>
 <body>
   <div id="{container_id}" style="width:100%;height:{height}px;"></div>
   <script>{chart_js}</script>
 </body>
 </html>"""
-
-
-def build_chart_png(
-    df: pd.DataFrame,
-    chart_type: str,
-    x_col: str | None,
-    y_cols: list[str],
-    *,
-    title: str | None = None,
-    height: int | None = None,
-    # The IMAGE's pixel-density multiplier, and the reason the gauge's dial kwarg is `dial`
-    # rather than the `scale` it would otherwise want to be called: this one got here first, and
-    # it means something completely different.
-    scale: int = 2,
-    width: int | None = None,
-    timeout: int = 30,
-    size_col: str | None = None,
-    target_col: str | None = None,
-    parent_col: str | None = None,
-    end_col: str | None = None,
-    high_col: str | None = None,
-    title_col: str | None = None,
-    goal_col: str | None = None,
-    width_col: str | None = None,
-    after_col: str | None = None,
-    agg: str = _GAUGE_DEFAULT_AGG,
-    dial: tuple[float, float] | None = None,
-) -> bytes:
-    """Render the chart to PNG bytes via the Highcharts export server.
-
-    The image is produced server-side, so displaying it (e.g. with
-    ``st.image``) needs **no client-side Highcharts JavaScript** — useful for
-    static reports or browsers that can't reach the Highcharts CDN. It does
-    require the running process to reach the Highcharts export server
-    (``export.highcharts.com`` by default; pass a ``server_instance`` to
-    ``download_chart`` to self-host). ``scale=2`` yields a crisper image.
-    """
-    chart = make_chart(
-        df,
-        chart_type,
-        x_col,
-        y_cols,
-        title=title,
-        size_col=size_col,
-        target_col=target_col,
-        parent_col=parent_col,
-        end_col=end_col,
-        high_col=high_col,
-        title_col=title_col,
-        goal_col=goal_col,
-        width_col=width_col,
-        after_col=after_col,
-        agg=agg,
-        dial=dial,
-    )
-    if height is not None:
-        # highcharts-core types `options` and `options.chart` as Optional, but
-        # `Chart.from_options` always populates both, so setting height is safe.
-        chart.options.chart.height = height  # ty: ignore[unresolved-attribute, invalid-assignment]
-    return chart.download_chart(
-        format="png",
-        scale=scale,
-        width=width,
-        timeout=timeout,
-    )
-
-
-def explain_export_failure(exc: Exception) -> str:
-    """Explain, in the user's terms, why a ``build_chart_png`` call failed.
-
-    ``build_chart_png`` can fail three genuinely different ways, and telling a user to
-    "check your network" when the export server answered them is worse than saying
-    nothing. They are told apart WITHOUT importing ``requests``: it reaches this project
-    only as a transitive dependency of highcharts-core, so importing it directly would be
-    depending on something ``pyproject.toml`` never declares.
-
-    - Nothing was ever sent. ``make_chart`` raised before the request — a bad column, an
-      unsupported type. Every ``requests`` exception subclasses ``OSError``
-      (``HTTPError`` -> ``RequestException`` -> ``OSError``), so anything that is *not*
-      an ``OSError`` never left the process.
-    - The request was made and no HTTP response came back (connection refused, DNS
-      failure, timeout). Those carry ``response = None``.
-    - The server answered, and its answer was an error. ``exc.response.status_code``
-      separates "it rejected our chart" (4xx) from "it broke" (5xx). A 4xx is the one
-      that most needs saying out loud, because the server is plainly reachable.
-
-    Returned as plain markdown for ``st.error``; this module stays Streamlit-free.
-    """
-    if not isinstance(exc, OSError):
-        return (
-            "The chart could not be built, so nothing was sent to the export server. "
-            "This is a problem with the data or the selected columns — not with your "
-            "network."
-        )
-    status = getattr(getattr(exc, "response", None), "status_code", None)
-    if status is None:
-        return (
-            "The Highcharts export server could not be reached. Check your network, or "
-            "switch to the **Interactive** mode instead."
-        )
-    if 400 <= status < 500:
-        return (
-            f"The Highcharts export server is reachable, but it rejected this chart "
-            f"(HTTP {status}). That points at the chart config it was sent, not at your "
-            f"network. The **Interactive** mode renders the same chart in the browser."
-        )
-    return (
-        f"The Highcharts export server reported an internal error (HTTP {status}). Try "
-        f"again in a moment, or switch to the **Interactive** mode instead."
-    )

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "highcharts-studio"
-version = "0.20.6"
+version = "0.21.0"
 description = "Streamlit application for building data visualizations with Highcharts."
 # SPDX expression (PEP 639). Covers this project's own code only; the Highcharts
 # JS/export server and the highcharts-core wrapper are proprietary and
@@ -35,13 +35,13 @@ dependencies = [
     # worth deriving here: it is a newer theming surface, not an older one, and it
     # is nowhere near the binding constraint.
     #
-    # The floor is 1.59.0 because the TEST HARNESS outranks the app here: 1.59.0
-    # gave st.image a first-class AppTest node, and tests/test_smoke.py's Static
-    # PNG test reads it as `app.image` (before 1.59.0 that attribute does not
-    # exist and the test dies with AttributeError). The floor is stated once, for
-    # the whole project, so it has to cover the strictest consumer — and a floor
-    # that installs cleanly but cannot run the suite is not a floor. Confirmed by
-    # `uv lock --resolution lowest-direct`, which picked 1.57.0 before this bump.
+    # The floor is 1.59.0 and is HELD there, not re-derived. It was set by the test
+    # harness: 1.59.0 gave st.image a first-class AppTest node, which the Static PNG
+    # test read as `app.image`. That test went with the Static PNG mode in 0.21.0,
+    # so the binding constraint is gone — but lowering the floor would claim the
+    # suite runs on versions nobody has run it on, and a floor that installs
+    # cleanly but cannot run the suite is not a floor. Lower it only after
+    # `uv lock --resolution lowest-direct` and a green suite at the lower version.
     "streamlit>=1.59.0",
 ]
 

@@ -31,19 +31,19 @@ uv run streamlit run streamlit_app.py
 ```
 
 Then open <http://localhost:8501>. Pick a sample dataset (or upload a CSV),
-choose a chart type and map its columns, and switch between two render modes:
-interactive (CDN iframe) or a static PNG. The app ships a single dark theme, and
-the charts are built to match it.
+choose a chart type and map its columns, then download the chart as PNG, JPEG
+or SVG from its ☰ menu. The app ships a single dark theme, and the charts are
+built to match it.
 
 ## Features
 
 - **Data in** — built-in sample datasets or your own CSV upload. Map columns to
   the chart with compact pills, falling back to `st.multiselect` on wide CSVs.
-- **Two render modes** — *Interactive* runs Highcharts JS from the CDN, embedded
-  via `st.iframe`; *Static (PNG)* renders server-side through the Highcharts
-  export server and shows the image with a download button.
+- **Interactive charts, downloadable** — Highcharts JS runs from the CDN,
+  embedded via `st.iframe`. Each chart's ☰ menu downloads it as PNG, JPEG or SVG,
+  drawn in the browser (no export server is contacted).
 - **One dark theme, end to end** — the app ships a single dark theme, and the charts
-  are built to match it in both render modes: background, text, axes and tooltip all
+  are built to match it, downloads included: background, text, axes and tooltip all
   come from the same palette the Streamlit shell uses.
 - **KPI row** — rows, numeric columns, and a chart-type-adaptive third metric:
   series plotted, or — for the types whose single series draws many marks — that
@@ -96,7 +96,7 @@ whole of the data, so the picker offers date columns only. See
 ## Development
 
 The core chart logic lives in `highcharts_builder.py` — pure, Streamlit-free
-functions (DataFrame → Highcharts options → `Chart` → HTML/PNG) that are
+functions (DataFrame → Highcharts options → `Chart` → HTML) that are
 independently unit-testable. `streamlit_app.py` is the UI and `sample_data.py`
 the built-in datasets. See [`CLAUDE.md`](CLAUDE.md) for the architecture and the
 project conventions, and [`docs/chart-types.md`](docs/chart-types.md) for the
@@ -116,16 +116,16 @@ gates locally so edits stay green before a push (see `CLAUDE.md`).
 ## Notes
 
 - There is **no official Streamlit ↔ Highcharts component** for the
-  `highcharts-core` object model, so interactive mode uses a dependency-free
+  `highcharts-core` object model, so the app uses a dependency-free
   `Chart` → HTML → `st.iframe` bridge.
-- **Interactive** mode loads Highcharts JS from the CDN
+- The chart loads Highcharts JS from the CDN
   (`https://code.highcharts.com/`), so the browser needs network access; the
   iframe has a fixed height (it does not auto-grow). The release is pinned
   (`HIGHCHARTS_JS_VERSION` in `highcharts_builder.py`), so a new Highcharts
   release cannot change a chart until that constant is bumped.
-- **Static** mode needs the running process to reach the Highcharts export server
-  (`export.highcharts.com` by default). Self-host one and pass `server_instance`
-  to `download_chart` to remove that external dependency.
+- Downloads (PNG, JPEG, SVG) are drawn **in the browser** by Highcharts'
+  exporting modules, with the export-server fallback switched off, so the app
+  has no server-side network dependency at all.
 
 ## License
 
@@ -137,9 +137,9 @@ The MIT license covers **only this project's code**, not the third-party tools
 it renders with. Two of its dependencies are proprietary and separately
 licensed, and the MIT grant does not extend to them:
 
-- **Highcharts JS** (loaded from the CDN) and the **Highcharts export server**
-  are owned by Highsoft — free for personal/non-commercial use; commercial use
-  requires a paid Highcharts license.
+- **Highcharts JS** (loaded from the CDN, including the exporting modules that
+  draw downloads in the browser) is owned by Highsoft — free for
+  personal/non-commercial use; commercial use requires a paid Highcharts license.
 - **`highcharts-core`** (the Highcharts for Python toolkit) is itself
   proprietary, governed by the Highcharts for Python Toolkit License (which
   presupposes a Highcharts Software license — paid for commercial use, or a

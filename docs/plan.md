@@ -38,14 +38,14 @@ waits until after 1.0.
   `pandas` adds none because Streamlit requires it anyway. Every planned feature is built
   from the standard library or what these three already ship, and a feature that needs a
   new package is dropped or narrowed instead (as Excel upload was, in [#9](#9-delimiter-sniffing)).
-  The same applies to **network** dependencies: the app relies on the Highcharts CDN and
-  export server today, should never add a third, and [#13](#13-client-side-export) takes it
-  down to the CDN alone. Dev tools (`pytest`, `ruff`, `ty`, `watchdog`)
+  The same applies to **network** dependencies: since [#13](#13-client-side-export) the app
+  relies on the Highcharts CDN alone (the export server is gone), and should never add a
+  second. Dev tools (`pytest`, `ruff`, `ty`, `watchdog`)
   never ship to users and are outside this rule. Enforced by [#12](#12-pin-the-runtime-dependency-set).
 
-**Client side, in two steps.** The chart is already drawn in the browser in interactive
-mode; only Static PNG mode sends it to a remote service (`export.highcharts.com`). Moving
-the PNG into the browser ([#13](#13-client-side-export)) is small and planned. Running the
+**Client side, in two steps.** The chart is drawn in the browser, and since
+[#13](#13-client-side-export) (0.21.0) so are its downloads: nothing goes to a remote
+service any more. That was the first step. Running the
 whole app in the browser with no server ([#14](#14-spike-run-the-app-in-the-browser-stlite))
 is large and waits on a spike, because its first-load download clashes with "lightweight".
 
@@ -90,7 +90,7 @@ L = changes how the app is structured.
 only new types). A fix with no new behaviour is a **patch** bump; a feature is a **minor**
 bump. While the version is below 1.0, a change that removes public API is also a minor bump,
 but its changelog section says **Removed** and names what went, since the builder is
-importable on its own ([#13](#13-client-side-export) is the one planned item that does
+importable on its own ([#13](#13-client-side-export) was the one planned item that did
 this). Items may share a release only when they cannot be shipped usefully apart, and the
 entry says so.
 
@@ -105,7 +105,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 3rd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | done (0.20.4) |
 | 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | done (0.20.5) |
 | 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | done (0.20.6) |
-| 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
+| 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | done (0.21.0) |
 | 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | planned |
 | 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
 | 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
@@ -151,45 +151,13 @@ reasoning (names only, the `dev` group left free, a duplicated entry caught too)
 
 ### 13. Client-side export
 
-- **What & why:** Retire Static PNG mode and its remote service. Load Highcharts'
-  `exporting` and `offline-exporting` modules in `build_chart_html`, which adds the chart's
-  ☰ menu with PNG / SVG / JPEG downloads generated **in the browser**. This removes:
-  - the export server, the last network dependency besides the CDN;
-  - its failure paths (unreachable, HTTP 4xx/5xx) and `explain_export_failure`;
-  - the interactive-versus-PNG mismatches, including the `CHART_PNG_WIDTH = 800` workaround,
-    because there is only one renderer;
-  - the render-mode selector, one fewer control.
+Done in 0.21.0: Static PNG mode, the render-mode selector, `build_chart_png` and
+`explain_export_failure` are gone; every chart carries Highcharts' ☰ menu, drawing PNG/JPEG/SVG
+in the browser with the export-server fallback off. The reasoning, the settings and what
+rendering verified: [`decisions.md`](decisions.md#static-png-mode-and-its-retirement).
 
-  It goes before #5 because it deletes code that #5 would otherwise have to thread its
-  `style=` through (`build_chart_png` and its cached wrapper).
-- **Touches:** `highcharts_builder.py` (module scripts, an `exporting` block in the
-  options, `build_chart_png` and `explain_export_failure` removed), `streamlit_app.py` (the
-  render-mode selector, the static branch, `cached_chart_png`), the tests that cover static
-  mode and the cache layer (`_CACHE_LAYER` drops to two renderer wrappers),
-  `CLAUDE.md` (the PNG path in the flow diagram, `CHART_PNG_WIDTH`, the export-server
-  conventions), `docs/decisions.md` (an entry for why the mode was retired), and the
-  export-server mentions in `NOTICE` and `README.md` (its Static mode description, its
-  network-requirements note and its License section). Change `NOTICE` and the README's
-  License section **together**: `tests/test_packaging.py` keeps them in sync.
-- **Verify by rendering:** the ☰ menu and its dropdown must be themed dark through
-  `_themed`, and the **downloaded** PNG must come out dark too: the exporting module
-  re-renders the chart for the file, so check the file, not only the screen. Check both
-  browser colour schemes (the `color-scheme` pin).
-- **Checked 2026-10-07:** downloads from inside the iframe are permitted. Streamlit's
-  iframe sandbox (in the installed `streamlit` frontend) includes `allow-downloads`, with
-  `allow-scripts` and `allow-same-origin`. This was the condition that could have made the
-  item unworkable.
-- **Decided:** no server-side PNG option is kept for users without JS. The mode is retired
-  entirely.
-- **Check when building:**
-  - That a download from the ☰ menu actually lands in Chrome, Firefox **and Safari**
-    (the sandbox permits it; the browsers have to agree).
-  - That `offline-exporting` exports all 30 types in the browser, with the fallback switched
-    off (`exporting.fallbackToExportServer: false`); otherwise the remote service quietly
-    comes back for any type it cannot handle.
-- **Shipping:** removes public API (`build_chart_png`, `explain_export_failure`), so its
-  changelog section has a **Removed** heading naming both (see Shipping in the Legend).
-- **Size:** S–M (mostly deletion, plus a render check) · **Status:** planned
+- **Checked 2026-10-07:** a real PNG and SVG download saves in **Firefox and Safari**, and the
+  PNG is dark (tested by hand; Chrome's path was exercised by script).
 
 ### 23. Host a public demo on Streamlit Community Cloud
 
@@ -212,9 +180,9 @@ reasoning (names only, the `dev` group left free, a duplicated entry caught too)
   deployment comes down until a commercial licence is in place. The README's `## License`
   section and `NOTICE` already put licensing on whoever deploys; the live-demo section says
   the demo is non-commercial.
-- **Depends on:** [#13](#13-client-side-export). With Static PNG mode retired, the hosted
-  app's only outside dependency is the Highcharts CDN, so a visitor's render no longer
-  calls `export.highcharts.com`.
+- **Depends on:** [#13](#13-client-side-export), now done (0.21.0): with Static PNG mode
+  retired, the hosted app's only outside dependency is the Highcharts CDN, and no visitor's
+  render calls `export.highcharts.com`.
 - **Touches:** `README.md` (a live-demo link near the top and a short deploy section), and a
   deploy config only if Community Cloud needs one.
 - **Check when building:**
@@ -280,8 +248,8 @@ either sample), but the format keeps every label ending in its `(type)` for the 
   (`normal`/`percent`) for column/bar/area, a logarithmic Y, and a reference line (from #6).
 - **Step zero, a decision:** pass all of these as **one** frozen, hashable `ChartStyle`
   dataclass under a single `style=` kwarg, not one kwarg each. As separate kwargs, every
-  control costs a change to each renderer cache wrapper and its call site (three today, two
-  after [#13](#13-client-side-export); the kwarg rule in `CLAUDE.md`);
+  control costs a change to each renderer cache wrapper and its call site (two since
+  [#13](#13-client-side-export) retired the PNG one; the kwarg rule in `CLAUDE.md`);
   as one object, the wrappers change once, `_FORWARDED` derives the new name on its own,
   and each later control is one field plus one widget. Write this up in `decisions.md`
   *before* the code, since every future control inherits it.
@@ -299,7 +267,7 @@ either sample), but the format keeps every label ending in its `(type)` for the 
   `_KEYED_PICKERS`).
 - **Touches:** `highcharts_builder.py` (`ChartStyle`, applied in or beside `_themed`, plus
   `style_controls_for`), the sidebar's Chart section, `_KEYED_PICKERS`, the renderer
-  wrappers (once; two of them after [#13](#13-client-side-export) retires the PNG one), the
+  wrappers (once; two of them since [#13](#13-client-side-export) retired the PNG one), the
   kwarg docs in `CLAUDE.md`, and `README.md`'s description of the controls.
 - **Decided:**
   - **`style` is not a column kwarg.** It is a setting, like the gauge family's `agg` and
@@ -626,8 +594,8 @@ decision made here carries over: CDN-linked only, no inlined Highcharts JavaScri
   4. **Hosting.** Which static host (GitHub Pages is the obvious one), and does the CSV
      upload still work with no server?
 - **Not affected:** the tests keep running on CPython in CI; only the deployment changes.
-- **Depends on:** [#13](#13-client-side-export). With the export server gone, nothing in
-  the app needs a server-side network call.
+- **Depends on:** [#13](#13-client-side-export), now done (0.21.0): with the export server
+  gone, nothing in the app needs a server-side network call.
 - **Size:** M for the spike; the migration is sized after it · **Status:** deferred
 
 ## Dropped

@@ -10,8 +10,8 @@ Layers:
   non-numeric x, and bubble's (x, y, size) triples whose series share one size
   column, its ``highcharts-more`` module resolution, and its dimension-naming
   tooltip), non-finite data (an ``inf`` is not missing but can't be serialized —
-  ``to_js_literal`` emits the bare token ``inf``, a JS ReferenceError, and the
-  export server 400s — so every type applies its own missing-data policy to it,
+  ``to_js_literal`` emits the bare token ``inf``, a JS ReferenceError (and the
+  retired export server 400'd) — so every type applies its own missing-data policy to it,
   swept over ``SUPPORTED_TYPES``), radar's polar-line shape (chart.type "line" + ``chart.polar``,
   sharing the ``highcharts-more`` module), heatmap's category × category value
   matrix (``[x, y, value]`` cells colored by a ``colorAxis``, empty cells kept as
@@ -72,7 +72,7 @@ Layers:
   flips while the ``DEFAULT_COLORS`` palette stays shared across modes,
   ``build_chart_html`` gives the iframe body a background that tracks the mode,
   and it pins the chart's ``color-scheme`` so Highcharts' own ``light-dark()``
-  defaults resolve to the export server's values rather than the viewer's browser.
+  defaults resolve to fixed values rather than the viewer's browser.
 - a row-less frame (columns, no rows — a header-only CSV) draws an EMPTY chart
   rather than raising, swept over ``SUPPORTED_TYPES`` because the bug was one
   shared line: an empty ``.map()`` mask comes back non-boolean, and a DataFrame
@@ -95,7 +95,7 @@ Layers:
   rendering a traceback), title, and series, revealing
   the generated Highcharts config
   behind its toggle, the KPI metric row, the wide-CSV multiselect fallback, and
-  the render-mode selector's two modes (interactive iframe / static PNG), plus
+  the absence of a render-mode control (the Static PNG mode was retired), plus
   tripping the x-in-y warning and the no-CSV-uploaded info guard — asserting on
   the generated config (incl. the brand palette) and the guard messages.
 """
@@ -135,7 +135,6 @@ from highcharts_builder import (  # noqa: E402
     _needle_radii,
     _pct,
     build_chart_html,
-    build_chart_png,
     build_options,
     count_marks,
     explain_gauge_error,
@@ -406,9 +405,10 @@ def test_a_string_beginning_with_date_is_emitted_unquoted_by_the_library():
 
     so ANY string beginning ``Date`` — except exactly ``"Date"`` — reaches the page as raw
     JavaScript rather than as a string. It is the FOURTH serialization trap, and it lands in the
-    same place as the format one above: the chart call dies with a ``SyntaxError``, the iframe is
-    blank, and the export server renders the PNG PERFECTLY, so the two modes disagree and only
-    the interactive one is wrong.
+    same place as the format one above: the chart call dies with a ``SyntaxError`` and the iframe
+    is blank (so is its download, which re-renders it in the browser). While the export server
+    path existed it rendered the PNG PERFECTLY, so the two modes disagreed and only the
+    interactive one was wrong.
 
     It is reachable from three ordinary channels — the app's free-text chart title, a column name
     (which becomes an axis title AND a series name), and a point's own label — and it is
@@ -416,7 +416,7 @@ def test_a_string_beginning_with_date_is_emitted_unquoted_by_the_library():
     is semantically a date and ``Date added`` / ``Dates`` / ``DateTime`` are all natural headers.
 
     Not worked around, on purpose: every available fix mutates text the user typed (a zero-width
-    space defeats the prefix test and reaches the DOM and the PNG), which is a worse trade than a
+    space defeats the prefix test and reaches the DOM and every download), which is a worse trade than a
     documented library bug — see ``docs/decisions.md``. So this test does not assert the bug is
     FIXED. It asserts the bug is STILL THERE, against the pinned highcharts-core, which is the
     only way a repo that chose to live with something finds out when it changes: fixed upstream,
@@ -457,9 +457,9 @@ def test_no_supported_type_emits_an_unquoted_format_object(labeled_frame, chart_
     # directions an options-dict test can look. `to_js_literal` renders a format string by
     # substitution, so `{"format": "{value:%b %Y}"}` comes out as `format: {value:%b %Y}` — a
     # bare brace-block where JS expects a string. The chart call dies with a SyntaxError, the
-    # iframe stays blank, and the export server renders the PNG PERFECTLY (it is handed the
-    # dict, never this text), so the two render modes disagree and only the interactive one is
-    # wrong. Verified by building a chart WITH `xAxis.labels.format` and reading the emitted JS.
+    # iframe stays blank (and its download with it). The retired export server rendered the PNG
+    # PERFECTLY (it was handed the dict, never this text), which is how it hid behind a working
+    # mode. Verified by building a chart WITH `xAxis.labels.format` and reading the emitted JS.
     #
     # Swept over SUPPORTED_TYPES rather than pinned on the one type that provoked it, for the
     # non-finite sweep's reason exactly: the trap is a property of the SERIALIZER, so it is
@@ -497,7 +497,7 @@ def test_no_supported_type_emits_an_unquoted_format_object(labeled_frame, chart_
     context = "" if found is None else js[max(0, found.start() - 40) : found.end() + 40]
     assert found is None, (
         f"{chart_type} emitted an unquoted format object — invalid JS, so the iframe renders "
-        f"blank while the export server's PNG comes back perfect: ...{context}..."
+        f"blank (and so does its download): ...{context}..."
     )
 
 
@@ -543,18 +543,17 @@ def non_finite_frame() -> pd.DataFrame:
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart_type):
     # An infinity is not missing — pd.isna(inf) is False — but it cannot be serialized:
-    # to_js_literal renders it as the bare token `inf`, which is not a JavaScript
-    # identifier (JS spells it `Infinity`), so the whole Highcharts.chart(...) call dies
-    # with a ReferenceError and the iframe renders blank. The static path fares no better:
-    # the export server is handed the non-standard JSON literal `Infinity` and answers
-    # 400, which the app then misreports as an unreachable server. Both were live bugs in
-    # every type before `_plottable`. Only the emitted JS can prove the fix, and this
-    # sweeps SUPPORTED_TYPES so a newly added type is covered the day it is added — but only
-    # for its VALUE channel (this fixture carries the infinities in the y/weight/size
-    # column, always with a safe string x). The LABEL channel has its own sweep
+    # to_js_literal renders it as the bare token `inf`, which is not a JavaScript identifier (JS
+    # spells it `Infinity`), so the whole Highcharts.chart(...) call dies with a ReferenceError and
+    # the iframe renders blank. The retired static path fared no better: the export server was
+    # handed the non-standard JSON literal `Infinity` and answered 400. Both were live bugs in
+    # every type before `_plottable`. Only the emitted JS can prove the fix, and this sweeps
+    # SUPPORTED_TYPES so a newly added type is covered the day it is added — but only for its VALUE
+    # channel (this fixture carries the infinities in the y/weight/size column, always with a safe
+    # string x). The LABEL channel has its own sweep
     # (test_missing_or_non_finite_label_drops_the_row_in_every_type), and boxplot's
-    # aggregation-overflow path — the one type that can manufacture a non-finite from
-    # finite inputs — has its own test, since neither is reachable through this frame.
+    # aggregation-overflow path — the one type that can manufacture a non-finite from finite inputs
+    # — has its own test, since neither is reachable through this frame.
     from highcharts_builder import make_chart
 
     js = make_chart(
@@ -1011,7 +1010,7 @@ def test_explicit_title_overrides_default(labeled_frame):
 
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_default_palette_applied_per_type(labeled_frame, chart_type):
-    # Every chart type carries the brand palette so all render modes share a look.
+    # Every chart type carries the brand palette, so the chart and its downloads share a look.
     opts = build_options(
         labeled_frame,
         chart_type,
@@ -1180,9 +1179,9 @@ def test_build_chart_html_pins_the_chart_color_scheme(chart_type):
     # than our `dark` flag. Two real failures followed: a light-mode chart painted itself
     # dark (#141414 background, pale text) on a dark-OS browser, and a boxplot's box fill
     # — the one mark color highcharts-core cannot express — differed between the iframe
-    # and the export-server PNG. Pinning the chart root to `only light` makes the iframe
-    # resolve those defaults exactly as the export server does, in BOTH modes, leaving
-    # `_themed` the single source of truth for dark mode.
+    # and the (since retired) export-server PNG. Pinning the chart root to `only light` makes
+    # the iframe resolve those defaults to fixed values whatever the viewer's browser prefers,
+    # leaving `_themed` the single source of truth for dark mode.
     #
     # The selector must be `.highcharts-root` (the <svg>), not `html`: Highcharts declares
     # `color-scheme: light dark` on `.highcharts-container` (between `html` and the <svg>),
@@ -1192,8 +1191,8 @@ def test_build_chart_html_pins_the_chart_color_scheme(chart_type):
     html = build_chart_html(df, chart_type, "g", ["v"])
     assert ".highcharts-root{color-scheme:only light}" in html
     # `only light` even though the chart IS dark, and that is not a contradiction: this pins
-    # how Highcharts' own `light-dark()` DEFAULTS resolve, so that the iframe resolves them
-    # exactly as the export server does. Our dark chrome is expressed in the options, never
+    # how Highcharts' own `light-dark()` DEFAULTS resolve, so that they cannot follow the
+    # viewer's browser. Our dark chrome is expressed in the options, never
     # here — which is why removing light mode did not make this pin removable.
     assert "color-scheme:only dark" not in html
 
@@ -1333,6 +1332,84 @@ def test_pin_script_tags_refuses_a_url_it_cannot_pin(src):
 
     with pytest.raises(ValueError, match="cannot pin Highcharts"):
         _pin_script_tags(f'<script src="{src}"></script>')
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_every_chart_exports_in_the_browser_and_never_from_the_server(
+    labeled_frame, chart_type
+):
+    # Client-side export replaced the Static PNG path: every chart carries Highcharts' ☰ menu,
+    # drawn by modules/exporting + modules/offline-exporting IN THE BROWSER. Asserted on the
+    # emitted JS and the page, not the options dict, for the serializer's reasons (CLAUDE.md:
+    # it can drop or mangle what the dict holds). Swept over SUPPORTED_TYPES because the
+    # settings ride `_themed`, which every type passes through.
+    from highcharts_builder import _HIGHCHARTS_CDN, HIGHCHARTS_JS_VERSION
+
+    chart = make_chart(
+        labeled_frame,
+        chart_type,
+        None if chart_type in GAUGE_TYPES else "label",
+        _y_for(chart_type),
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
+        parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
+    )
+    compact = "".join((chart.to_js_literal() or "").split())
+    # The fallback OFF: left on, any export the browser cannot do is quietly sent to
+    # export.highcharts.com — the remote service this change removed.
+    assert "fallbackToExportServer:false" in compact, chart_type
+    assert "local:true" in compact, chart_type
+    # Three items, and in particular no PDF: it needs `exporting.libURL` (no default since
+    # Highcharts 13), so with the fallback off it could only fail.
+    assert "menuItems:['downloadPNG','downloadJPEG','downloadSVG']" in compact, (
+        chart_type
+    )
+    # Laid out at 800px, not Highcharts' 600px fallback, which truncates labels.
+    assert "sourceWidth:800" in compact, chart_type
+
+    html = build_chart_html(
+        labeled_frame,
+        chart_type,
+        None if chart_type in GAUGE_TYPES else "label",
+        _y_for(chart_type),
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
+        parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
+    )
+    pinned = f"{_HIGHCHARTS_CDN}{HIGHCHARTS_JS_VERSION}/modules/"
+    for module in ("exporting.js", "offline-exporting.js"):
+        assert f'src="{pinned}{module}"' in html, f"{chart_type}: {module} not loaded"
+    assert "export.highcharts.com" not in html
+
+
+def test_export_menu_and_button_are_themed_dark():
+    # The menu and its ☰ button default to `var(--highcharts-background-color)`, which the
+    # color-scheme pin resolves to WHITE: a white menu and a white button on the dark chart
+    # (seen by rendering before this was themed). The button's hover fill cannot be set through
+    # options (highcharts-core serializes `theme.states` as a JS string), so it is the one bit of
+    # chrome in CSS, and the CSS must reach the page.
+    from highcharts_builder import _DARK_CHROME, _EXPORT_BUTTON_CSS
+
+    df = pd.DataFrame({"x": ["a", "b"], "y": [1.0, 2.0]})
+    nav = build_options(df, "column", "x", ["y"])["navigation"]
+    assert nav["menuStyle"]["background"] == _DARK_CHROME["bg"]
+    assert nav["menuItemStyle"]["color"] == _DARK_CHROME["text"]
+    assert nav["menuItemHoverStyle"]["background"] == _DARK_CHROME["grid"]
+    assert nav["buttonOptions"]["theme"]["fill"] == _DARK_CHROME["bg"]
+    assert nav["buttonOptions"]["symbolStroke"] == _DARK_CHROME["muted"]
+    html = build_chart_html(df, "column", "x", ["y"])
+    assert _EXPORT_BUTTON_CSS in html
+    assert f"fill:{_DARK_CHROME['grid']}" in _EXPORT_BUTTON_CSS
 
 
 def _relative_luminance(hex_color):
@@ -1701,7 +1778,7 @@ def test_app_theme_is_a_single_mode_with_no_light_dark_toggle():
 
 def test_theme_colors_stay_in_sync_with_config():
     # The chart palette and chrome DUPLICATE config.toml theme values, and must: the charts
-    # render in an iframe / server-side PNG that no theme CSS reaches, and Streamlit applies
+    # render in an iframe that no theme CSS reaches, and Streamlit applies
     # its own chartCategoricalColors only to its own Vega/Plotly charts — of which this app
     # has none. So the theme is restated in highcharts_builder and guarded mechanically
     # here, rather than by cross-referencing comments on both sides.
@@ -2346,7 +2423,7 @@ def test_treemap_light_mode_shape():
     # (headerFormat blanked so a hovered tile isn't a bare value), the disabled
     # legend (the in-tile labels carry identity, so a legend would just repeat
     # them), and the two-line name+value "contrast" tile labels (printed in the
-    # mark so the Static-PNG mode, which has no hover, still shows the numbers —
+    # mark so an exported image, which has no hover, still shows the numbers —
     # like pie and heatmap).
     df = pd.DataFrame({"name": ["A", "B"], "v": [1.0, 2.0]})
     opts = build_options(df, "treemap", "name", ["v"])
@@ -2638,7 +2715,7 @@ def test_sankey_serializes_and_pulls_in_the_sankey_module():
 
 def test_sankey_labels_its_nodes_and_links():
     # Nodes are named and links carry their weight — the value printed IN the mark,
-    # as pie/heatmap/treemap print theirs, so the Static-PNG mode (no hover) still
+    # as pie/heatmap/treemap print theirs, so an exported image (no hover) still
     # shows the numbers. Getting BOTH takes two separate places, and the reason is a
     # silent drop: highcharts-core discards plotOptions.sankey.dataLabels.nodeFormat,
     # and the `format` that does survive there applies to nodes AND links, so setting
@@ -2833,13 +2910,14 @@ def test_dependencywheel_serializes_and_pulls_in_both_modules():
 def test_dependencywheel_html_loads_sankey_before_dependency_wheel():
     # THE interactive-mode regression pin. modules/dependency-wheel.js EXTENDS the sankey series,
     # so it must load AFTER modules/sankey.js — but highcharts-core's get_script_tags emits them
-    # REVERSED (it walks the chart's plotOptions before its series, so the dependent module is
-    # seen first). Loaded first, dependency-wheel.js throws "Cannot read properties of undefined
+    # REVERSED (it walks the chart's plotOptions before its series, so the dependent module is seen
+    # first). Loaded first, dependency-wheel.js throws "Cannot read properties of undefined
     # (reading 'prototype')" and Highcharts reports the series missing (error #17), leaving a BLANK
-    # iframe while the export-server PNG renders fine — the two-render-modes-must-agree bug that
-    # build_chart_html fixes via _order_script_tags. So pin the ORDER in the emitted HTML, not just
-    # the presence the test above covers: sankey's tag must precede the wheel's. Verified by
-    # rendering in a real browser (the console showed error #17 before the fix, nothing after).
+    # iframe (and download), while the since-retired export-server PNG rendered fine — which is how
+    # it hid. build_chart_html fixes it via _order_script_tags. So pin the ORDER in the emitted
+    # HTML, not just the presence the test above covers: sankey's tag must precede the wheel's.
+    # Verified by rendering in a real browser (the console showed error #17 before the fix, nothing
+    # after).
     from highcharts_builder import build_chart_html
 
     df = pd.DataFrame({"src": ["A", "B"], "dst": ["C", "C"], "w": [1.0, 2.0]})
@@ -3012,11 +3090,10 @@ def test_networkgraph_serializes_and_pulls_in_only_the_networkgraph_module():
 
 def test_networkgraph_disables_the_simulation_so_both_render_modes_agree():
     # enableSimulation MUST be False, and pinned on the EMITTED JS (this repo's silent-drop
-    # discipline). It is the one setting the whole type turns on: with it True the export
-    # server rasterizes the graph as an unreadable central knot while the iframe animates it
-    # loose, so the two render modes disagree — the class of bug _LIGHT_COLOR_SCHEME_CSS
-    # exists to close. With it False Highcharts settles the layout synchronously and both
-    # modes draw the same picture.
+    # discipline). It is the one setting the whole type turns on: with it True the (since
+    # retired) export server rasterized the graph as an unreadable central knot while the iframe
+    # animated it loose, so the two render modes disagreed. With it False Highcharts settles the
+    # layout synchronously, so the chart and the browser's own export draw the same picture.
     from highcharts_builder import make_chart
 
     df = pd.DataFrame({"src": ["A"], "dst": ["B"]})
@@ -3333,9 +3410,10 @@ def test_organization_html_loads_sankey_before_organization():
     # organization.js EXTENDS the sankey series, so it must load AFTER modules/sankey.js — but
     # get_script_tags emits them REVERSED (it walks plotOptions before series, so the dependent is
     # seen first). Loaded first, organization.js throws and Highcharts reports the series missing
-    # (error #17), blanking the iframe while the export-server PNG renders fine. build_chart_html
-    # fixes it via _order_script_tags (now a LIST of prerequisite/dependent pairs). Verified by
-    # rendering in a real browser. Pin the ORDER in the emitted HTML, not just the presence.
+    # (error #17), blanking the iframe (the retired export-server PNG rendered fine).
+    # build_chart_html fixes it via _order_script_tags (now a LIST of prerequisite/dependent
+    # pairs). Verified by rendering in a real browser. Pin the ORDER in the emitted HTML, not just
+    # the presence.
     df = pd.DataFrame({"emp": ["A", "B"], "mgr": ["", "A"], "title": ["CEO", "CTO"]})
     html = build_chart_html(
         df, "organization", "emp", [], target_col="mgr", title_col="title"
@@ -3639,7 +3717,7 @@ def test_boxplot_finite_but_overflowing_group_becomes_enforced_null():
     # spread near the double range, iqr = q3 - q1 (and numpy's quantile interpolation,
     # a + (b - a) * frac) exceeds it and returns +/-inf, so a fence or the median itself
     # goes non-finite while the rest stay finite — smuggling the bare token `inf` past the
-    # input guard and into the emitted JS (a blank iframe, a 400 from the export server).
+    # input guard and into the emitted JS (a blank iframe, and a blank download with it).
     # The whole group is treated as unplottable, the same EnforcedNull box an all-missing
     # group gets. Reachable from a plain CSV: read_csv parses -9e307/9e307 as finite floats.
     big = 9e307  # finite (max double ~1.8e308), but 9e307 - (-9e307) overflows to inf
@@ -3766,6 +3844,21 @@ def test_boxplot_fill_color_is_accepted_then_silently_dropped():
     assert "654321" not in js
 
 
+def _own_modules(tags: str | list[str]) -> set[str]:
+    """The ``modules/*.js`` a chart's script tags load, minus the export pair EVERY chart loads.
+
+    Every chart carries an `exporting` block (client-side export), which pulls in
+    ``modules/exporting.js`` and ``modules/offline-exporting.js`` whatever its type, so "this
+    type needs no module of its own" has to look past those two.
+    """
+    # get_script_tags is stubbed `list[str] | str`; with as_str=True it is a str.
+    text = tags if isinstance(tags, str) else "\n".join(tags)
+    return set(re.findall(r"modules/[\w-]+\.js", text)) - {
+        "modules/exporting.js",
+        "modules/offline-exporting.js",
+    }
+
+
 def test_boxplot_serializes_and_pulls_in_the_more_module():
     # End to end: the 5-array box shape and its linked outlier scatter must serialize AND
     # resolve highcharts-more — the module boxplot shares with bubble and radar, not a
@@ -3784,7 +3877,7 @@ def test_boxplot_serializes_and_pulls_in_the_more_module():
     assert "type:'scatter'" in compact
     tags = chart.get_script_tags(as_str=True)
     assert "highcharts-more" in tags  # bubble/radar's module, shared
-    assert "modules/" not in tags  # boxplot has no module of its own
+    assert not _own_modules(tags)  # boxplot has no module of its own
 
 
 def test_boxplot_light_mode_shape():
@@ -3946,8 +4039,8 @@ def test_waterfall_with_no_drawable_steps_appends_no_total():
 
 
 def test_waterfall_labels_each_bar_with_its_delta():
-    # The value is printed IN the bar, as pie/heatmap/treemap/sankey print theirs, so the
-    # Static-PNG mode (which has no hover tooltip) still shows the numbers. This is where
+    # The value is printed IN the bar, as pie/heatmap/treemap/sankey print theirs, so an
+    # exported image (which has no hover tooltip) still shows the numbers. This is where
     # waterfall parts from column/bar, which carry no labels: their bars stand ON the axis,
     # so a height is a value — while a waterfall's bar floats at the running total and
     # encodes its value as a LENGTH, which no axis can be read against.
@@ -4038,7 +4131,7 @@ def test_waterfall_serializes_and_pulls_in_the_more_module():
     assert "inside:true" in compact  # and the in-bar labels
     tags = chart.get_script_tags(as_str=True)
     assert "highcharts-more" in tags  # bubble/radar/boxplot's module, shared
-    assert "modules/" not in tags  # waterfall has no module of its own
+    assert not _own_modules(tags)  # waterfall has no module of its own
 
 
 def test_waterfall_light_mode_shape():
@@ -5013,7 +5106,7 @@ def test_xrange_carries_no_data_labels():
     # either. The five that DO print a value in the mark do it because the value can be read
     # against no axis (an angle, an area, a link's width, a bar floating above an invisible
     # running total). An xrange bar's two ends BOTH land on a real, ticked x axis that renders
-    # in the Static PNG too — column/bar's case. And there is no second identity to print: the
+    # in an exported image too — column/bar's case. And there is no second identity to print: the
     # lane name IS the y-axis category (labelling the bar just repeats it — verified by
     # rendering).
     assert "dataLabels" not in _xr()["plotOptions"]["xrange"]
@@ -5260,12 +5353,12 @@ def test_xrange_light_mode_shape():
 
 
 def test_xrange_dark_mode_dissolves_the_bar_borders():
-    # Xrange joins column/bar here and NOT waterfall — the other bar-shaped type, which needs
-    # the opposite treatment. That was MEASURED, not inferred from the shared bar base class:
-    # waterfall is the standing proof the inference is unsound, its border being a fixed
-    # #333333. Pixel-scanning a dark-mode xrange PNG off the export server puts its default
-    # border at pure #ffffff — the background variable, exactly column/bar's case — so every
-    # bar is ringed white until it is dissolved into the dark background.
+    # Xrange joins column/bar here and NOT waterfall — the other bar-shaped type, which needs the
+    # opposite treatment. That was MEASURED, not inferred from the shared bar base class: waterfall
+    # is the standing proof the inference is unsound, its border being a fixed #333333.
+    # Pixel-scanning a dark-mode xrange PNG off the (since retired) export server put its default
+    # border at pure #ffffff — the background variable, exactly column/bar's case — so every bar is
+    # ringed white until it is dissolved into the dark background.
     opts = _xr()
     assert (
         opts["plotOptions"]["xrange"]["borderColor"] == "#0f172a"
@@ -6209,8 +6302,8 @@ def test_bullet_rejects_the_measure_column_as_the_goal_column():
     # columnrange's low-is-high, a fifth time — and the worst of the five. The other four produce
     # a VISIBLY broken chart (a row of hairlines, a collapsed band); this one produces a PERFECT
     # chart making a FALSE CLAIM: every bar landing exactly on its own crossbar, so the chart
-    # reports that every category hit its target precisely, with no tooltip at all in the Static
-    # PNG to contradict it.
+    # reports that every category hit its target precisely, with no tooltip at all in an exported
+    # image to contradict it.
     with pytest.raises(ValueError, match="cannot also be the goal column"):
         build_options(_bullet_df(), "bullet", "region", ["actual"], goal_col="actual")
 
@@ -6565,7 +6658,7 @@ def test_bullet_tooltip_sanitizes_both_user_column_names():
 
 def test_bullet_prints_nothing_in_the_mark_and_the_omitted_key_is_the_gate():
     # xrange's rule reached from xrange's premise, exactly as columnrange reached it: a bullet's
-    # bar stands on a real, ticked, gridlined y axis that renders in the Static PNG too
+    # bar stands on a real, ticked, gridlined y axis that renders in an exported image too
     # (column/bar's case, not waterfall's bar floating above an invisible running total); its goal
     # is DRAWN on that same axis rather than printed; and the only other identity, the category
     # name, is already on the X axis. So there is nothing to print and no gate constant to tune.
@@ -7018,9 +7111,8 @@ def test_variwide_resolves_its_own_module_and_not_highcharts_more():
     """`modules/variwide` from `chart.type` alone, and NOT `highcharts-more` — the plausible guess
     the round trip corrects, as it does for columnrange, funnel and bullet. Dropping the module is
     a SILENT blank: verified by stripping the tag, the browser renders an SVG with zero series
-    paths, no Highcharts error band and no console error, while the export server rasterizes the
-    PNG perfectly — the solidgauge-pane trap, and the class of bug the two-render-modes rule
-    exists to close.
+    paths, no Highcharts error band and no console error (and the since-retired export server
+    rasterized the PNG perfectly, which is how it hid) — the solidgauge-pane trap.
 
     Note the chart must carry a SERIES: resolution is by the series' effective type, and an
     options tree with `chart.type` and no series emits only `highcharts.js`, so a test omitting it
@@ -7336,7 +7428,7 @@ def test_dumbbell_tooltip_sanitizes_user_column_names():
 def test_dumbbell_prints_nothing_in_the_mark():
     """xrange's rule reached from xrange's OWN premise, unlike variwide where that premise is
     false: BOTH of a dumbbell's numbers land on a real, ticked, gridlined y axis that renders in
-    the Static PNG too, and the only other identity — the category name — is already on the X
+    an exported image too, and the only other identity — the category name — is already on the X
     axis. A dumbbell's dataLabels default OFF (column/bar's behaviour, not a gauge's), so the
     OMITTED key is the gate.
     """
@@ -7813,9 +7905,9 @@ def test_timeline_draws_its_events_in_date_order_whatever_the_row_order():
 def test_timeline_pulls_in_its_own_module():
     """Every module-requiring type pins its script tag, and timeline shipped without one.
 
-    Nothing else can see this: `build_options` validates, `to_js_literal` serializes, and the
-    export server renders the PNG PERFECTLY — it is handed the options, never these tags. Only
-    the iframe fails, with Highcharts error #17 ("requested series type does not exist") on a
+    Nothing else can see this: `build_options` validates and `to_js_literal` serializes (and the
+    since-retired export server rendered the PNG PERFECTLY — it was handed the options, never
+    these tags). Only the iframe fails, with Highcharts error #17 ("requested series type does not exist") on a
     blank page. That is the interactive-only divergence this file pins for heatmap, treemap,
     funnel, sankey, dependencywheel, networkgraph, organization, sunburst, xrange, bullet,
     variwide, dumbbell and solidgauge, and timeline was the one module type without it. (The
@@ -8296,8 +8388,8 @@ def test_gauge_pane_pulls_in_highcharts_more_without_which_the_chart_is_blank(
     # when the options tree carries a `pane` key — not for the series type, not for
     # plotOptions.solidgauge, not for a series radius — and a solid gauge WITHOUT
     # highcharts-more draws an EMPTY SVG in the browser: zero series paths, no error band, no
-    # Python-side error. The export server rasterizes it regardless, so dropping the pane would
-    # make the two render modes silently DISAGREE.
+    # Python-side error — and so a blank download. (The since-retired export server rasterized
+    # it regardless, which is how it hid.)
     chart = make_chart(bookings_frame, "solidgauge", None, ["north"])
     tags = " ".join(chart.get_script_tags())
     assert "highcharts-more.js" in tags
@@ -8360,8 +8452,8 @@ def test_gauge_labels_stack_in_the_hub_in_each_rings_own_hue(bookings_frame):
     # the <text> and turning it INVISIBLE — the element stays in the DOM, so every assertion
     # about it still passes while a ring's value is simply absent from the chart.
     assert shared["allowOverlap"] is True
-    # `useHTML` is pinned False: the export server silently drops HTML labels, so the iframe and
-    # the PNG would disagree.
+    # `useHTML` is pinned False: the retired export server silently dropped HTML labels, and the
+    # label stays in the SVG the browser's export copies.
     assert shared["useHTML"] is False
 
 
@@ -8388,8 +8480,8 @@ def test_gauge_tooltip_names_the_series_not_the_point_or_the_category(bookings_f
 
 
 def test_gauge_subtitle_states_the_aggregation_and_the_dial(bookings_frame):
-    # The scale is INVISIBLE on the chart (a 360° gauge has nowhere to put an axis) and the
-    # Static PNG has no tooltip, so without this a downloaded gauge cannot be decoded at all:
+    # The scale is INVISIBLE on the chart (a 360° gauge has nowhere to put an axis) and the an
+    # exported image has no tooltip, so without this a downloaded gauge cannot be decoded at all:
     # "436" means nothing until you know it is a sum of eight weeks against a 500 target.
     opts = _gauge(bookings_frame, ["north"], agg="sum")
     assert opts["subtitle"]["text"] == "sum · dial 0 – 500"
@@ -8657,8 +8749,8 @@ def test_needle_pivot_is_one_neutral_colour_not_one_per_series(bookings_frame):
 def test_needle_resolves_highcharts_more_from_the_chart_type_alone(bookings_frame):
     # The family's sharpest INVERSION, and the reason solidgauge's pane comment must not be
     # copied here. A solid gauge resolves highcharts-more ONLY from its `pane` — drop that key and
-    # the browser draws an empty SVG while the export server renders perfectly. A needle resolves
-    # it from `chart.type`, so its pane is geometry and nothing hangs on it.
+    # the browser draws an empty SVG (the retired export server rendered it perfectly). A needle
+    # resolves it from `chart.type`, so its pane is geometry and nothing hangs on it.
     chart = make_chart(bookings_frame, "gauge", None, ["north"])
     assert "highcharts-more" in chart.get_required_modules()
     # ...and it does so with the pane taken away entirely — which is what "from the type alone"
@@ -8742,9 +8834,9 @@ def test_needle_subtitle_states_only_the_aggregation(bookings_frame):
 def test_needle_prints_nothing_in_the_mark_and_says_so_EXPLICITLY(count):
     # The sibling MUST print its readings in the hub — a 360° ring has nowhere to put an axis, so
     # the value can be read against nothing, and it pays for that with a gate, a measured leading
-    # and a per-series offset. A needle points AT an axis that renders in the Static PNG too, and
-    # its identity is in the legend it carries anyway. So it prints NOTHING in the mark and needs
-    # no gate constant either: xrange's rule, reached from xrange's premise.
+    # and a per-series offset. A needle points AT an axis that renders in an exported image too,
+    # and its identity is in the legend it carries anyway. So it prints NOTHING in the mark and
+    # needs no gate constant either: xrange's rule, reached from xrange's premise.
     #
     # DISABLED EXPLICITLY, which is the whole reason the key is here: a gauge's dataLabels default
     # to ON (unlike heatmap's and column's), so merely omitting it would print Highcharts' own
@@ -8767,7 +8859,7 @@ def test_needle_off_the_dial_swings_past_the_scale_instead_of_lying_on_it(
     # DERIVES, but the app's two Dial inputs accept any two numbers. Zoom the scale to 0..50 on a
     # column that sums to 436 and — left to Highcharts — the needle pegs EXACTLY ON the final tick,
     # pixel-identical to a true reading of 50 (verified by rendering). Nothing on the chart
-    # contradicts it, and the Static PNG has no tooltip.
+    # contradicts it, and an exported image has no tooltip.
     #
     # It is also the ONE place the two gauges would disagree: a solid gauge in the same state fills
     # its arc and PRINTS "north: 436" in the hub, so its reader is told. A needle prints nothing in
@@ -8866,11 +8958,11 @@ def test_gauge_reading_label_is_honest_and_length_bounded_at_every_magnitude():
 
 
 def test_needle_tooltip_names_the_series_not_the_point(bookings_frame):
-    # A gauge series holds exactly ONE point, so the mark's identity is not on the point at all.
-    # It IS the series. (`{point.name}` renders blank; `{point.category}` reads an axis that has
-    # no categories.) The tooltip is PER NEEDLE (the reading is baked in Python) and is the only
-    # place the exact reading survives, now that nothing is printed in the mark — the one thing
-    # interactive mode has that the Static PNG does not, a real cost of axis-instead-of-labels.
+    # A gauge series holds exactly ONE point, so the mark's identity is not on the point at all. It
+    # IS the series. (`{point.name}` renders blank; `{point.category}` reads an axis that has no
+    # categories.) The tooltip is PER NEEDLE (the reading is baked in Python) and is the only place
+    # the exact reading survives, now that nothing is printed in the mark — the one thing the
+    # interactive chart has that an exported image does not, a real cost of axis-instead-of-labels.
     (needle,) = _needles(_needle(bookings_frame, ["north"], agg="sum"))
     assert needle["tooltip"]["pointFormat"] == "{series.name}: <b>436</b>"
     # ...and there is no chart-wide tooltip pointFormat left to drift from the per-series one.
@@ -8964,82 +9056,6 @@ def test_server_utilization_sample_builds_a_needle_gauge():
     # ...and the three live readings SPREAD, which is what a needle gauge is for.
     live = [_needle_reading(n) for n in needles[:3]]
     assert max(live) - min(live) > 15
-
-
-# --------------------------------------------------------------------------- #
-# Static-PNG failure messages (the export server's three different answers)
-# --------------------------------------------------------------------------- #
-class _FakeResponse:
-    def __init__(self, status_code: int):
-        self.status_code = status_code
-
-
-class _FakeRequestError(OSError):
-    """Stands in for a ``requests`` exception: they all subclass ``OSError`` and carry a
-    ``response`` (``None`` when no HTTP answer ever arrived). Faked rather than imported,
-    for the same reason the helper doesn't import requests — and so these tests need no
-    network."""
-
-    def __init__(self, status_code: int | None = None):
-        super().__init__("boom")
-        self.response = _FakeResponse(status_code) if status_code else None
-
-
-def test_export_failure_explains_a_build_error_without_blaming_the_network():
-    # `except Exception` also catches a ValueError raised by build_options before any
-    # request is made. Telling that user to check their network sends them somewhere the
-    # bug isn't. Non-OSError == it never left the process.
-    from highcharts_builder import explain_export_failure
-
-    message = explain_export_failure(ValueError("At least one y column is required."))
-    assert "could not be built" in message
-    assert "not with your network" in message
-    assert "export server" in message  # names what it did NOT reach
-
-
-def test_export_failure_explains_an_unreachable_server():
-    from highcharts_builder import explain_export_failure
-
-    message = explain_export_failure(_FakeRequestError())  # no HTTP response at all
-    assert "could not be reached" in message
-    assert "Check your network" in message
-
-
-@pytest.mark.parametrize("status", [400, 413, 422])
-def test_export_failure_explains_a_rejected_chart(status):
-    # The case that most needs saying out loud: the server answered, so it is plainly
-    # reachable, and the fault is in the payload we sent it.
-    from highcharts_builder import explain_export_failure
-
-    message = explain_export_failure(_FakeRequestError(status))
-    assert f"HTTP {status}" in message
-    assert "rejected this chart" in message
-    assert "not at your network" in message
-    assert "check your network" not in message.lower()  # the old, wrong advice
-
-
-@pytest.mark.parametrize("status", [500, 502, 503])
-def test_export_failure_explains_a_server_side_error(status):
-    from highcharts_builder import explain_export_failure
-
-    message = explain_export_failure(_FakeRequestError(status))
-    assert f"HTTP {status}" in message
-    assert "internal error" in message
-    assert "rejected" not in message
-
-
-def test_app_static_png_error_uses_the_export_failure_explainer():
-    # The helper is only worth having if the app calls it, and the AppTest suite stays on
-    # the network-free interactive path, so it can never reach that except block. Pin the
-    # call site by reading the source — the same mechanical-sync idea as
-    # test_theme_colors_stay_in_sync_with_config.
-    source = (ROOT / "streamlit_app.py").read_text()
-    assert "explain_export_failure" in source
-    assert "explain_export_failure(exc)" in source
-    # And the old advice, which asserted a cause it could not know, is gone for good.
-    assert (
-        "This usually means the Highcharts export server is unreachable" not in source
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -9396,10 +9412,8 @@ def test_org_headcount_sample_builds_a_sunburst_chart():
 # an ordinal and "the three" is not a uniqueness claim. All of them are addressed by
 # LABEL rather than index, since each shifts the widgets that follow it. The Upload CSV
 # path shifts them again — it has no Dataset selectbox — so a test on that path addresses
-# "Chart type" by label too. Everything in THIS section stays on the network-free
-# interactive path; the one test that selects Static PNG lives in the cache-layer section
-# at the end of the file and swaps the builder out, so it contacts no export server
-# either.
+# "Chart type" by label too. Everything in THIS section is network-free: the app renders an
+# iframe document and never fetches it, and since 0.21.0 there is no export server to reach.
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def app():
@@ -10405,8 +10419,7 @@ def test_app_funnel_family_kpi_shows_stages_from_count_marks(app, chart_type):
 
 
 def test_app_chart_type_selector_offers_every_supported_type(app):
-    # Contract test mirroring test_app_render_mode_selector_offers_the_two_modes:
-    # the chart-type selectbox offers exactly SUPPORTED_TYPES (so a new builder
+    # Contract test: the chart-type selectbox offers exactly SUPPORTED_TYPES (so a new builder
     # type shows up in the UI, and a removed/renamed one fails here) and defaults
     # to the first. Also pins the positional index [1] other app tests rely on.
     selector = app.selectbox[1]
@@ -10595,21 +10608,19 @@ def test_app_upload_csv_with_no_file_shows_info_guard(app):
     assert "Upload a CSV" in app.info[0].value
 
 
-def test_app_render_mode_selector_offers_the_two_modes(app):
-    # After removing the click-events mode, the Render selector offers exactly
-    # two modes and defaults to the interactive one. This pins the two-mode
-    # contract (a re-added or renamed mode fails here) and guards the positional
-    # index [1] the other app tests rely on.
-    mode = app.segmented_control[1]
-    assert mode.label == "Mode"
-    assert list(mode.options) == ["Interactive", "Static PNG"]
-    assert mode.value == "Interactive"
+def test_app_has_no_render_mode_control(app):
+    # Static PNG mode was retired (the export server with it): every chart is drawn in the
+    # browser, and downloads come from the chart's own ☰ menu. So the sidebar's "3 · Render"
+    # section is gone, and the Source control is the ONLY segmented control left. Pinned because
+    # re-adding a mode control is an edit nothing else would object to.
+    assert [sc.label for sc in app.segmented_control] == ["Source"]
+    assert not any("Render" in header.value for header in app.header)
 
 
 def test_app_default_interactive_mode_shows_iframe_caption(app):
-    # The default (Interactive) render shows the iframe (CDN) caption; the
-    # negative check that no click-events caption appears is a light backstop —
-    # the selector-options test above owns the two-mode contract.
+    # The (only) render shows the iframe (CDN) caption, which also points at the chart's ☰
+    # download menu now that the Static PNG path and its download button are gone. The negative
+    # check that no click-events caption appears is a light backstop.
     assert not app.exception
     assert any(
         "Highcharts JS is loaded from the CDN" in cap.value for cap in app.caption
@@ -10618,7 +10629,7 @@ def test_app_default_interactive_mode_shows_iframe_caption(app):
 
 
 def test_app_generated_config_includes_brand_palette(app):
-    # The brand palette reaches the iframe/PNG paths through build_options; the
+    # The brand palette reaches the chart (and so its downloads) through build_options; the
     # generated-config toggle is the visible proof once switched on.
     _reveal_config(app)
     assert not app.exception
@@ -10790,8 +10801,9 @@ def test_app_switch_to_gauge_hides_the_x_control_and_shows_the_dial_controls(
     assert not app.exception
     assert f"type: '{chart_type}'" in app.code[0].value
     # The solid gauge's pane is what resolves highcharts-more — without it the iframe is silently
-    # blank while the PNG renders perfectly. The needle's pane is only geometry (it resolves the
-    # module from chart.type alone), but both emit one, so the assertion holds for the family.
+    # blank (the retired export server's PNG rendered perfectly). The needle's pane is only
+    # geometry (it resolves the module from chart.type alone), but both emit one, so the assertion
+    # holds for the family.
     assert "pane" in app.code[0].value
 
 
@@ -11422,33 +11434,26 @@ def test_app_timeline_kpi_shows_events(app):
 # --------------------------------------------------------------------------- #
 # The app's CACHE LAYER — the wiring, checked without the network
 # --------------------------------------------------------------------------- #
-# The three `@st.cache_data` renderers are the one part of the app the ordinary AppTests
-# barely reach. `cached_chart_html` and `cached_chart_js` are covered INDIRECTLY — every
-# AppTest runs the app, which calls them, so a bad forward there surfaces as a wrong
-# chart — but `cached_chart_png` used to be executed by NOTHING: the AppTests stay on the
-# network-free interactive path, and `test_app_render_mode_selector_offers_the_two_modes`
-# pins that Static PNG is OFFERED without ever selecting it. A slip in that wrapper
-# shipped silently and surfaced only as a wrong Static PNG in production.
-#
-# The gap was never "the export server is untested" — that is a deliberate and correct
-# choice. It is that avoiding the network also un-tested the WIRING, and the two are
-# separable. Both halves are now covered, from opposite directions:
+# The two `@st.cache_data` renderers are the one part of the app the ordinary AppTests
+# barely CHECK. Every AppTest runs `cached_chart_html` and `cached_chart_js`, so a wrapper that
+# raised would surface — but a wrapper that forwarded the WRONG column would not: it renders a
+# plausible chart of the wrong data. Until 0.21.0 there was a third, `cached_chart_png`, that
+# nothing executed at all (the AppTests stayed off the export server), and closing that gap is
+# what produced the two directions below. The PNG path is gone; the directions stay:
 #
 #   - STATICALLY, by the two `ast` tests below, which read the SOURCE rather than
 #     importing the module (importing `streamlit_app` executes the whole Streamlit
 #     script) — `test_packaging.py`'s and `test_theme_colors_stay_in_sync_with_config`'s
 #     mechanical-sync idea applied to argument passing.
-#   - DYNAMICALLY, by `test_app_static_png_mode_executes_the_cached_png_wrapper`, which
-#     selects Static PNG for real with the BUILDER swapped for a recorder. That executes
-#     the wrapper, builds its cache key, and observes the forwarding as VALUES instead of
-#     as AST names — while still contacting no export server.
+#   - DYNAMICALLY, by `test_app_executes_the_cached_html_wrapper_and_forwards_every_kwarg`,
+#     which runs the app with the BUILDER swapped for a recorder, so the forwarding is observed
+#     as VALUES instead of as AST names.
 #
 # What they catch is precisely what the keyword form does NOT prevent: `goal_col=high_col`
 # type-checks, caches and renders, and just draws the wrong column. Ten of these
 # parameters are `str | None`, so nothing else in the toolchain can tell them apart.
 _CACHE_LAYER = {  # cached wrapper -> the builder it must forward to
     "cached_chart_html": "build_chart_html",
-    "cached_chart_png": "build_chart_png",
     "cached_chart_js": "make_chart",
 }
 
@@ -11470,21 +11475,22 @@ def _forwarded_arguments() -> tuple[str, ...]:
     extra-column kwarg added to the builders and to the wrappers but omitted here would
     leave that column unchecked while both tests below kept passing: a test that grows
     blind spots as the code grows is worse than one that fails. Deriving it means adding
-    a kwarg to the three builders extends the check for free, on the day it is added.
+    a kwarg to the builders extends the check for free, on the day it is added.
 
-    The intersection drops each render mode's OWN parameters, which are not
-    interchangeable with anything (`container_id`, `height`, `scale`, `width`,
-    `timeout`). `title` and `dark` survive it and are excluded by name: they are
-    forwarded verbatim inside the wrappers, but the call SITES pass them positionally, so
-    including them would fail the call-site test for a transposition that cannot happen —
-    a `str` title and a `bool` dark are not silently interchangeable with a column name.
+    The intersection drops `build_chart_html`'s own `height`, which `make_chart` lacks.
+    `title` and `dark` survive it and are excluded by name: they are forwarded verbatim
+    inside the wrappers, but the call SITES pass them positionally, so including them would
+    fail the call-site test for a transposition that cannot happen — a `str` title and a
+    `bool` dark are not silently interchangeable with a column name.
+
+    `container_id` survives it too, and is excluded by name for a different reason: it is the
+    one renderer setting both builders share, and the wrappers deliberately do NOT forward it
+    (every chart uses the default container). It used to fall out of the intersection on its
+    own, because the retired `build_chart_png` had no container; with two builders left it
+    has to be named.
     """
-    shared = (
-        _keyword_only(build_chart_html)
-        & _keyword_only(build_chart_png)
-        & _keyword_only(make_chart)
-    )
-    return tuple(sorted(shared - {"title", "dark"}))
+    shared = _keyword_only(build_chart_html) & _keyword_only(make_chart)
+    return tuple(sorted(shared - {"title", "dark", "container_id"}))
 
 
 # Same-typed, positionally interchangeable, and the whole reason these tests exist. The
@@ -11514,8 +11520,7 @@ def test_app_cached_renderer_forwards_every_column_kwarg_under_its_own_name(
 
     A transposition here is invisible to every other gate: it type-checks (ten of the
     parameters are `str | None`), it caches (the key is the bound arguments, which are
-    still distinct), and it renders — it just draws the wrong column. For
-    `cached_chart_png` nothing else in the suite would notice at all.
+    still distinct), and it renders — it just draws the wrong column.
     """
     fn = _app_functions()[wrapper]
     call = next(
@@ -11572,8 +11577,8 @@ def test_app_calls_its_cached_renderers_with_named_column_arguments():
 def test_forwarded_arguments_derivation_is_not_vacuous():
     """The derivation must not silently collapse — an empty tuple passes both tests below.
 
-    `_FORWARDED` is computed from three signatures, so a refactor that made the column
-    kwargs positional, or renamed one in only two of the three builders, would shrink the
+    `_FORWARDED` is computed from the builders' signatures, so a refactor that made the column
+    kwargs positional, or renamed one in only one of the builders, would shrink the
     intersection instead of raising. Both tests below loop over it, so a shrunk tuple
     checks less and stays GREEN — the vacuous pass this project treats as worse than no
     test at all.
@@ -11597,15 +11602,6 @@ def test_forwarded_arguments_derivation_is_not_vacuous():
         assert name in _FORWARDED
 
 
-# A real 1x1 PNG: `st.image` decodes its bytes through PIL, so a `b"not-a-png"` stand-in
-# fails the render rather than the assertion, blaming the test for the app's behaviour.
-_ONE_PIXEL_PNG = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xff\xff?"
-    b"\x00\x05\xfe\x02\xfe\r\xefF\xb8\x00\x00\x00\x00IEND\xaeB`\x82"
-)
-
-
 @pytest.fixture
 def cleared_chart_caches():
     """Clear the `@st.cache_data` caches around a test that installs a STAND-IN builder.
@@ -11614,9 +11610,8 @@ def cleared_chart_caches():
     protects this test from a cached real render, but leaves its fake behind for everyone
     else. `monkeypatch` restores the patched FUNCTION at teardown; it knows nothing about
     the cached VALUE that function produced, which stays keyed by the real arguments for
-    the rest of the session. A later test rendering Static PNG with those same arguments
-    would be handed the 1x1 stand-in, call no builder, contact no network, and PASS —
-    vacuously, and in the one section of this file whose whole subject is coverage that
+    the rest of the session. A later test rendering with those same arguments would be
+    handed the stand-in page, call no builder, and PASS — vacuously, and in the one section of this file whose whole subject is coverage that
     silently isn't there.
 
     Applies to the `load_csv` cache too, since `st.cache_data.clear()` is global; that is
@@ -11631,76 +11626,45 @@ def cleared_chart_caches():
 
 
 @pytest.mark.usefixtures("cleared_chart_caches")
-def test_app_static_png_mode_executes_the_cached_png_wrapper(app, monkeypatch):
-    """Run the Static PNG path for real, with the builder swapped for a recorder.
+def test_app_executes_the_cached_html_wrapper_and_forwards_every_kwarg(
+    app, monkeypatch
+):
+    """Run the app with `build_chart_html` swapped for a recorder.
 
-    The `ast` tests above read the source; this one EXECUTES `cached_chart_png` — the
-    wrapper nothing else in the suite runs — so its forwarding is observed as values
-    rather than as AST names, and a wrapper that raised or failed to hash its arguments
-    would fail here rather than in production.
+    The `ast` tests above read the source; this one EXECUTES `cached_chart_html`, so its
+    forwarding is observed as values rather than as AST names, and a wrapper that raised or
+    failed to hash its arguments fails here. (It took over from the Static PNG test of the same
+    shape when that path was retired: the dynamic direction belongs to whichever renderer the
+    app has, not to the PNG.)
 
-    The patch targets `highcharts_builder.build_chart_png` (the module attribute), not the
-    app's own binding: `streamlit_app` does `from highcharts_builder import ...`, and
-    AppTest re-executes the whole script on every `run()`, so the from-import re-reads the
-    patched attribute each time. Patching by string keeps the module out of this file's
-    imports. No export server is contacted, so the suite stays network-free.
-
-    Takes the shared `app` fixture like every other control-switching test here rather
-    than building its own AppTest. The fixture's initial `.run()` renders the INTERACTIVE
-    mode, which never calls `build_chart_png` — so patching in the body, before the
-    `.run()` that switches to Static PNG, still covers every call the builder receives.
-
-    The `cleared_chart_caches` fixture empties the renderer caches on BOTH sides: a hit on
-    the way in would skip the recorder and read as "the app never called the builder", and
-    an entry left on the way out would hand this test's stand-in PNG to the next one.
+    The patch targets `highcharts_builder.build_chart_html` (the module attribute), not the
+    app's own binding: `streamlit_app` does `from highcharts_builder import ...`, and AppTest
+    re-executes the whole script on every `run()`, so the from-import re-reads the patched
+    attribute each time. The `app` fixture's first run has already cached a REAL render under
+    the landing arguments, so the caches are cleared again after patching; otherwise that hit
+    would skip the recorder and read as "the app never called the builder".
     """
+    import streamlit as st
+
     seen: dict[str, object] = {}
 
     # The four leading arguments are passed POSITIONALLY by the wrapper, so they are
     # accepted and ignored here; only the keyword tail is what this test observes.
     def _recorder(_df, _chart_type, _x_col, _y_cols, **kwargs):
         seen.update(kwargs)
-        return _ONE_PIXEL_PNG
+        return "<!DOCTYPE html><html><body>recorded</body></html>"
 
-    monkeypatch.setattr("highcharts_builder.build_chart_png", _recorder)
-
-    app.segmented_control[1].set_value("Static PNG").run()  # Render mode -> Static PNG
+    monkeypatch.setattr("highcharts_builder.build_chart_html", _recorder)
+    st.cache_data.clear()
+    app.run()
 
     assert not app.exception
-    assert seen, "selecting Static PNG did not reach build_chart_png"
+    assert seen, "rendering the chart did not reach build_chart_html"
     missing = [name for name in _FORWARDED if name not in seen]
     assert not missing, (
-        f"cached_chart_png did not forward {missing} to build_chart_png — the Static PNG "
-        f"path would silently ignore those columns"
+        f"cached_chart_html did not forward {missing} to build_chart_html — the chart would "
+        f"silently ignore those columns"
     )
-    # The bytes reached the PAGE, not merely the wrapper's return. `st.image` decodes
-    # through PIL, so a rendered `image` element is itself proof that valid image bytes
-    # arrived — a truncated or corrupted payload raises "cannot identify image file" and
-    # surfaces as `app.exception` above. (That is not hypothetical: this test was first
-    # written with a `b"not-a-png"` stand-in and failed exactly that way, which is why
-    # `_ONE_PIXEL_PNG` is a real PNG.) The caption alone would prove nothing — the Static
-    # PNG branch emits it unconditionally, before and regardless of what st.image got.
-    #
-    # Byte-EQUALITY is deliberately NOT asserted: Streamlit serves both sinks as media
-    # URLs whose hash is salted with filename and mimetype rather than being a digest of
-    # the content, and `st.image` re-encodes to .jpg besides — so matching bytes would
-    # mean reaching into private media-manager API for no guarantee this does not give.
-    #
-    # `app.image`, not `app.get("imgs")`: Streamlit 1.59.0 gave `st.image` a first-class
-    # AppTest node (`testing.v1.element_tree.Image`, and the `.image` accessor with it),
-    # and that node reports `type == "image"` where the untyped element it replaced
-    # reported the PROTO field name, `imgs`. The proto still spells it `imgs` — only the
-    # harness's name for it moved — so the old lookup did not raise on the 1.58 -> 1.62
-    # bump, it silently returned an EMPTY list, and this assertion is what caught it. A
-    # lookup keyed on element TYPE is the one thing this file's find-by-LABEL convention
-    # cannot protect: a renamed label fails loudly at `.set_value`, a renamed type reads
-    # as "the element is not there".
-    assert len(app.image) == 1, "the PNG never reached st.image"
-    downloads = app.get("download_button")
-    assert len(downloads) == 1 and downloads[0].proto.url.endswith(".png"), (
-        "the Static PNG branch did not offer its bytes as a .png download"
-    )
-    assert any("export server" in caption.value for caption in app.caption)
 
 
 # --------------------------------------------------------------------------- #
