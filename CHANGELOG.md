@@ -33,6 +33,18 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.20.4] - 2026-10-07
+
+A test-only change, so a patch.
+
+### Added
+
+- **The runtime dependency set is pinned.** `test_runtime_dependencies_are_exactly_the_pinned_set`
+  asserts `pyproject.toml`'s runtime `dependencies` are exactly `highcharts-core`, `pandas` and
+  `streamlit`, by name, so a new runtime package (or a dropped or duplicated one) fails the suite
+  until the pinned list is edited on purpose. The version floors and the `dev` group are
+  deliberately left out. This makes the plan's "no new runtime dependencies" rule mechanical.
+
 ## [0.20.3] - 2026-10-07
 
 A fix with no new capability, so a patch.

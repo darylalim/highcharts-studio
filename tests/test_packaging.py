@@ -25,7 +25,10 @@ lives can't silently drift apart:
   ``[project].version``, which until it had a changelog was the one packaging
   fact with *no second home*: the badges pin the version *floors*, the SPDX
   fields pin ``LICENSE``/``NOTICE``, but ``version`` itself was asserted by
-  nothing, so nothing could catch a release that shipped without its notes.
+  nothing, so nothing could catch a release that shipped without its notes,
+- the ``pyproject.toml`` runtime ``dependencies`` — pinned by NAME to the three
+  the app is built from, so a new runtime package is a deliberate edit to a test
+  rather than something that slips in with a feature.
 
 They read the files directly (no build step), mirroring the mechanical-sync
 idea behind ``test_theme_colors_stay_in_sync_with_config`` in
@@ -276,4 +279,29 @@ def test_changelog_documents_the_current_version():
         f"CHANGELOG.md's newest entry is {versions[0]}, but pyproject.toml "
         f"declares version {version} — one of the two was bumped and the other "
         f"was not."
+    )
+
+
+# The runtime set, by name. Exactly these three: Streamlit already brings pandas, numpy and
+# pyarrow, highcharts-core adds three packages of its own, and every planned feature is built
+# from the standard library or what these ship. Adding a fourth is allowed, but it is a
+# decision, and this is where it gets made.
+_RUNTIME_DEPENDENCIES = ["highcharts-core", "pandas", "streamlit"]
+
+
+def test_runtime_dependencies_are_exactly_the_pinned_set():
+    # The plan's "no new runtime dependencies" rule, made mechanical. Names only: the version
+    # floors are explained in pyproject.toml's own comments and move with every upgrade, so
+    # pinning them here would only make each upgrade edit two places. The `dev` group is
+    # deliberately NOT pinned: pytest, ruff, ty and watchdog never ship to users.
+    #
+    # Compared as a sorted LIST, not a set, so a duplicated entry (the same package listed
+    # twice with different floors) fails too rather than collapsing into one.
+    names = sorted(_req_name(d) for d in _project_metadata()["dependencies"])
+    assert names == _RUNTIME_DEPENDENCIES, (
+        f"pyproject.toml's runtime dependencies are {names}, but the pinned set is "
+        f"{_RUNTIME_DEPENDENCIES}. Changing the runtime set is a decision, not a side "
+        f'effect: see docs/plan.md#direction-a-lightweight-chart-editor ("No new runtime '
+        f'dependencies"), and if the change is still wanted, update _RUNTIME_DEPENDENCIES '
+        f"here in the same commit."
     )

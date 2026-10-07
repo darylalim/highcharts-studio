@@ -142,7 +142,10 @@ dependencies are unauthenticated CDNs — `code.highcharts.com` (interactive) an
   proprietary layers kept in sync with the README's `## License` section), the README's
   header badges and `## Contents` table of contents, and `CHANGELOG.md`'s newest entry
   pinned to `pyproject.toml`'s `version` — the guard that closed the suite's own
-  [blind spot](docs/decisions.md#packaging-the-fact-with-no-second-home). Reads the files
+  [blind spot](docs/decisions.md#packaging-the-fact-with-no-second-home) — and the runtime
+  `dependencies` pinned **by name** to `highcharts-core`, `pandas` and `streamlit`, so a new
+  runtime package fails the suite until `_RUNTIME_DEPENDENCIES` is edited on purpose (the
+  `dev` group and the version floors are deliberately not pinned). Reads the files
   directly, no build step.
 - `.streamlit/config.toml` — project Streamlit theme: **Studio Slate**, the bundled
   financial-dashboard template's chrome and typography kept, its categorical scale
