@@ -33,6 +33,18 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.20.6] - 2026-10-07
+
+A label and docstring change with no new capability, so a patch.
+
+### Changed
+
+- **The two samples with real names now say when their figures are from.** *Company market
+  cap, ~2024 (treemap)* matches market caps of about October 2024, and *Country economics,
+  ~2023 (bubble)* is a 2022–23 mix of GDP per capita, life expectancy and population. Both
+  docstrings say the figures are illustrative. Once a chart can be copied onto another page,
+  its numbers travel with it, and undated they would read as current.
+
 ## [0.20.5] - 2026-10-07
 
 No chart changes (the pinned release is the one already in use), so a patch.
