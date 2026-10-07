@@ -8,14 +8,17 @@
 [Lint & format](#lint--format) · [Type check](#type-check) ·
 [Release](#release) · [Hooks](#hooks) · [Conventions](#conventions)
 
-Three docs, three jobs. **This file** carries the commands, the file map, and the rules
+Four docs, four jobs. **This file** carries the commands, the file map, and the rules
 that apply to every type at once. [`docs/chart-types.md`](docs/chart-types.md) carries the
 per-type design record — why each type is built the way it is, what the library silently
 drops, and which calls were settled by rendering; it is long, so read the section you need
 ([How a chart is built](docs/chart-types.md#how-a-chart-is-built) plus the entry for the
 nearest existing type) rather than the whole file.
 [`docs/decisions.md`](docs/decisions.md) carries the argument and the incident behind
-rules stated tersely here.
+rules stated tersely here. [`docs/plan.md`](docs/plan.md) carries what is **not built
+yet** — the feature backlog, one entry per feature with its status. It states intentions,
+not facts the code must match, so a finished entry's reasoning moves into the docs above and
+the entry shrinks to a pointer.
 
 ## Project Overview
 
@@ -190,6 +193,9 @@ dependencies are unauthenticated CDNs — `code.highcharts.com` (interactive) an
   why the file says so.
 - `docs/chart-types.md` — the per-type design record. See [Chart types](#chart-types).
 - `docs/decisions.md` — the argument and the incident behind rules stated tersely here.
+- `docs/plan.md` — the feature backlog and its direction (`idea` → `planned` → `in progress`
+  → `done`, or `deferred`/`dropped` with the reason kept).
+  Intentions only; nothing in it is a fact the code must match.
 
 ## Chart types
 
