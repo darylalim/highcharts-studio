@@ -96,14 +96,15 @@ In build order. Numbers are stable IDs, not priorities.
 |---|---|---|---|---|
 | 1st | 20 | [Escape `</script>` in the chart's JS](#20-escape-script-in-the-charts-js) | S | planned |
 | 2nd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
-| 3rd | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
-| 4th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
-| 5th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
-| 6th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
-| 7th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
-| 8th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
-| 9th | 2 | [Export as Python](#2-export-as-python) | S | planned |
-| 10th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
+| 3rd | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | planned |
+| 4th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
+| 5th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
+| 6th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
+| 7th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
+| 8th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
+| 9th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
+| 10th | 2 | [Export as Python](#2-export-as-python) | S | planned |
+| 11th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
@@ -206,6 +207,35 @@ In build order. Numbers are stable IDs, not priorities.
 - **Shipping:** removes public API (`build_chart_png`, `explain_export_failure`), so its
   changelog section has a **Removed** heading naming both (see Shipping in the Legend).
 - **Size:** S–M (mostly deletion, plus a render check) · **Status:** planned
+
+### 21. Pin the Highcharts JS version
+
+- **What & why:** Every script URL is unversioned
+  (`https://code.highcharts.com/highcharts.js`, checked 2026-10-07), so the app always loads
+  the latest Highcharts release. The Python side is pinned and CI-tested; the JS that draws
+  every chart is not, and a new major can change the drawing with no code change here
+  (Highcharts 13's `light-dark()` defaults already did once, which is why the app pins
+  `color-scheme`). Decided with #15: one exact version for the **app and the exports**, so
+  what the app shows is what a snippet embeds, and an embedded chart cannot change under
+  someone's page.
+- **Design:** one constant (e.g. `HIGHCHARTS_JS_VERSION`) in `highcharts_builder.py`, and
+  every CDN URL rewritten to `https://code.highcharts.com/<version>/…` where the script tags
+  are already post-processed (`_order_script_tags`), so every module (`highcharts-more`,
+  `modules/sankey` and the rest) gets the same version. Upgrading becomes a deliberate change:
+  bump the constant, render-check, ship, like a Python dependency upgrade.
+- **Why before #13 and #15:** both add CDN modules (`exporting`, `offline-exporting`,
+  `accessibility`); landing the pin first means they are versioned from the start.
+- **Touches:** `highcharts_builder.py`, tests, `CLAUDE.md` (the Run section's CDN note and
+  the "Never rely on a Highcharts default" convention, which this strengthens), `README.md`'s
+  network note.
+- **Tests:** every `<script src>` in `build_chart_html`'s output, for every supported type,
+  carries the pinned version (a sweep). Verify by breaking it: remove the rewrite and confirm
+  the sweep fails.
+- **Open questions:** Which version? The one the app renders with on the day this is built,
+  confirmed by a render check of the Tier 1 types in both browser colour schemes. Does the
+  CDN serve a versioned path for every module the app uses? Check each URL resolves before
+  shipping.
+- **Size:** S · **Status:** planned
 
 ### 19. Date the real-world samples
 
@@ -443,22 +473,21 @@ Settled on 2026-10-07:
   sets your own to match an existing `<div>`. Two *identical* charts on one page would share
   an id, which is the case the override is for.
 
-Still open:
-
-- **CDN version.** The app loads `https://code.highcharts.com/highcharts.js`, with no
-  version in the URL, so it always gets the latest release (checked 2026-10-07). That is
-  tolerable inside the app, which is redeployed with its tests, but a pasted snippet stays on
-  someone else's page indefinitely, and a new major can change how it looks (Highcharts 13's
-  `light-dark()` defaults already did once). Pin a version in the export URLs
-  (`code.highcharts.com/<version>/…`)? Which one, and the app's own URLs too?
-- **Background colour.** Every chart is drawn on `#0f172a` (dark), because 0.18.0 made dark
-  the only theme. Most host pages are light. Export dark as-is, add an export-only light
-  theme (partly reversing [the light-mode removal](decisions.md#light-mode-and-its-removal)),
-  or export a transparent background?
-- **Accessibility module.** Highcharts recommends `modules/accessibility` (screen-reader
-  support) for public pages and warns in the console without it. Include it in embeds, at
-  the cost of one more module per snippet?
-- **Size warning threshold.** At what size does the Export panel warn?
+- **CDN version: pinned, in the app and the exports alike**, by
+  [#21](#21-pin-the-highcharts-js-version). What the app shows is then exactly what a
+  snippet embeds, and a pasted snippet cannot change when Highcharts releases a new major.
+- **Background: dark, as the app shows it.** A dark chart reads as a self-contained card on
+  a light page, and the "one mode" rule and its palette tests stay as they are. Rejected: a
+  light export theme (it partly reverses
+  [the light-mode removal](decisions.md#light-mode-and-its-removal) and needs a second set of
+  chrome colours that pass the colour-blindness tests), a user toggle (that, plus a control),
+  and a transparent background (the chart's light text would be unreadable on a light page).
+- **Accessibility module: in embeds only.** Snippets load `modules/accessibility`, through
+  the same per-module check as every other module; the app's own preview does not. Embeds
+  are where charts reach the public, and without the module Highcharts logs a warning in
+  the host page's console.
+- **Size warning at 1 MB** of export text. Well past every sample, and around where a pasted
+  snippet starts to slow a page or hit a CMS field limit.
 
 ### 2. Export as Python
 
