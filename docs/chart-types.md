@@ -1884,7 +1884,17 @@ not merely the format string that used to hide the absurd number.
 ## The sample datasets
 
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
-  `SAMPLES` registry the app offers when no CSV is uploaded. The two gauge samples are siblings
+  `SAMPLES` registry the app offers when no CSV is uploaded.
+  `Monthly revenue by channel (stacked column/area)` is the **stackable** sample, and the
+  landing dataset is its mirror: both are multi-series, but its four channels are **parts of
+  one whole** (each month's channels sum to its revenue), while cost is not a part of revenue,
+  so stacking the landing dataset draws a total that measures nothing. It is shaped so both
+  stacked readings say something: the total climbs to a December peak, and the mix shifts under
+  it (online and partner grow, wholesale stays flat, so its share falls from 23% to 16%). Every
+  value is positive, since a negative part would stack below the axis and stop being a share.
+  Its label names no single type on purpose: `_pick_sample` takes the first label containing
+  `(<type>)`, so *(column)* would quietly become every column test's sample. Pinned by
+  `test_revenue_by_channel_sample_is_stackable`. The two gauge samples are siblings
   that exercise the dial from **opposite ends**: `Weekly bookings by region (solidgauge)` is read
   through `sum`, `Server utilization (gauge)` through `mean` (percentages, so the derived dial
   lands on the 0..100 a reader already has in mind — and `sum` on it is nonsense *on purpose*,

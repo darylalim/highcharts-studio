@@ -113,7 +113,10 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
   mirrors the xrange one on the **other** axis, and for the same purpose: both carry dates
   and neither carries a magnitude, but a release plan's rows have EXTENT (two coordinates,
   so the mark is a bar) and a milestone list has none (one, so the mark is a point) — the
-  difference is in the data, not in the drawing. Per-sample rationale:
+  difference is in the data, not in the drawing. The stackable sample (`Monthly revenue by
+  channel`) mirrors the landing dataset the same way: both are multi-series, but only its
+  series are **parts of one whole**, which is the property that makes a stacked total mean
+  something. Per-sample rationale:
   [`docs/chart-types.md`](docs/chart-types.md#the-sample-datasets).
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data and edge
   cases, the validation guards, and an end-to-end pass driving every supported type

@@ -9076,6 +9076,42 @@ def test_sample_datasets_are_plottable_and_fresh():
     assert factory() is not factory()
 
 
+def test_revenue_by_channel_sample_is_stackable():
+    # The stackable sample exists for plan #5's stacking control, and what makes stacking HONEST
+    # is that the series are parts of one whole. So pin the properties the docstring claims
+    # rather than the numbers: four positive parts over twelve months, a total that climbs to a
+    # December peak, and a mix that shifts under it — the two readings (stacked = the total,
+    # percent-stacked = the shares) each have something to show.
+    from sample_data import SAMPLES, _revenue_by_channel
+
+    df = _revenue_by_channel()
+    parts = ["online", "retail", "wholesale", "partner"]
+    assert list(df.columns) == ["month", *parts]  # leads with its category column
+    assert len(df) == 12
+    assert (df[parts] > 0).all().all()  # a negative part would stack below the axis
+    total = df[parts].sum(axis=1)
+    assert total.idxmax() == len(df) - 1  # the Q4 peak lands in December
+    share = df[parts].div(total, axis=0)
+    assert (
+        share["wholesale"].iloc[-1] < share["wholesale"].iloc[0]
+    )  # flat sales, shrinking share
+    for growing in ("online", "partner"):
+        assert share[growing].iloc[-1] > share[growing].iloc[0]
+
+    # It draws as a multi-series column and area chart today (stacking arrives with #5).
+    for chart_type in ("column", "area"):
+        opts = build_options(df, chart_type, "month", parts)
+        assert [series["name"] for series in opts["series"]] == parts
+        assert opts["xAxis"]["categories"][0] == "Jan"
+
+    # Its label must not capture another type's tests: `_pick_sample` takes the FIRST label
+    # containing `(<type>)`, so this one must contain none.
+    label = next(
+        key for key, factory in SAMPLES.items() if factory is _revenue_by_channel
+    )
+    assert not [t for t in SUPPORTED_TYPES if f"({t})" in label], label
+
+
 def test_daily_temperature_sample_builds_an_areaspline_chart():
     # The areaspline sample is wired to its intended type: plot the real sample
     # as an areaspline and pin the shape it produces (24 hourly categories, one

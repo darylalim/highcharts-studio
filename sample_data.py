@@ -28,6 +28,46 @@ def _fruit_sales() -> pd.DataFrame:
     )
 
 
+def _revenue_by_channel() -> pd.DataFrame:
+    """Monthly revenue split by sales channel, in $ thousands — the STACKABLE sample.
+
+    Its four series are PARTS OF ONE WHOLE: every month's channels sum to that month's revenue.
+    That is what makes stacking honest. Stacked, the column/area tops trace total revenue;
+    percent-stacked, each band is a channel's share of it. The landing dataset (``revenue`` vs
+    ``cost``) is the mirror and the reason this one exists: it is also multi-series, but cost is
+    not a part of revenue, so its stacked "total" measures nothing.
+
+    Shaped so both readings say something: total revenue climbs to a Q4 peak, while the MIX shifts
+    under it — online and partner grow steadily, wholesale stays flat, so its share shrinks. Twelve
+    months, all values positive (a negative part would stack below the axis and stop being a
+    share). Leads with its category column (``month``), per the first-column rule. Labelled
+    *(stacked column/area)* rather than *(column)*: the tests' ``_pick_sample`` takes the first
+    label containing ``"(column)"``, so a single-type label would quietly become every column
+    test's sample."""
+    return pd.DataFrame(
+        {
+            "month": [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ],
+            "online": [42, 44, 47, 50, 53, 55, 58, 61, 65, 70, 78, 90],
+            "retail": [60, 58, 61, 63, 62, 64, 66, 65, 67, 70, 80, 95],
+            "wholesale": [35, 36, 34, 37, 38, 36, 35, 37, 39, 38, 40, 42],
+            "partner": [12, 13, 14, 15, 17, 18, 20, 22, 24, 26, 29, 33],
+        }
+    )
+
+
 def _height_vs_weight() -> pd.DataFrame:
     return pd.DataFrame(
         {
@@ -1096,6 +1136,7 @@ def _reporting_lines() -> pd.DataFrame:
 SAMPLES = {
     "Monthly revenue vs cost (line/area/column)": _revenue_vs_cost,
     "Fruit sales (pie/bar/column)": _fruit_sales,
+    "Monthly revenue by channel (stacked column/area)": _revenue_by_channel,
     "Height vs weight (scatter)": _height_vs_weight,
     "Daily temperature (areaspline)": _daily_temperature,
     "Country economics, ~2023 (bubble)": _country_economics,

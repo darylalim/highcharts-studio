@@ -107,7 +107,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | done (0.20.6) |
 | 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | done (0.21.0) |
 | 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | done (0.21.1) |
-| 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | planned |
+| 8th | 18 | [A stackable sample](#18-a-stackable-sample) | S | done (0.22.0) |
 | 9th | 5 | [Style controls (with the reference line)](#5-style-controls) | M | planned |
 | 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | planned |
 | 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | planned |
@@ -184,28 +184,10 @@ either sample), but the format keeps every label ending in its `(type)` for the 
 
 ### 18. A stackable sample
 
-- **What & why:** #5's main new control is stacking, and no sample can show it honestly.
-  The only multi-series Tier 1 sample is *Monthly revenue vs cost*, and stacking it is
-  **meaningless**: cost is not a part of revenue, so the stacked total measures nothing (and
-  percent stacking is worse). Add a sample whose series **are** parts of a whole, e.g.
-  *Monthly revenue by channel*: a `month` column, then 3–4 channels (online, retail,
-  wholesale, partner) over 12 months. Stacked, it shows the total; percent-stacked, the mix.
-  It is the sample #5 is verified against by rendering, so it comes first.
-- **Touches:** `sample_data.py` (a new factory and `SAMPLES` entry, leading with the
-  category column per the [first-column rule](chart-types.md#the-sample-datasets)), the
-  sample tests, and the sample's rationale in `docs/chart-types.md`.
-- **Constraints:**
-  - **Added alongside the landing dataset, not replacing it.** Many tests read the first
-    sample (`next(iter(SAMPLES.values()))`) and the AppTests expect its `revenue` and `cost`
-    columns.
-  - **Its label must not capture another type's tests.** `_pick_sample` takes the *first*
-    `SAMPLES` key containing `"(column)"`, `"(area)"` and so on, so a label like
-    *(column)* would silently become the sample for every column test. Label it
-    *(stacked column/area)*, which matches no single type.
-- **Decided:** no sample for the log-scale control. Log only helps when values span orders
-  of magnitude, and the widest sample today (*Company market cap*) spans about 9×; rather
-  than a second sample, #5 tests log scale on made-up data.
-- **Size:** S · **Status:** planned
+Done in 0.22.0: *Monthly revenue by channel (stacked column/area)* in `sample_data.py`, four
+channels that sum to each month's revenue, so #5's stacking control has a sample where the
+stacked total means something. Its rationale is in
+[`chart-types.md`](chart-types.md#the-sample-datasets).
 
 ### 5. Style controls
 
