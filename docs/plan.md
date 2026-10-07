@@ -103,7 +103,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 1st | 20 | [Escape `</script>` in the chart's JS](#20-escape-script-in-the-charts-js) | S | done (0.20.2) |
 | 2nd | 22 | [Large datasets (re-scoped: the networkgraph freeze)](#22-large-datasets) | S | done (0.20.3) |
 | 3rd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | done (0.20.4) |
-| 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | planned |
+| 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | done (0.20.5) |
 | 5th | 19 | [Date the real-world samples](#19-date-the-real-world-samples) | S | planned |
 | 6th | 13 | [Client-side export (retire Static PNG mode)](#13-client-side-export) | S–M | planned |
 | 7th | 23 | [Host a public demo on Streamlit Community Cloud](#23-host-a-public-demo-on-streamlit-community-cloud) | S | planned |
@@ -233,40 +233,12 @@ reasoning (names only, the `dev` group left free, a duplicated entry caught too)
 
 ### 21. Pin the Highcharts JS version
 
-- **What & why:** Every script URL is unversioned
-  (`https://code.highcharts.com/highcharts.js`, checked 2026-10-07), so the app always loads
-  the latest Highcharts release. The Python side is pinned and CI-tested; the JS that draws
-  every chart is not, and a new major can change the drawing with no code change here
-  (Highcharts 13's `light-dark()` defaults already did once, which is why the app pins
-  `color-scheme`). Decided with #15: one exact version for the **app and the exports**, so
-  what the app shows is what a snippet embeds, and an embedded chart cannot change under
-  someone's page.
-- **Design:** one constant (e.g. `HIGHCHARTS_JS_VERSION`) in `highcharts_builder.py`, and
-  every CDN URL rewritten to `https://code.highcharts.com/<version>/…` where the script tags
-  are already post-processed (`_order_script_tags`), so every module (`highcharts-more`,
-  `modules/sankey` and the rest) gets the same version. Upgrading becomes a deliberate change:
-  bump the constant, render-check, ship, like a Python dependency upgrade.
-- **Why before #13 and #15:** both add CDN modules (`exporting`, `offline-exporting`,
-  `accessibility`); landing the pin first means they are versioned from the start.
-- **Touches:** `highcharts_builder.py`, tests, `CLAUDE.md` (the Run section's CDN note and
-  the "Never rely on a Highcharts default" convention, which this strengthens), `README.md`'s
-  network note.
-- **Tests:** every `<script src>` in `build_chart_html`'s output, for every supported type,
-  carries the pinned version (a sweep). Verify by breaking it: remove the rewrite and confirm
-  the sweep fails.
-- **Check when building:**
-  - **Which version:** the one the app renders with on the day this is built, confirmed by
-    a render check of the Tier 1 types in both browser colour schemes.
-  - **That every module has a versioned path:** each
-    `code.highcharts.com/<version>/…` URL the app uses (and `exporting`,
-    `offline-exporting`, `accessibility`) must resolve. Check from a **browser**: on
-    2026-10-07 the CDN answered `403` to scripted requests from this machine for every URL,
-    the unversioned `highcharts.js` the app loads today included, so a script cannot settle
-    it. (The `403` is `Missing Referer`: the CDN refuses a request with no `Referer` header.)
-  - **A floor, found by [#22](#22-large-datasets):** pin **11.4.4 or later**. Up to 11.4.3 a
-    series of point objects past `turboThreshold` drew blank, and 11 of the types emit point
-    objects ([why](decisions.md#large-data-the-turbothreshold-bug-that-was-not-there)).
-- **Size:** S · **Status:** planned
+Done in 0.20.5: `HIGHCHARTS_JS_VERSION` (13.1.1, the release already in use) and
+`_pin_script_tags` in `highcharts_builder.py`. For #13 and #15: their new modules (`exporting`,
+`offline-exporting`, `accessibility`) were checked to load at 13.1.1 from a browser, and they
+are pinned automatically, since every script `get_script_tags` emits goes through the rewrite.
+The reasoning and the upgrade procedure:
+[`decisions.md`](decisions.md#highcharts-js-one-pinned-release).
 
 ### 19. Date the real-world samples
 

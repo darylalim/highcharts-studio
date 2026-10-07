@@ -120,7 +120,9 @@ gates locally so edits stay green before a push (see `CLAUDE.md`).
   `Chart` → HTML → `st.iframe` bridge.
 - **Interactive** mode loads Highcharts JS from the CDN
   (`https://code.highcharts.com/`), so the browser needs network access; the
-  iframe has a fixed height (it does not auto-grow).
+  iframe has a fixed height (it does not auto-grow). The release is pinned
+  (`HIGHCHARTS_JS_VERSION` in `highcharts_builder.py`), so a new Highcharts
+  release cannot change a chart until that constant is bumped.
 - **Static** mode needs the running process to reach the Highcharts export server
   (`export.highcharts.com` by default). Self-host one and pass `server_instance`
   to `download_chart` to remove that external dependency.

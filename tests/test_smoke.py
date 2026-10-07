@@ -1275,6 +1275,66 @@ def test_user_text_cannot_close_the_charts_script_element(labeled_frame, chart_t
     )
 
 
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_every_script_loads_the_pinned_highcharts_version(labeled_frame, chart_type):
+    # highcharts-core emits UNVERSIONED CDN URLs, which serve whatever Highcharts released last, so
+    # the JS drawing every chart could change with no change here. `_pin_script_tags` rewrites each
+    # one to HIGHCHARTS_JS_VERSION. Swept over SUPPORTED_TYPES because each type pulls its own
+    # modules (17 distinct URLs across the 30), and a single unpinned module beside a pinned
+    # highcharts.js is a version mix — worse than either alone.
+    from highcharts_builder import _HIGHCHARTS_CDN, HIGHCHARTS_JS_VERSION
+
+    html = build_chart_html(
+        labeled_frame,
+        chart_type,
+        None if chart_type in GAUGE_TYPES else "label",
+        _y_for(chart_type),
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
+        parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
+    )
+    srcs = re.findall(r'<script[^>]*\bsrc="([^"]+)"', html)
+    assert srcs, f"{chart_type}: no script tags at all"
+    pinned = f"{_HIGHCHARTS_CDN}{HIGHCHARTS_JS_VERSION}/"
+    assert all(src.startswith(pinned) for src in srcs), (
+        f"{chart_type}: unpinned script URL(s) {[s for s in srcs if not s.startswith(pinned)]}"
+    )
+
+
+def test_pinned_highcharts_version_is_at_or_above_the_turbo_threshold_floor():
+    # Up to 11.4.3, a series of point OBJECTS past `turboThreshold` (1,000) drew BLANK, and 11 of
+    # the supported types emit point objects. From 11.4.4 such data falls back to the slower path
+    # and draws. So a pin below the floor would silently blank every large pie, sankey, xrange...
+    # at once (docs/decisions.md, "Large data: the turboThreshold bug that was not there").
+    from highcharts_builder import HIGHCHARTS_JS_VERSION
+
+    version = tuple(int(part) for part in HIGHCHARTS_JS_VERSION.split("."))
+    assert len(version) == 3, f"not an exact x.y.z release: {HIGHCHARTS_JS_VERSION}"
+    assert version >= (11, 4, 4)
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "https://cdn.example.com/highcharts.js",  # not the Highcharts CDN at all
+        "https://code.highcharts.com/12.0.0/highcharts.js",  # already pinned to something else
+    ],
+)
+def test_pin_script_tags_refuses_a_url_it_cannot_pin(src):
+    # A URL the rewrite does not recognise would otherwise pass through untouched and load a
+    # different release beside the pinned ones, silently. So it raises instead — which is also what
+    # catches the day highcharts-core changes its URL format.
+    from highcharts_builder import _pin_script_tags
+
+    with pytest.raises(ValueError, match="cannot pin Highcharts"):
+        _pin_script_tags(f'<script src="{src}"></script>')
+
+
 def _relative_luminance(hex_color):
     """WCAG 2.x relative luminance of a #rrggbb string."""
     raw = hex_color.lstrip("#")
