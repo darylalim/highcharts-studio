@@ -64,6 +64,12 @@ only if your use is non-commercial, or once you hold a commercial Highcharts lic
 
 - **Data in** — built-in sample datasets or your own CSV upload. Map columns to
   the chart with compact pills, falling back to `st.multiselect` on wide CSVs.
+- **Style controls** — for the core chart types (line, spline, area, areaspline,
+  column, bar, scatter, bubble, radar): axis titles, legend position or none, data
+  labels, stacking (normal or percent) for column, bar and the area types, a log Y
+  axis, and a dashed reference line at a value you type. A control a type cannot use
+  is hidden, and keeps its value for when you switch back. Log scale is disabled, with
+  the reason, when the Y data has a value of 0 or below, or the chart is stacked.
 - **Interactive charts, downloadable** — Highcharts JS runs from the CDN,
   embedded via `st.iframe`. Each chart's ☰ menu downloads it as PNG, JPEG or SVG,
   drawn in the browser (no export server is contacted).

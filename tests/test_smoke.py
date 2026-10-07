@@ -1412,6 +1412,183 @@ def test_export_menu_and_button_are_themed_dark():
     assert f"fill:{_DARK_CHROME['grid']}" in _EXPORT_BUTTON_CSS
 
 
+# --------------------------------------------------------------------------- #
+# Style controls (plan #5): one ChartStyle, applied after the per-type build
+# --------------------------------------------------------------------------- #
+def _js(options: dict) -> str:
+    """The emitted JS for an options dict, whitespace removed — where style keys must survive."""
+    from highcharts_core.chart import Chart
+
+    return "".join((Chart.from_options(options).to_js_literal() or "").split())
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_default_style_changes_no_chart(labeled_frame, chart_type):
+    # ChartStyle's defaults are the chart as it was before the controls existed, so passing the
+    # default must build IDENTICAL options for every type. This is what let the controls arrive
+    # without touching any existing chart, test or sample.
+    from highcharts_builder import ChartStyle
+
+    def build(style):
+        return build_options(
+            labeled_frame,
+            chart_type,
+            None if chart_type in GAUGE_TYPES else "label",
+            _y_for(chart_type),
+            size_col=_size_for(chart_type),
+            target_col=_target_for(chart_type),
+            parent_col=_parent_for(chart_type),
+            end_col=_end_for(chart_type),
+            high_col=_high_for(chart_type),
+            goal_col=_goal_for(chart_type),
+            width_col=_width_for(chart_type),
+            after_col=_after_for(chart_type),
+            style=style,
+        )
+
+    assert build(ChartStyle()) == build(None)
+
+
+def test_style_controls_cover_tier_one_and_nothing_else():
+    # The table the sidebar draws from. Tier 1 only; pie takes none (no axes, always-on slice
+    # labels); stacking only where marks have a baseline; radar (polar) takes no axis titles and
+    # no log axis. Every other type takes nothing, so the Style section is hidden for it.
+    from highcharts_builder import style_controls_for
+
+    cartesian = {
+        "x_title",
+        "y_title",
+        "legend",
+        "data_labels",
+        "log_y",
+        "reference_line",
+    }
+    for t in ("line", "spline", "scatter", "bubble"):
+        assert style_controls_for(t) == cartesian, t
+    for t in ("area", "areaspline", "column", "bar"):
+        assert style_controls_for(t) == cartesian | {"stacking"}, t
+    assert style_controls_for("radar") == {"legend", "data_labels", "reference_line"}
+    tier_one = {
+        "line",
+        "spline",
+        "area",
+        "areaspline",
+        "column",
+        "bar",
+        "pie",
+        "scatter",
+    }
+    tier_one |= {"bubble", "radar"}
+    for t in SUPPORTED_TYPES:
+        if t == "pie" or t not in tier_one:
+            assert style_controls_for(t) == frozenset(), t
+
+
+def test_each_style_control_reaches_the_emitted_js():
+    # Asserted on the JS, not the dict, because the serializer can drop or mangle what the dict
+    # holds (it turned the export button's hover state into a string). Every key here survived.
+    from highcharts_builder import _DARK_CHROME, ChartStyle
+
+    df = pd.DataFrame(
+        {"m": ["a", "b", "c"], "r": [1.0, 2.0, 3.0], "c": [2.0, 1.0, 4.0]}
+    )
+    style = ChartStyle(
+        x_title="Month",
+        y_title="Revenue",
+        legend="right",
+        data_labels=True,
+        stacking="percent",
+        reference_line=2.5,
+    )
+    js = _js(build_options(df, "column", "m", ["r", "c"], style=style))
+    assert "text:'Month'" in js and "text:'Revenue'" in js
+    assert "align:'right'" in js and "layout:'vertical'" in js
+    assert "dataLabels:{enabled:true}" in js
+    assert "stacking:'percent'" in js
+    # ...and its 0–100 axis says so, QUOTED (a bare `{value}%` would be the unquoted-format bug).
+    assert "format:'{value}%'" in js
+    assert "plotLines:[{" in js and "value:2.5" in js and "dashStyle:'Dash'" in js
+    # The line's colour is an existing chrome colour, not a new one and not a series colour.
+    assert f"color:'{_DARK_CHROME['text']}'" in js
+    # An axis title keeps its themed colour: style changes the TEXT only.
+    assert f"style:{{'color':'{_DARK_CHROME['muted']}'}},text:'Revenue'" in js
+
+    top = _js(build_options(df, "line", "m", ["r"], style=ChartStyle(legend="top")))
+    assert "verticalAlign:'top'" in top
+    hidden = build_options(df, "line", "m", ["r"], style=ChartStyle(legend="hidden"))
+    assert hidden["legend"]["enabled"] is False
+    log = build_options(df, "line", "m", ["r"], style=ChartStyle(log_y=True))
+    assert log["yAxis"]["type"] == "logarithmic"
+
+
+def test_style_fields_a_type_does_not_take_are_ignored():
+    # A hidden control keeps its value in the app, so a kept value must never reach a chart it
+    # does not belong to: the builder ignores every field style_controls_for does not list.
+    from highcharts_builder import ChartStyle
+
+    df = pd.DataFrame({"m": ["a", "b", "c"], "r": [1.0, 2.0, 3.0]})
+    everything = ChartStyle(
+        x_title="X",
+        y_title="Y",
+        legend="hidden",
+        data_labels=True,
+        stacking="normal",
+        log_y=True,
+        reference_line=2.0,
+    )
+    assert build_options(df, "pie", "m", ["r"], style=everything) == build_options(
+        df, "pie", "m", ["r"]
+    )
+    line = build_options(df, "line", "m", ["r"], style=ChartStyle(stacking="normal"))
+    assert "series" not in line.get("plotOptions", {})  # line takes no stacking
+    radar = build_options(
+        df, "radar", "m", ["r"], style=ChartStyle(y_title="Y", log_y=True)
+    )
+    assert radar == build_options(
+        df, "radar", "m", ["r"]
+    )  # no axis titles, no log on polar
+
+
+def test_log_scale_is_refused_where_it_cannot_be_honest():
+    # A log axis has no place for a value <= 0 (Highcharts drops such points silently), and a
+    # stacked chart fills down to zero. The app disables the toggle in both cases; the builder
+    # ignores log_y in both too, so a stale True can never draw.
+    from highcharts_builder import ChartStyle, log_scale_ok
+
+    positive = pd.DataFrame({"m": ["a", "b"], "r": [1.0, 2.0]})
+    with_zero = pd.DataFrame({"m": ["a", "b"], "r": [0.0, 2.0]})
+    assert log_scale_ok(positive, ["r"])
+    assert not log_scale_ok(with_zero, ["r"])
+    # Missing and non-finite values are dropped by every type anyway, so they do not block log.
+    assert log_scale_ok(pd.DataFrame({"r": [1.0, float("nan"), float("inf")]}), ["r"])
+
+    log = ChartStyle(log_y=True)
+    assert (
+        "type" not in build_options(with_zero, "line", "m", ["r"], style=log)["yAxis"]
+    )
+    stacked = ChartStyle(log_y=True, stacking="normal")
+    assert (
+        "type"
+        not in build_options(positive, "column", "m", ["r"], style=stacked)["yAxis"]
+    )
+    # And a reference line at or below zero is dropped on a log axis, which has nowhere for it.
+    low_line = ChartStyle(log_y=True, reference_line=0.0)
+    y_axis = build_options(positive, "line", "m", ["r"], style=low_line)["yAxis"]
+    assert y_axis["type"] == "logarithmic" and "plotLines" not in y_axis
+
+
+def test_chart_style_is_hashable_and_validates_its_choices():
+    # Hashable because it is part of the app's cache key; validated so a typo cannot silently
+    # fall through to Highcharts' own default.
+    from highcharts_builder import ChartStyle
+
+    assert hash(ChartStyle(y_title="Y")) == hash(ChartStyle(y_title="Y"))
+    with pytest.raises(ValueError, match="legend"):
+        ChartStyle(legend="left")
+    with pytest.raises(ValueError, match="stacking"):
+        ChartStyle(stacking="stream")
+
+
 def _relative_luminance(hex_color):
     """WCAG 2.x relative luminance of a #rrggbb string."""
     raw = hex_color.lstrip("#")
@@ -10511,6 +10688,72 @@ def test_app_y_selection_survives_a_label_only_chart_type_switch(app):
     )
 
 
+def test_app_style_section_shows_for_tier_one_and_hides_for_pie(app):
+    # The sidebar draws exactly style_controls_for(chart_type): the landing type (line) gets the
+    # Style section, pie gets none of it.
+    assert any(sh.value.endswith("Style") for sh in app.subheader)
+    assert app.text_input(key="style_y_title")
+    _chart_type_selectbox(app).set_value("pie").run()
+    assert not app.exception
+    assert not any(sh.value.endswith("Style") for sh in app.subheader)
+
+
+def test_app_a_hidden_style_control_keeps_its_value(app):
+    # Streamlit discards the stored value of a keyed widget a run does not draw, so without
+    # keep_hidden_style_state a Y-axis title set on a line chart would be gone after a visit to
+    # pie, which draws no style controls. A value may be dropped when it stops being VALID, never
+    # when it merely stops being DRAWN.
+    app.text_input(key="style_y_title").set_value("Revenue ($k)").run()
+    _chart_type_selectbox(app).set_value("pie").run()
+    _chart_type_selectbox(app).set_value("line").run()
+    assert not app.exception
+    assert app.text_input(key="style_y_title").value == "Revenue ($k)"
+
+
+def test_app_a_gate_that_stops_does_not_forget_the_style_controls(app):
+    # The other way a style value can be lost: a stop ABOVE the controls. Timeline's gate stops
+    # on the landing dataset (it has no date column), above every style widget, so the style
+    # keys are in _KEYED_PICKERS and keep_picker_state() keeps them across that stop.
+    app.text_input(key="style_x_title").set_value("Month").run()
+    _chart_type_selectbox(app).set_value("timeline").run()
+    _chart_type_selectbox(app).set_value("line").run()
+    assert not app.exception
+    assert app.text_input(key="style_x_title").value == "Month"
+
+
+def test_app_log_scale_is_disabled_with_the_reason(app):
+    # Visible but disabled, saying why, so the user is told; a disabled widget is still drawn,
+    # so it keeps its value. Two reasons: stacking, and Y data <= 0.
+    _chart_type_selectbox(app).set_value("column").run()
+    assert not app.toggle(key="style_log_y").disabled  # landing data is all positive
+    app.selectbox(key="style_stacking").set_value("normal").run()
+    log = app.toggle(key="style_log_y")
+    assert log.disabled and "stacked" in log.help
+
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        ("signed.csv", b"month,change\nJan,-3\nFeb,5\n", "text/csv")
+    ).run()
+    _chart_type_selectbox(app).set_value("line").run()
+    assert not app.exception
+    log = app.toggle(key="style_log_y")
+    assert log.disabled and "≤ 0" in log.help
+
+
+def test_app_style_reaches_the_generated_config(app):
+    # End to end: a style typed in the sidebar is in the JS the app renders (read through the
+    # config panel, which builds from the same cache layer as the chart).
+    app.text_input(key="style_y_title").set_value("Revenue ($k)").run()
+    app.number_input(key="style_reference_line").set_value(150.0).run()
+    next(t for t in app.toggle if "generated Highcharts config" in t.label).set_value(
+        True
+    ).run()
+    assert not app.exception
+    js = "".join(app.code[0].value.split())
+    assert "text:'Revenue($k)'" in js
+    assert "plotLines:[{" in js and "value:150.0" in js
+
+
 def test_app_x_selection_survives_a_label_only_chart_type_switch(app):
     # The X selectbox's half of the same claim: line -> scatter relabels it
     # "Category (X) axis" -> "X axis" while the choices stay `df.columns`, so a keyless
@@ -11534,11 +11777,13 @@ def _forwarded_arguments() -> tuple[str, ...]:
 # flight (`list(y_cols)`) or differ per wrapper, so they are not pinned by name here.
 _FORWARDED = _forwarded_arguments()
 
-# The subset that names a COLUMN. `agg` (a reduction) and `dial` (a scale) are forwarded
-# identically but are not columns, and the docs count only the columns — which is why
-# CLAUDE.md's two numbers differ. Hoisted rather than re-filtered per test so the one
-# place that encodes "these two are not columns" cannot drift between its readers.
-_EXTRA_COLUMN_KWARGS = tuple(n for n in _FORWARDED if n not in ("agg", "dial"))
+# The subset that names a COLUMN. `agg` (a reduction), `dial` (a scale) and `style` (the
+# sidebar's style controls, one ChartStyle object) are forwarded identically but are not
+# columns, and the docs count only the columns — which is why CLAUDE.md's two numbers differ.
+# Hoisted rather than re-filtered per test so the one place that encodes "these are not
+# columns" cannot drift between its readers.
+_SETTING_KWARGS = ("agg", "dial", "style")
+_EXTRA_COLUMN_KWARGS = tuple(n for n in _FORWARDED if n not in _SETTING_KWARGS)
 
 
 def _app_functions() -> dict[str, ast.FunctionDef]:
@@ -11628,13 +11873,13 @@ def test_forwarded_arguments_derivation_is_not_vacuous():
     that. The named members below carry the rest: they cannot be satisfied by an
     unrelated tuple that merely happens to be long enough.
     """
-    assert len(_FORWARDED) >= 11, (
+    assert len(_FORWARDED) >= 12, (
         f"the derivation SHRANK — it found {len(_FORWARDED)} shared keyword-only "
-        f"arguments where at least 11 (9 extra-column kwargs + agg + dial) exist, so a "
+        f"arguments where at least 12 (9 extra-column kwargs + agg + dial + style) exist, so a "
         f"kwarg is positional or renamed in one builder only: {_FORWARDED}"
     )
     # The two that are NOT column names, and the extremes of the column set.
-    for name in ("size_col", "after_col", "agg", "dial"):
+    for name in ("size_col", "after_col", "agg", "dial", "style"):
         assert name in _FORWARDED
 
 

@@ -1708,7 +1708,10 @@ not merely the format string that used to hide the absurd number.
   (one ring per y column, an empty column kept as a null ring rather than dropped), so
   "Series plotted" is already literally the ring count, and an entry would force a
   `count_marks` rule that did nothing but restate `len(y_cols)` — the can't-drift rule
-  run backwards, a second computation of a fact that cannot differ from the first), the
+  run backwards, a second computation of a fact that cannot differ from the first), a
+  **Style** section (plan #5: `style_controls_for` decides which controls a type draws, the rest
+  are hidden with their values kept, and the whole set reaches the builder as one `ChartStyle`;
+  see [the decision](decisions.md#style-one-object-not-one-kwarg-per-control)), the
   chart embed (whose ☰ menu downloads PNG/JPEG/SVG; the render-mode selector and its
   Static PNG mode went in 0.21.0), and a toggle that reveals
   the generated Highcharts config (JS). No theme is read: `.streamlit/config.toml` is a

@@ -21,10 +21,12 @@ from highcharts_builder import (
     FUNNEL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
+    LEGEND_POSITIONS,
     MAGNITUDE_RANGE_TYPES,
     NETWORKGRAPH_TYPES,
     NODE_LINK_TYPES,
     ORGANIZATION_TYPES,
+    STACKING_MODES,
     SUPPORTED_TYPES,
     TIMELINE_TYPES,
     UNWEIGHTED_NODE_LINK_TYPES,
@@ -32,6 +34,7 @@ from highcharts_builder import (
     WEIGHTED_NODE_LINK_TYPES,
     X_IN_Y_GUARD_TYPES,
     XRANGE_TYPES,
+    ChartStyle,
     build_chart_html,
     count_marks,
     explain_gauge_error,
@@ -39,8 +42,10 @@ from highcharts_builder import (
     explain_tree_error,
     explain_xrange_error,
     gauge_dial,
+    log_scale_ok,
     make_chart,
     picker_columns,
+    style_controls_for,
 )
 from sample_data import SAMPLES
 
@@ -52,7 +57,18 @@ MAX_PILL_OPTIONS = 5
 # The keyed pickers, named once so the gate below and the widgets themselves cannot drift apart.
 # `y_pills` and `y_multiselect` are the SAME control under two commands (see the Y block), and
 # both are listed because which one exists depends on the frame's width.
-_KEYED_PICKERS = ("x_col", "y_pills", "y_multiselect")
+# The style controls' widget keys, by ChartStyle field (plan #5). They are keyed so a value survives
+# reruns, and listed in _KEYED_PICKERS below so the stops ABOVE them do not discard them either.
+_STYLE_KEYS = {
+    "x_title": "style_x_title",
+    "y_title": "style_y_title",
+    "legend": "style_legend",
+    "data_labels": "style_data_labels",
+    "stacking": "style_stacking",
+    "log_y": "style_log_y",
+    "reference_line": "style_reference_line",
+}
+_KEYED_PICKERS = ("x_col", "y_pills", "y_multiselect", *_STYLE_KEYS.values())
 
 
 def keep_picker_state() -> None:
@@ -75,6 +91,36 @@ def keep_picker_state() -> None:
     for key in _KEYED_PICKERS:
         if key in st.session_state:
             st.session_state[key] = st.session_state[key]
+
+
+def keep_hidden_style_state(shown: frozenset[str]) -> None:
+    """Keep the value of every style control this chart type does NOT draw.
+
+    A type hides the controls that mean nothing for it (pie hides them all), and Streamlit
+    discards the stored value of a keyed widget a run does not draw — so a Y-axis title set on a
+    line chart would be gone after a visit to pie. Re-assigning a hidden key to itself is the same
+    opt-out ``keep_picker_state`` uses. Only HIDDEN keys are touched: re-assigning one that is
+    drawn later in the same run would count as setting it through the Session State API.
+    """
+    for field, key in _STYLE_KEYS.items():
+        if field not in shown and key in st.session_state:
+            st.session_state[key] = st.session_state[key]
+
+
+def current_style() -> ChartStyle:
+    """The ChartStyle the sidebar's controls describe, read from session state.
+
+    Read from session state rather than from the widgets' return values because a hidden control
+    returns nothing but still holds its value. The builder ignores the fields a type does not take
+    (``style_controls_for``), so a kept, hidden value never reaches a chart it does not belong to.
+    """
+    defaults = ChartStyle()
+    return ChartStyle(
+        **{
+            field: st.session_state.get(key, getattr(defaults, field))
+            for field, key in _STYLE_KEYS.items()
+        }
+    )
 
 
 # The one-series types, and the mark each one draws. These render a SINGLE series (of
@@ -208,6 +254,7 @@ def cached_chart_html(
     after_col,
     agg,
     dial,
+    style,
 ) -> str:
     return build_chart_html(
         df,
@@ -227,6 +274,7 @@ def cached_chart_html(
         after_col=after_col,
         agg=agg,
         dial=dial,
+        style=style,
     )
 
 
@@ -248,6 +296,7 @@ def cached_chart_js(
     after_col,
     agg,
     dial,
+    style,
 ) -> str:
     # highcharts-core stubs `to_js_literal` as `str | None`; it returns the JS
     # literal string for a built chart.
@@ -268,6 +317,7 @@ def cached_chart_js(
         after_col=after_col,
         agg=agg,
         dial=dial,
+        style=style,
     ).to_js_literal()
 
 
@@ -1063,6 +1113,64 @@ with st.sidebar:
     )
     height = st.slider("Height (px)", min_value=300, max_value=800, value=480, step=20)
 
+    # Style controls (plan #5). The builder says which controls this type takes; the rest are
+    # hidden, and their values kept, for the reason in keep_hidden_style_state. Every widget uses
+    # its natural default (empty, off, the first option), which is also ChartStyle's default, so
+    # a chart nobody has styled is exactly the chart the app drew before these existed.
+    shown = style_controls_for(chart_type)
+    keep_hidden_style_state(shown)
+    if shown:
+        st.subheader(":material/palette: Style")
+        if "x_title" in shown:
+            st.text_input("X-axis title", key="style_x_title", placeholder=x_col)
+        if "y_title" in shown:
+            st.text_input(
+                "Y-axis title", key="style_y_title", placeholder=", ".join(y_cols)
+            )
+        if "legend" in shown:
+            st.selectbox(
+                "Legend", LEGEND_POSITIONS, key="style_legend", format_func=str.title
+            )
+        if "data_labels" in shown:
+            st.toggle("Data labels", key="style_data_labels")
+        if "stacking" in shown:
+            st.selectbox(
+                "Stacking",
+                [None, *STACKING_MODES],
+                key="style_stacking",
+                format_func=lambda mode: "Off" if mode is None else mode.title(),
+            )
+        if "log_y" in shown:
+            # Disabled, not hidden, when log cannot be honest: the user is told why, and a
+            # disabled widget is still drawn, so it keeps its value with no extra code. The
+            # builder ignores log_y in both cases too, so a stale True never draws.
+            stacked = "stacking" in shown and st.session_state.get("style_stacking")
+            if not log_scale_ok(df, y_cols):
+                log_blocked = (
+                    "Unavailable: Y has values ≤ 0, which a log axis cannot show."
+                )
+            elif stacked:
+                log_blocked = (
+                    "Unavailable while stacked: stacked marks fill down to zero."
+                )
+            else:
+                log_blocked = None
+            st.toggle(
+                "Log scale (Y)",
+                key="style_log_y",
+                disabled=log_blocked is not None,
+                help=log_blocked,
+            )
+        if "reference_line" in shown:
+            st.number_input(
+                "Reference line (Y value)",
+                key="style_reference_line",
+                value=None,
+                placeholder="None",
+                help="Draws a dashed horizontal line at this value. Leave empty for none.",
+            )
+    style = current_style()
+
 
 # --------------------------------------------------------------------------- #
 # Main panel
@@ -1354,6 +1462,7 @@ with left.container(border=True, height="stretch"):
         after_col=after_col,
         agg=agg,
         dial=dial,
+        style=style,
     )
     # The HTML is embedded in a sandboxed iframe with a FIXED height. st.iframe
     # DOES measure its content by default (`height="content"`), so the pin is a
@@ -1393,5 +1502,6 @@ with left.container(border=True, height="stretch"):
             after_col=after_col,
             agg=agg,
             dial=dial,
+            style=style,
         )
         st.code(chart_js, language="javascript")
