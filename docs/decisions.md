@@ -25,7 +25,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [`color-scheme`: why the pin sits on the SVG](#color-scheme-why-the-pin-sits-on-the-svg) ·
 [Palette: the scale that was a palette by accident](#palette-the-scale-that-was-a-palette-by-accident) ·
 [The strings highcharts-core emits unquoted](#the-strings-highcharts-core-emits-unquoted) ·
-[Tooltip precision: when a channel is a value's only home](#tooltip-precision-when-a-channel-is-a-values-only-home)
+[Tooltip precision: when a channel is a value's only home](#tooltip-precision-when-a-channel-is-a-values-only-home) ·
+[`</script>` in user text: an encoding, not an edit](#script-in-user-text-an-encoding-not-an-edit)
 
 ## Packaging: the fact with no second home
 
@@ -674,3 +675,43 @@ this, because every frame rendered had day granularity: rendering only ever chec
 rendered. It took a **review** asking what `date_columns` admits that the samples do not. When a
 picker is deliberately widened past the shipped samples — as this one is, to `_COORD_EMPTY` and
 to full ISO-8601 — the admitted-but-never-rendered cases are exactly where the next defect is.
+
+## `</script>` in user text: an encoding, not an edit
+
+`build_chart_html` puts the chart's JS inside a `<script>` element, and the HTML parser ends
+that element at the first `</script` it sees, case-insensitively, **even inside a JS string**.
+The JS carries user text in strings (labels, column names, the title), so a CSV label
+`</script><b>x</b>` closed the chart's script early: checked on 2026-10-07, a page with that
+label and that title had 4 closing tags for 3 script elements, and the chart did not draw.
+Inside the app's sandboxed iframe that only broke the uploader's own chart. On a page someone
+else embeds (plan #15's exports) it would be a script-injection hole, which is why it was fixed
+before anything else.
+
+`_escape_for_script_element` replaces every `</` with `<\/` and every `<!--` with `<\!--`. The
+second is the other way in: `<!--` can switch the parser into a mode where a later `<script`
+hides the real close. **Why this is not editing what the user typed:** inside a JS string `\/`
+*is* `/` and `\!` *is* `!`, so the string the chart receives is byte-for-byte the original.
+That holds only because every `</` and `<!--` in `to_js_literal` output sits inside a string:
+the builder emits data, never a JS function. If a type ever emits a callback (a `formatter`, say)
+that is no longer guaranteed, and the escape must be re-argued. Matching on `</` alone covers
+`</SCRIPT` and every other spelling for free.
+
+`test_user_text_cannot_close_the_charts_script_element` sweeps every supported type with the
+payload in the title (the gauge family has no label channel) and in the label. It asserts the
+document closes no more script elements than a clean build does, that no `<!--` reaches it, and
+— with `esprima`, already installed with `highcharts-core` — that the escaped JS parses and its
+title string decodes back to exactly what was typed. That last check is what proves the escape
+touched nothing outside a string. Both halves were verified by breaking them: without the `</`
+escape all 30 types fail on the tag count; without the `<!--` one, all 30 fail on the comment.
+
+**What rendering showed, which the plan did not expect.** The chart now draws, but the label is
+not shown as literal text: Highcharts treats label and title text as its own restricted HTML.
+`<b>x</b>` draws a bold **x**, and `<script>` and `<!--` are stripped, so `<!--<script>` draws
+as an empty label. That is Highcharts' display, not this escape (the JS string is the original,
+and the test proves it), and it was true before the fix for any label with markup in it. It is
+not changed here, because changing it means rewriting what the user typed; it matters again for
+#15, whose embeds inherit it.
+
+**Known limit:** a label that also *starts* with `Date` hits the library's
+[unquoted-string bug](#the-strings-highcharts-core-emits-unquoted) first: it is emitted as code,
+not as a string, and is broken before this escape applies.

@@ -100,7 +100,7 @@ In build order. Numbers are stable IDs, not priorities.
 
 | Order | # | Feature | Size | Status |
 |---|---|---|---|---|
-| 1st | 20 | [Escape `</script>` in the chart's JS](#20-escape-script-in-the-charts-js) | S | planned |
+| 1st | 20 | [Escape `</script>` in the chart's JS](#20-escape-script-in-the-charts-js) | S | done (0.20.2) |
 | 2nd | 22 | [Large datasets in the label + value types](#22-large-datasets-in-the-label--value-types) | S–M | planned |
 | 3rd | 12 | [Pin the runtime dependency set](#12-pin-the-runtime-dependency-set) | S | planned |
 | 4th | 21 | [Pin the Highcharts JS version](#21-pin-the-highcharts-js-version) | S | planned |
@@ -130,33 +130,9 @@ In build order. Numbers are stable IDs, not priorities.
 
 ### 20. Escape `</script>` in the chart's JS
 
-- **What & why:** A **bug today**. `build_chart_html` puts the chart's JS inside a
-  `<script>` element, and the HTML parser ends that element at the first `</script>` it
-  sees, **even inside a JS string**. So a CSV label such as `</script><b>x</b>` closes the
-  chart's script early: checked on 2026-10-07, the page came out with 3 `</script>` tags
-  where 2 belong. Inside the app's sandboxed iframe that breaks the chart, and the only
-  person who can be targeted is the one who uploaded the CSV. Once
-  [#15](#15-embeddable-outputs-html-js-json) puts the same output on other people's pages,
-  it is a script-injection hole on those pages, so it is fixed **first**.
-- **Fix:** before the JS goes into the `<script>` element, replace every `</` with `<\/`
-  and every `<!--` with `<\!--`. Inside a JS string, `\/` *is* `/` and `\!` *is* `!`, so the
-  text the chart draws is unchanged: this is an encoding of what the user typed, not an edit
-  of it. Every `</` the builder emits is inside a string (the `<b>…</b>` tooltip formats
-  included), so the replacement cannot touch code. It covers `</SCRIPT` and other cases
-  for free, because it matches on `</` alone.
-- **Touches:** `build_chart_html` (one helper applied to the JS before it is embedded),
-  tests, `docs/decisions.md` (one entry: why the escape is safe, and why it is not "editing
-  what the user typed").
-- **Tests:** a sweep over every supported type with a `</script>` label (and an
-  `<!--` one) asserting the document has exactly as many `</script>` tags as `<script>`
-  elements, plus one `esprima.parseScript` check that the escaped JS still parses (`esprima`
-  is already installed with `highcharts-core`). Verify by breaking it: remove the helper
-  and confirm the sweep fails. **Verify by rendering:** the label shows as literal text.
-- **Known limit:** a label that also starts with `Date` hits the library's
-  [unquoted-string bug](decisions.md#the-strings-highcharts-core-emits-unquoted) first; it
-  is emitted as code, not as a string, and is broken before this fix applies. #15's
-  JSON-built JS has neither problem.
-- **Size:** S · **Status:** planned
+Done in 0.20.2. The reasoning, the tests, and what rendering showed (Highcharts draws label
+markup as its own restricted HTML, which #15 inherits) are in
+[`decisions.md`](decisions.md#script-in-user-text-an-encoding-not-an-edit).
 
 ### 22. Large datasets in the label + value types
 

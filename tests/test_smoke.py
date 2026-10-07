@@ -1198,6 +1198,83 @@ def test_build_chart_html_pins_the_chart_color_scheme(chart_type):
     assert "color-scheme:only dark" not in html
 
 
+def _string_literals(node):
+    """Every string literal's DECODED value in an esprima AST (``toDict()`` form)."""
+    if isinstance(node, dict):
+        if node.get("type") == "Literal" and isinstance(node.get("value"), str):
+            yield node["value"]
+        for child in node.values():
+            yield from _string_literals(child)
+    elif isinstance(node, list):
+        for child in node:
+            yield from _string_literals(child)
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_user_text_cannot_close_the_charts_script_element(labeled_frame, chart_type):
+    # The HTML parser ends a <script> element at the first `</script` it sees, case-insensitively,
+    # EVEN INSIDE A JS STRING — and the chart's JS carries user text in strings (labels, column
+    # names, the title). So a CSV label `</script><b>x</b>` used to close the chart's script early
+    # and spill the rest of it into the page as text. Inside the app's sandboxed iframe that only
+    # broke the uploader's own chart; on a page someone else embeds (#15's exports) it is a
+    # script-injection hole. `_escape_for_script_element` fixes it.
+    #
+    # Swept over SUPPORTED_TYPES because the bug sits in the one line every type shares. The title
+    # carries the payload for EVERY type (the gauge family has no label channel), and the label
+    # carries it too wherever a type has one. `<!--` is in both because it is the other way in: it
+    # can switch the parser into a mode where a later `<script` hides the real close.
+    import esprima
+
+    from highcharts_builder import _escape_for_script_element
+
+    title = "t</SCRIPT><!--<script>"
+    labels = ["</script><b>x</b>", "<!--<script>", "c"]
+    df = labeled_frame.assign(
+        label=labels,
+        # sunburst's tree must still hang together under the new labels, or its rows dangle and
+        # the label channel goes untested for it.
+        parent=[None, labels[0], labels[0]],
+    )
+
+    def build(render, frame, title=None):
+        return render(
+            frame,
+            chart_type,
+            "label",
+            _y_for(chart_type),
+            title=title,
+            size_col=_size_for(chart_type),
+            target_col=_target_for(chart_type),
+            parent_col=_parent_for(chart_type),
+            end_col=_end_for(chart_type),
+            high_col=_high_for(chart_type),
+            goal_col=_goal_for(chart_type),
+            width_col=_width_for(chart_type),
+            after_col=_after_for(chart_type),
+        )
+
+    clean = build(build_chart_html, labeled_frame)
+    html = build(build_chart_html, df, title)
+
+    # The payload adds no closing tag: the document closes exactly the script elements the clean
+    # build does. (Opening tags are not counted — `<script` inside a string is harmless once
+    # neither `</` nor `<!--` can reach the parser, and the payload itself contains one.)
+    def closes(doc):
+        return len(re.findall(r"</script", doc, re.IGNORECASE))
+
+    assert closes(html) == closes(clean), f"{chart_type}: user text closed the script"
+    assert "<!--" not in html, f"{chart_type}: user text opened an HTML comment"
+
+    # An encoding, not an edit: the escaped JS still parses, and its strings decode back to exactly
+    # what the user typed. The parse is what proves no `</` the escape touched was outside a string.
+    js = _escape_for_script_element(build(make_chart, df, title).to_js_literal())
+    assert js in html
+    strings = set(_string_literals(esprima.parseScript(js).toDict()))
+    assert title in strings, (
+        f"{chart_type}: the title did not survive the escape intact"
+    )
+
+
 def _relative_luminance(hex_color):
     """WCAG 2.x relative luminance of a #rrggbb string."""
     raw = hex_color.lstrip("#")
