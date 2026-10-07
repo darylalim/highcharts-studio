@@ -163,9 +163,8 @@ In build order. Numbers are stable IDs, not priorities.
 - **Verify by breaking it:** add a fake dependency to a copy of `pyproject.toml`, run the
   test alone, confirm it fails on the assertion, restore, and diff (the mutation procedure
   in `CLAUDE.md`'s Run section).
-- **Open questions:** Should the version floors be pinned too, or only the names? Names
-  only: the floors are already explained in `pyproject.toml`'s comments and move with
-  upgrades.
+- **Decided:** names only, not the version floors. The floors are already explained in
+  `pyproject.toml`'s comments and move with every upgrade.
 - **Size:** S · **Status:** planned
 
 ### 13. Client-side export
@@ -194,16 +193,18 @@ In build order. Numbers are stable IDs, not priorities.
   `_themed`, and the **downloaded** PNG must come out dark too: the exporting module
   re-renders the chart for the file, so check the file, not only the screen. Check both
   browser colour schemes (the `color-scheme` pin).
-- **Open questions:**
-  - The iframe is sandboxed. Do downloads started from inside it work in Chrome, Firefox
-    and Safari, or does `st.iframe` need a sandbox permission it does not grant? Test this
-    first; if downloads are blocked, the item is not viable as written.
-  - Some types load extra modules (sankey, sunburst, gauge and so on). Does
-    `offline-exporting` export all 30 types without falling back to the export server?
-    The fallback must be switched off (`exporting.fallbackToExportServer: false`), or the
-    remote service quietly comes back.
-  - Keep a server-side PNG option for users who can't run JS? No: the lightweight answer is
-    to retire it entirely.
+- **Checked 2026-10-07:** downloads from inside the iframe are permitted. Streamlit's
+  iframe sandbox (in the installed `streamlit` frontend) includes `allow-downloads`, with
+  `allow-scripts` and `allow-same-origin`. This was the condition that could have made the
+  item unworkable.
+- **Decided:** no server-side PNG option is kept for users without JS. The mode is retired
+  entirely.
+- **Check when building:**
+  - That a download from the ☰ menu actually lands in Chrome, Firefox **and Safari**
+    (the sandbox permits it; the browsers have to agree).
+  - That `offline-exporting` exports all 30 types in the browser, with the fallback switched
+    off (`exporting.fallbackToExportServer: false`); otherwise the remote service quietly
+    comes back for any type it cannot handle.
 - **Shipping:** removes public API (`build_chart_png`, `explain_export_failure`), so its
   changelog section has a **Removed** heading naming both (see Shipping in the Legend).
 - **Size:** S–M (mostly deletion, plus a render check) · **Status:** planned
@@ -231,10 +232,15 @@ In build order. Numbers are stable IDs, not priorities.
 - **Tests:** every `<script src>` in `build_chart_html`'s output, for every supported type,
   carries the pinned version (a sweep). Verify by breaking it: remove the rewrite and confirm
   the sweep fails.
-- **Open questions:** Which version? The one the app renders with on the day this is built,
-  confirmed by a render check of the Tier 1 types in both browser colour schemes. Does the
-  CDN serve a versioned path for every module the app uses? Check each URL resolves before
-  shipping.
+- **Check when building:**
+  - **Which version:** the one the app renders with on the day this is built, confirmed by
+    a render check of the Tier 1 types in both browser colour schemes.
+  - **That every module has a versioned path:** each
+    `code.highcharts.com/<version>/…` URL the app uses (and `exporting`,
+    `offline-exporting`, `accessibility`) must resolve. Check from a **browser**: on
+    2026-10-07 the CDN answered `403` to scripted requests from this machine for every URL,
+    the unversioned `highcharts.js` the app loads today included, so a script cannot settle
+    it.
 - **Size:** S · **Status:** planned
 
 ### 19. Date the real-world samples
@@ -255,9 +261,9 @@ In build order. Numbers are stable IDs, not priorities.
   *Company market cap, ~2024 (treemap)*. The test helper `_pick_sample` finds a type's
   sample by the exact substring `"(treemap)"`, so *(treemap, illustrative ~2024)* would
   break every test that uses it.
-- **Open questions:** Which year to state for each? Read the figures against a source
-  once, write the year they match, and put "illustrative" in the docstring rather than the
-  label (the label is narrow).
+- **Check when building:** which year to state for each. Read the figures against a source
+  once and write the year they match. "Illustrative" goes in the docstring rather than the
+  label, which is narrow.
 - **Size:** S · **Status:** planned
 
 ### 18. A stackable sample
@@ -280,10 +286,9 @@ In build order. Numbers are stable IDs, not priorities.
     `SAMPLES` key containing `"(column)"`, `"(area)"` and so on, so a label like
     *(column)* would silently become the sample for every column test. Label it
     *(stacked column/area)*, which matches no single type.
-- **Open questions:** Should a log-scale control (#5) get a sample too? Log only helps when
-  values span orders of magnitude, and the widest sample today (*Company market cap*) spans
-  about 9×. Either a second small sample, or test log scale on synthetic data only and
-  ship no sample for it (the lightweight answer).
+- **Decided:** no sample for the log-scale control. Log only helps when values span orders
+  of magnitude, and the widest sample today (*Company market cap*) spans about 9×; rather
+  than a second sample, #5 tests log scale on made-up data.
 - **Size:** S · **Status:** planned
 
 ### 5. Style controls
@@ -314,14 +319,25 @@ In build order. Numbers are stable IDs, not priorities.
   `style_controls_for`), the sidebar's Chart section, `_KEYED_PICKERS`, the renderer
   wrappers (once; two of them after [#13](#13-client-side-export) retires the PNG one), the
   kwarg docs in `CLAUDE.md`, and `README.md`'s description of the controls.
-- **Open questions:**
-  - Per control within Tier 1: stacking means nothing to a pie or scatter, and log scale
-    cannot show zero or negative values (hide the control, or warn when the data has them?).
-  - Does `ChartStyle` count as a tenth row in the kwarg table, or as the gauge family's kind
-    of non-column kwarg? The docs-count tests read the builders' signatures, so they will
-    ask.
-  - Do the style values go into the exports ([#15](#15-embeddable-outputs-html-js-json),
-    [#2](#2-export-as-python))? They should, since they are part of the chart.
+- **Decided:**
+  - **`style` is not a column kwarg.** It is a setting, like the gauge family's `agg` and
+    `dial`, so it gets no row in `CLAUDE.md`'s kwarg table. The tests settle this
+    mechanically: they define the column kwargs as `_FORWARDED` minus `("agg", "dial")`, so
+    an unexcluded `style` would be counted as a **tenth column kwarg** and fail the docs-count
+    tests. Add it to that exclusion, and update `CLAUDE.md`'s line about the gauge family
+    taking "the two that are **not** column names" (it becomes three, and no longer
+    gauge-only).
+  - **Style values go into the exports** ([#15](#15-embeddable-outputs-html-js-json),
+    [#2](#2-export-as-python)), since they are part of the chart.
+  - **Log scale with values ≤ 0: disable, with the reason.** A log axis cannot show zero or
+    negative values, so when the selected Y data has any, the log toggle stays visible but
+    **disabled**, with help text saying why ("Y has values ≤ 0"), and re-enables when the
+    data allows. Settled 2026-10-07. Rejected: hiding it (the user is not told why, and the
+    value needs `_KEYED_PICKERS` to survive) and allowing it with a warning (the chart drops
+    the points it cannot show, quietly misrepresenting the data). A disabled widget is still
+    drawn, so it keeps its value with no extra code; the builder must still refuse a log
+    axis on such data, so a stale `True` can never reach the chart. Test both: the AppTest
+    sees the toggle disabled, and the builder ignores or rejects `log=True` on data ≤ 0.
 - **Size:** M · **Status:** planned
 
 ### 17. Group the chart-type picker by family
@@ -497,9 +513,13 @@ Settled on 2026-10-07:
   it. (The JSON half of this item moved to #15.)
 - **Touches:** a pure `python_snippet(...)` helper in `highcharts_builder.py` (testable:
   `exec` the snippet against the sample frame and compare the options it produces).
-- **Open questions:** Building this after #5 means the snippet includes
-  `style=ChartStyle(...)` from the start. Should the snippet embed the data, or assume a
-  `df` the user already has? Assuming `df` keeps it short; embedding it makes it runnable.
+- **Decided:** the snippet starts with `df = pd.read_csv("your-file.csv")` rather than
+  carrying the data: one shape, short at any data size, and the user has their own CSV. For
+  a sample dataset (no file to read), a comment names the sample instead. Settled
+  2026-10-07; rejected: inlining samples only (two snippet shapes to build and test) and
+  always inlining (long snippets for large uploads, #15's size problem again). Built after
+  #5, so the snippet includes `style=ChartStyle(...)` from the start. The `exec` test feeds
+  the snippet a `df` rather than a file.
 - **Size:** S · **Status:** planned
 
 ### 8. Edit data in place
@@ -508,8 +528,8 @@ Settled on 2026-10-07:
   can fix a typo or try a value without re-uploading.
 - **Touches:** `streamlit_app.py`. The edited frame must replace `df` *before* the pickers
   and the gate run.
-- **Open questions:** Should edits survive a dataset switch (probably not)? Should adding
-  and deleting rows be allowed, or only editing cells? Cells only is the lightweight answer.
+- **Decided:** edit cells only (no adding or deleting rows, the lightweight answer), and
+  edits reset when the dataset changes: they belong to the data they were made on.
 - **Size:** S · **Status:** planned
 
 ## Folded
