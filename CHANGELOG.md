@@ -33,6 +33,19 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [0.22.0] - 2026-10-07
+
+A new sample dataset in the picker, so a minor.
+
+### Added
+
+- **A stackable sample: *Monthly revenue by channel (stacked column/area)*.** Four channels
+  (online, retail, wholesale, partner) over twelve months, which together make each month's
+  revenue. It is the first multi-series sample whose series are parts of one whole, so a stacked
+  chart of it shows real total revenue and a percent-stacked one shows the channel mix (the
+  landing dataset's revenue and cost cannot be stacked meaningfully). It is the sample the
+  coming stacking control will be checked against.
+
 ## [0.21.1] - 2026-10-07
 
 Documentation only, so a patch.
