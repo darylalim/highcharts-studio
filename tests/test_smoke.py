@@ -1211,6 +1211,51 @@ def _string_literals(node):
             yield from _string_literals(child)
 
 
+def _chart_script(html: str) -> str:
+    """The JavaScript in ``build_chart_html``'s inline <script> element (its last one: the CDN
+    tags before it carry a ``src`` and no body)."""
+    return html.rsplit("<script>", 1)[1].split("</script>", 1)[0]
+
+
+@pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
+def test_the_apps_chart_draws_the_exports_call(labeled_frame, chart_type):
+    # Plan #16: the app's iframe and the embeds are ONE encoding. Before it, the iframe used
+    # `to_js_literal` and the exports used JSON, so a title like "Dates that mattered" blanked the
+    # app's chart while its exported page drew fine. Pinned as string equality, so the two cannot
+    # drift back apart without this failing.
+    html = build_chart_html(
+        labeled_frame,
+        chart_type,
+        None if chart_type in GAUGE_TYPES else "label",
+        _y_for(chart_type),
+        size_col=_size_for(chart_type),
+        target_col=_target_for(chart_type),
+        parent_col=_parent_for(chart_type),
+        end_col=_end_for(chart_type),
+        high_col=_high_for(chart_type),
+        goal_col=_goal_for(chart_type),
+        width_col=_width_for(chart_type),
+        after_col=_after_for(chart_type),
+    )
+    exports = _exports_for(labeled_frame, chart_type, container_id="hc_chart")
+    assert _chart_script(html) == exports.js
+
+
+@pytest.mark.parametrize(
+    "text", ["Dates that mattered", "{value:%b %Y}", "{point.name}: {point.y:.1f}"]
+)
+def test_the_apps_chart_survives_the_strings_the_library_emits_unquoted(text):
+    # The two shapes `to_js_literal` writes bare (see the test pinning the `Date` bug above, and
+    # the format-object sweep) reach the app's chart from a title and a column name. Both used to
+    # blank it with a SyntaxError; through JSON they are ordinary strings. The parse is the proof.
+    import esprima
+
+    df = pd.DataFrame({"label": ["a", "b"], text: [1.0, 2.0]})
+    js = _chart_script(build_chart_html(df, "line", "label", [text], title=text))
+    strings = set(_string_literals(esprima.parseScript(js).toDict()))
+    assert text in strings
+
+
 @pytest.mark.parametrize("chart_type", SUPPORTED_TYPES)
 def test_user_text_cannot_close_the_charts_script_element(labeled_frame, chart_type):
     # The HTML parser ends a <script> element at the first `</script` it sees, case-insensitively,
@@ -1218,15 +1263,14 @@ def test_user_text_cannot_close_the_charts_script_element(labeled_frame, chart_t
     # names, the title). So a CSV label `</script><b>x</b>` used to close the chart's script early
     # and spill the rest of it into the page as text. Inside the app's sandboxed iframe that only
     # broke the uploader's own chart; on a page someone else embeds (#15's exports) it is a
-    # script-injection hole. `_escape_for_script_element` fixes it.
+    # script-injection hole. The chart's call is JSON with `<` written \u003c (`_options_json`,
+    # the exports' encoding since plan #16), which fixes it.
     #
     # Swept over SUPPORTED_TYPES because the bug sits in the one line every type shares. The title
     # carries the payload for EVERY type (the gauge family has no label channel), and the label
     # carries it too wherever a type has one. `<!--` is in both because it is the other way in: it
     # can switch the parser into a mode where a later `<script` hides the real close.
     import esprima
-
-    from highcharts_builder import _escape_for_script_element
 
     title = "t</SCRIPT><!--<script>"
     labels = ["</script><b>x</b>", "<!--<script>", "c"]
@@ -1266,10 +1310,9 @@ def test_user_text_cannot_close_the_charts_script_element(labeled_frame, chart_t
     assert closes(html) == closes(clean), f"{chart_type}: user text closed the script"
     assert "<!--" not in html, f"{chart_type}: user text opened an HTML comment"
 
-    # An encoding, not an edit: the escaped JS still parses, and its strings decode back to exactly
-    # what the user typed. The parse is what proves no `</` the escape touched was outside a string.
-    js = _escape_for_script_element(build(make_chart, df, title).to_js_literal())
-    assert js in html
+    # An encoding, not an edit: the chart's script still parses, and its strings decode back to
+    # exactly what the user typed.
+    js = _chart_script(html)
     strings = set(_string_literals(esprima.parseScript(js).toDict()))
     assert title in strings, (
         f"{chart_type}: the title did not survive the escape intact"

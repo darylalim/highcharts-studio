@@ -27,7 +27,7 @@ type, and sweep it as `CLAUDE.md` > Conventions prescribes.
 # build_options() -> Chart.from_options() -> set container, in one call:
 chart = make_chart(df, chart_type, x_col, y_cols, title=title)
 
-# interactive: get_script_tags() + to_js_literal() wrapped as HTML for st.iframe
+# interactive: get_script_tags() + the options as JSON, wrapped as HTML for st.iframe
 html = build_chart_html(df, chart_type, x_col, y_cols, height=height, title=title)
 
 # downloads: none — every chart carries Highcharts' ☰ menu, which draws PNG/JPEG/SVG
@@ -2774,8 +2774,9 @@ stopped being **rendered** — and both measurements are in
   a pin on a policy the family deliberately does not have. A vacuous pass is worse than no test.
   Reachable from a plain CSV: `inf`,
   `Infinity`, `-inf` and `1e400` (which silently overflows), and a blank cell (`nan`).
-- **Two string shapes reach the page UNQUOTED**: the chart call dies with a `SyntaxError`
-  and the iframe is blank, and so is its download, which re-renders it in the browser. (While
+- **Two string shapes `to_js_literal` emits UNQUOTED**: the chart call dies with a
+  `SyntaxError`. Until 1.3.1 that blanked the app's iframe and its download; since plan #16 the
+  app draws from JSON and they reach only a caller of `make_chart(...).to_js_literal()`. (While
   the Static PNG mode existed these were worse than the `inf` above, because the export
   server, built from JSON, rendered them perfectly and hid them.) They are invisible to every
   assertion over an options dict, and both are pinned on `to_js_literal()` output instead. The first is a

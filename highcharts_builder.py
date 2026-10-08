@@ -8,8 +8,9 @@ This module is deliberately Streamlit-free so it can be imported and unit
 tested on its own. ``streamlit_app.py`` wraps it with the UI and caching.
 
 The flow mirrors the highcharts-core pattern (an options ``dict`` ->
-``Chart.from_options`` -> serialize), then uses the chart's own
-``get_script_tags`` / ``to_js_literal`` to produce embeddable HTML.
+``Chart.from_options``, which validates it and resolves the chart's ``get_script_tags``),
+but serializes the options with the standard library's ``json`` rather than
+``to_js_literal``: the app's chart and every export draw from one encoding (plan #16).
 """
 
 from __future__ import annotations
@@ -6231,23 +6232,6 @@ def _order_script_tags(script_tags: str) -> str:
     return "\n".join(lines)
 
 
-def _escape_for_script_element(js: str) -> str:
-    """Make ``js`` safe to place inside a ``<script>`` element without changing what it means.
-
-    The HTML parser ends a script element at the first ``</script`` it sees (case-insensitive),
-    **even inside a JS string**, and a ``<!--`` can switch it into a mode where a later
-    ``<script`` hides the real close. Both arrive in user text — a CSV label, a column name, the
-    chart title — so ``</script><b>x</b>`` in a label used to cut the chart's script short.
-
-    Replaces every ``</`` with ``<\\/`` and every ``<!--`` with ``<\\!--``. Inside a JS string
-    ``\\/`` IS ``/`` and ``\\!`` IS ``!``, so the text the chart draws is byte-for-byte what the
-    user typed: this is an encoding of it, not an edit. It is safe only because every ``</`` and
-    ``<!--`` in ``to_js_literal`` output sits inside a string — the builder emits data, never a
-    JS function — and matching on ``</`` alone covers ``</SCRIPT`` and every other case for free.
-    """
-    return js.replace("</", "<\\/").replace("<!--", "<\\!--")
-
-
 def build_chart_html(
     df: pd.DataFrame,
     chart_type: str,
@@ -6274,19 +6258,25 @@ def build_chart_html(
 
     Includes the Highcharts CDN ``<script>`` tags the chart actually needs
     (resolved by ``get_script_tags`` — e.g. ``highcharts-more`` for a bubble
-    chart) plus the ``Highcharts.chart(...)`` call emitted by ``to_js_literal``.
-    Pass the result to ``st.iframe(html, height=...)``.
+    chart) plus the ``Highcharts.chart(...)`` call, which is exactly
+    ``build_chart_exports(..., container_id=container_id).js``. Pass the result to
+    ``st.iframe(html, height=...)``.
+
+    The call is serialized by ``_options_json``, not ``to_js_literal``, so the two strings
+    highcharts-core emits unquoted (a ``{...:...}`` format value, a string beginning ``Date``)
+    cannot blank the chart, and ``<`` is written ``\\u003c`` so user text cannot close the
+    ``<script>`` element it sits in. ``Chart.from_options`` still runs: it validates the options
+    and resolves the script tags.
 
     The document also pins the chart's color scheme (``_LIGHT_COLOR_SCHEME_CSS``) so
     Highcharts' own ``light-dark()`` defaults can't follow the viewer's browser, which
     leaves ``_themed`` the single source of the dark chrome.
     """
-    chart = make_chart(
+    options = build_options(
         df,
         chart_type,
         x_col,
         y_cols,
-        container_id=container_id,
         title=title,
         size_col=size_col,
         target_col=target_col,
@@ -6301,6 +6291,7 @@ def build_chart_html(
         dial=dial,
         style=style,
     )
+    chart = Chart.from_options(options)
 
     # For a SOLID gauge this resolves highcharts-more as well as modules/solid-gauge — and it does
     # so only because the options tree carries a `pane`. Without highcharts-more the chart renders
@@ -6316,20 +6307,14 @@ def build_chart_html(
     # dependencywheel needs modules/sankey.js loaded BEFORE modules/dependency-
     # wheel.js (the latter extends the former), but get_script_tags emits them reversed. See
     # `_order_script_tags`.
-    # get_script_tags(as_str=True) returns str, but the stub types it list[str] | str — the
-    # to_js_literal `str | None` stub mismatch, one method over (see the module's ty notes).
     # `_pin_script_tags` then loads every one of them from HIGHCHARTS_JS_VERSION, never "latest".
     script_tags = _pin_script_tags(
-        _order_script_tags(
-            chart.get_script_tags(as_str=True)  # ty: ignore[invalid-argument-type]
-        )
+        _order_script_tags(chart.get_script_tags(as_str=True))
     )
-    # Escaped because user text (labels, column names, the title) sits inside JS strings here, and
-    # a `</script>` in any of them would end the element early. to_js_literal is stubbed
-    # `str | None`; the chart always has options, so it is a str (the module's ty notes).
-    chart_js = _escape_for_script_element(
-        chart.to_js_literal()  # ty: ignore[invalid-argument-type]
-    )
+    # The exports' own call (`ChartExports.js`), byte for byte: one encoding for the app and the
+    # embeds, so they cannot draw different charts. JSON quotes every string, and `_options_json`
+    # writes `<` as \u003c, so user text can neither go bare nor close this <script> element.
+    chart_js = f"Highcharts.chart({json.dumps(container_id)}, {_options_json(options, indent=None)});"
     # Match the iframe body to the chart's own background so there's no light
     # flash at the edges (or during load) when the app is in dark mode.
     body_bg = _DARK_CHROME["bg"]

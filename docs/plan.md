@@ -117,12 +117,12 @@ In build order. Numbers are stable IDs, not priorities.
 | 14th | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | done (1.1.0) |
 | 15th | 9 | [Delimiter sniffing (Excel dropped)](#9-delimiter-sniffing) | S | done (1.2.0) |
 | 16th | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | done (1.3.0) |
+| 17th | 16 | [Switch the app's iframe to the JSON-built JS](#16-switch-the-apps-iframe-to-the-json-built-js) | M | done (1.3.1) |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
 | — | 7 | [Data prep: aggregate, sort, top-N, filter](#7-data-prep) | M | deferred |
 | — | 10 | [New chart types](#10-new-chart-types) | M each | deferred |
-| — | 16 | [Switch the app's iframe to the JSON-built JS](#16-switch-the-apps-iframe-to-the-json-built-js) | M | deferred |
 | — | 14 | [Spike: run the app in the browser (stlite)](#14-spike-run-the-app-in-the-browser-stlite) | M (spike) | deferred |
 | — | 11 | [Compare charts side by side](#11-compare-charts-side-by-side) | L | dropped |
 
@@ -280,6 +280,13 @@ were settled as follows:
   ISO date second, so the first-column rule holds. *Rejected:* leading with the date (a second
   counterexample to the rule) and no sample.
 
+### 16. Switch the app's iframe to the JSON-built JS
+
+Done in 1.3.1. The app's chart now draws `build_chart_exports(...).js` itself, so a title or
+column name beginning `Date`, or a `{...:...}` format string, no longer blanks it. All 30 types
+drew identical SVG before and after. The argument and the render check are in
+[`decisions.md`](decisions.md#the-strings-highcharts-core-emits-unquoted).
+
 ## Ideas
 
 No open ideas.
@@ -324,19 +331,6 @@ Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.
 | `wordcloud` | pie (label + weight) | Needs a text-heavy sample. |
 | `streamgraph` | cartesian multi-series | Close to `areaspline`; the theme must be checked by rendering. |
 | `pareto` | column + derived line | Sorted bars plus a cumulative-% line. |
-
-### 16. Switch the app's iframe to the JSON-built JS
-
-- **Why deferred:** Split out of [#15](#15-embeddable-outputs-html-js-json) to keep that
-  item to the exports. Once #15 exists, the app's interactive iframe could draw from the
-  same JSON-built JS instead of `to_js_literal`. That would fix both
-  [unquoted-string bugs](decisions.md#the-strings-highcharts-core-emits-unquoted) in the app
-  itself, so one renderer would serve both the app and the exports.
-- **What it costs:** a render check across all 30 types in both browser colour schemes,
-  and the docs that describe the bugs as live in the app (`CLAUDE.md`'s "Two string shapes
-  the serializer emits UNQUOTED" convention) rewritten to say they are confined to
-  `to_js_literal`, which the app would no longer call.
-- **Size:** M · **Status:** deferred
 
 ### 14. Spike: run the app in the browser (stlite)
 
