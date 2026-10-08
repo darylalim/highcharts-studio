@@ -1858,6 +1858,58 @@ def test_python_snippet_writes_only_what_differs_from_the_defaults():
     compile(quoted, "<snippet>", "exec")  # a quote in a column name stays valid Python
 
 
+# --------------------------------------------------------------------------- #
+# Edit data in place (plan #8): the data editor's cell edits
+# --------------------------------------------------------------------------- #
+def test_apply_cell_edits_changes_cells_and_keeps_column_types():
+    # Cells only, by row POSITION (the data editor's shape). The edited columns are rebuilt so
+    # their dtype follows the values: an int column edited with an int stays int, a cleared cell
+    # is a gap (float NaN, as a blank CSV cell is), a decimal turns it float, and a string edit
+    # stays a string. The input frame is not mutated.
+    from highcharts_builder import apply_cell_edits
+
+    df = pd.DataFrame({"m": ["a", "b"], "n": [1, 2], "f": [1.5, 2.5]})
+    edited = apply_cell_edits(df, {0: {"n": 5, "m": "z"}, 1: {"f": None}})
+    assert edited["m"].tolist() == ["z", "b"]
+    assert edited["n"].tolist() == [5, 2] and edited["n"].dtype == "int64"
+    assert edited["f"].iloc[0] == 1.5 and math.isnan(edited["f"].iloc[1])
+    assert df["n"].tolist() == [1, 2] and df["m"].tolist() == ["a", "b"]  # untouched
+    cleared = apply_cell_edits(df, {1: {"n": None}})
+    assert cleared["n"].dtype == "float64" and math.isnan(cleared["n"].iloc[1])
+    # A decimal typed into a column of whole numbers: pandas 3 RAISES on assigning 5.5 into int64
+    # cell by cell, so this is the case the rebuild exists for.
+    decimal = apply_cell_edits(df, {0: {"n": 5.5}})
+    assert decimal["n"].dtype == "float64" and decimal["n"].tolist() == [5.5, 2.0]
+
+
+def test_merge_cell_edits_lays_new_edits_over_kept_ones():
+    # The app keeps its own store of edits and merges the editor's latest into it each run. A
+    # later edit to the same cell wins, other kept cells stay, string row keys are normalized,
+    # and neither input is changed.
+    from highcharts_builder import merge_cell_edits
+
+    kept = {0: {"revenue": 1}, 1: {"cost": 2}}
+    merged = merge_cell_edits(kept, {"0": {"revenue": 5, "month": "X"}, 3: {"cost": 9}})
+    assert merged == {0: {"revenue": 5, "month": "X"}, 1: {"cost": 2}, 3: {"cost": 9}}
+    assert kept == {0: {"revenue": 1}, 1: {"cost": 2}}
+    assert merge_cell_edits(kept, None) == kept
+
+
+def test_apply_cell_edits_ignores_what_the_frame_does_not_have():
+    # An edit to a row or a column the current frame lacks is ignored, never an error, and no
+    # edits at all return the very same frame (no copy, nothing to re-hash differently).
+    from highcharts_builder import apply_cell_edits
+
+    df = pd.DataFrame({"m": ["a", "b"], "n": [1, 2]})
+    assert apply_cell_edits(df, None) is df
+    assert apply_cell_edits(df, {}) is df
+    assert apply_cell_edits(df, {9: {"n": 7}, 0: {"missing": 1}}) is df
+    assert apply_cell_edits(df, {"1": {"n": 7}})["n"].tolist() == [
+        1,
+        7,
+    ]  # string row keys too
+
+
 def _relative_luminance(hex_color):
     """WCAG 2.x relative luminance of a #rrggbb string."""
     raw = hex_color.lstrip("#")
@@ -11206,6 +11258,88 @@ def test_app_export_warns_when_the_export_is_large(app, monkeypatch):
     _reveal_config(app)
     assert not app.exception
     assert any("MB" in w.value and "every row" in w.value for w in app.warning)
+
+
+_LANDING_EDITOR = "data_editor:sample:Monthly revenue vs cost (line/area/column)"
+
+
+def _edit_cells(app, edited_rows: dict) -> None:
+    """Make a data-editor edit the way AppTest allows: through the editor's session state.
+
+    The harness has no data-editor widget to type into. An edit set here lands in the app's own
+    store (`_CELL_EDITS`) on the next run and stays there, exactly as a real edit does.
+    """
+    app.session_state[_LANDING_EDITOR] = {
+        "edited_rows": edited_rows,
+        "added_rows": [],
+        "deleted_rows": [],
+    }
+
+
+def _exported_options(app) -> dict:
+    _reveal_config(app)
+    return json.loads(next(code for code in app.code if code.language == "json").value)
+
+
+def test_app_cell_edits_reach_the_chart_and_the_table_shows_them(app):
+    # Plan #8: an edit in the Source data table changes the chart, because the kept edits are
+    # applied to the frame BEFORE the pickers and the chart read it, and the table is drawn over
+    # that same edited frame, so what it shows is what the chart uses.
+    _edit_cells(app, {0: {"revenue": 999}, 2: {"month": "March"}})
+    app.run()
+    assert not app.exception
+    options = _exported_options(app)
+    assert options["series"][0]["data"][0] == 999  # the edited revenue, first row
+    assert "March" in options["xAxis"]["categories"]
+    table = app.dataframe[0].value
+    assert table["revenue"].iloc[0] == 999 and table["month"].iloc[2] == "March"
+
+
+def test_app_cell_edits_survive_a_gate_that_stops_above_the_table(app):
+    # The bug this design exists for, seen in the running app: a gate that stops ABOVE the table
+    # (timeline's, on the landing data, which has no date column) discards the editor's widget
+    # state, and a data editor cannot be restored from session state, so an edit kept only there
+    # left the chart showing a value the table no longer did. Kept in the app's own store, the
+    # edit comes back in BOTH.
+    _edit_cells(app, {0: {"revenue": 999}})
+    app.run()
+    _select_chart_type(app, "xrange")
+    _chart_type_selectbox(app).set_value("timeline").run()
+    assert not app.dataframe  # the gate stopped above the table
+    _select_chart_type(app, "line")
+    assert not app.exception
+    assert app.dataframe[0].value["revenue"].iloc[0] == 999
+    assert _exported_options(app)["series"][0]["data"][0] == 999
+
+
+def test_app_cell_edits_reset_when_the_dataset_changes(app):
+    # Edits belong to the data they were made on: another dataset starts clean, and coming back
+    # does not resurrect them.
+    _edit_cells(app, {0: {"revenue": 999}})
+    app.run()
+    dataset = next(sb for sb in app.selectbox if sb.label == "Dataset")
+    dataset.set_value("Fruit sales (pie/bar/column)").run()
+    next(sb for sb in app.selectbox if sb.label == "Dataset").set_value(
+        "Monthly revenue vs cost (line/area/column)"
+    ).run()
+    assert not app.exception
+    assert app.dataframe[0].value["revenue"].iloc[0] == 120
+
+
+def test_app_data_editor_is_keyed_by_the_dataset_and_edits_cells_only(app):
+    # Edits belong to the data they were made on: the editor's key is the dataset's identity, so
+    # a different dataset gets a fresh editor with no edits. And cells only: fixed rows, no adding
+    # or deleting (editing_mode 1 is FIXED in the DataEditor proto).
+    editor = app.dataframe[0]
+    assert editor.proto.id.endswith(_LANDING_EDITOR)
+    assert editor.proto.editing_mode == 1
+    next(sb for sb in app.selectbox if sb.label == "Dataset").set_value(
+        "Fruit sales (pie/bar/column)"
+    ).run()
+    assert not app.exception
+    assert app.dataframe[0].proto.id.endswith(
+        "data_editor:sample:Fruit sales (pie/bar/column)"
+    )
 
 
 def test_app_x_selection_survives_a_label_only_chart_type_switch(app):

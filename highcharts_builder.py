@@ -21,6 +21,7 @@ import json
 import math
 import re
 import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -6473,3 +6474,61 @@ def python_snippet(
         + "\n# `chart` is a highcharts_core Chart: chart.to_js_literal() is its JavaScript, and\n"
         + "# build_chart_exports(...) with the same arguments gives the HTML, JS and JSON.\n"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Edit data in place (plan #8): the data editor's cell edits, applied to a frame
+# --------------------------------------------------------------------------- #
+def merge_cell_edits(
+    kept: Mapping[int, Mapping[str, object]],
+    edited_rows: Mapping[Any, Mapping[str, object]] | None,
+) -> dict[int, dict[str, object]]:
+    """``kept`` with ``edited_rows`` laid over it, as a new dict (neither input is changed).
+
+    The app keeps cell edits in its OWN session state and merges the data editor's latest edits
+    into it on every run, because the editor's widget state cannot be relied on to keep them: a
+    gate that stops above the table discards it, and a data editor cannot be restored from session
+    state. Edits are absolute cell values, so laying the same edit over itself is harmless, which
+    is what lets the editor be drawn over the already-edited frame. Row keys are normalized to
+    ``int`` (the editor's state may carry them as strings).
+    """
+    merged = {int(row): dict(changes) for row, changes in kept.items()}
+    for row, changes in (edited_rows or {}).items():
+        merged.setdefault(int(row), {}).update(changes)
+    return merged
+
+
+def apply_cell_edits(
+    df: pd.DataFrame, edited_rows: Mapping[Any, Mapping[str, object]] | None
+) -> pd.DataFrame:
+    """``df`` with cell edits applied, or ``df`` itself when there are none.
+
+    ``edited_rows`` is ``st.data_editor``'s shape: row POSITION to ``{column: new value}``. The app
+    applies its kept edits (``merge_cell_edits``) before its pickers and gates read the frame,
+    which is why this lives here as a pure function rather than in the Streamlit script. Cells only: an
+    edit to a row or a column the frame does not have is ignored, never an error.
+
+    Each edited column is REBUILT from Python values rather than assigned cell by cell, because
+    pandas 3 RAISES ``TypeError`` on assigning a value the column's dtype cannot hold — measured on
+    3.0.6: ``5.5`` into an int64 column raises, while ``None`` there quietly upcasts to float.
+    Rebuilding lets the dtype follow the values instead: an int column edited with ints stays int,
+    a decimal turns it float, and a cleared cell is a gap (NaN), as a blank CSV cell is.
+    """
+    if not edited_rows:
+        return df
+    columns: dict[str, list] = {}
+    for row, changes in edited_rows.items():
+        position = int(row)
+        if not 0 <= position < len(df):
+            continue
+        for col, value in changes.items():
+            if col not in df.columns:
+                continue
+            values = columns.setdefault(col, df[col].tolist())
+            values[position] = value
+    if not columns:
+        return df
+    df = df.copy()
+    for col, values in columns.items():
+        df[col] = pd.Series(values, index=df.index, name=col)
+    return df

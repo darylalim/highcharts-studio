@@ -36,6 +36,7 @@ from highcharts_builder import (
     X_IN_Y_GUARD_TYPES,
     XRANGE_TYPES,
     ChartStyle,
+    apply_cell_edits,
     build_chart_exports,
     build_chart_html,
     count_marks,
@@ -45,6 +46,7 @@ from highcharts_builder import (
     explain_xrange_error,
     gauge_dial,
     log_scale_ok,
+    merge_cell_edits,
     picker_columns,
     python_snippet,
     style_controls_for,
@@ -70,6 +72,8 @@ _STYLE_KEYS = {
     "log_y": "style_log_y",
     "reference_line": "style_reference_line",
 }
+# The app's own store of the data editor's cell edits (plan #8): {"data_id": ..., "edits": ...}.
+_CELL_EDITS = "_cell_edits"
 _KEYED_PICKERS = ("x_col", "y_pills", "y_multiselect", *_STYLE_KEYS.values())
 
 
@@ -564,6 +568,7 @@ with st.sidebar:
         name = st.selectbox("Dataset", list(SAMPLES))
         df = SAMPLES[name]()
         data_sample = name
+        data_id = f"sample:{name}"
     else:
         uploaded = st.file_uploader("CSV file", type="csv")
         if uploaded is None:
@@ -583,6 +588,27 @@ with st.sidebar:
             st.stop()
         df = load_csv(uploaded)
         data_csv = uploaded.name
+        data_id = f"csv:{uploaded.file_id}"
+
+    # Edit data in place (plan #8). The edits are KEPT in the app's own session state
+    # (`_CELL_EDITS`), not left in the editor's widget state, and that is the design rather than
+    # a detail: a gate that stops ABOVE the table discards the widget's state, and a data editor
+    # cannot be restored from session state, so a kept-but-undrawn edit would leave the chart
+    # showing a value the table no longer did (seen in the running app before this store
+    # existed). Each run merges the editor's latest edits into the store; the store belongs to
+    # one dataset and starts empty when the dataset changes; and the edits are applied HERE,
+    # before the pickers and the gate below read `df`. The editor, drawn later in the main panel,
+    # is given the EDITED frame, so after any stop it redraws showing exactly what the chart uses.
+    editor_key = f"data_editor:{data_id}"
+    kept = st.session_state.get(_CELL_EDITS)
+    edits = kept["edits"] if kept and kept["data_id"] == data_id else {}
+    editor_state = st.session_state.get(editor_key)
+    edits = merge_cell_edits(
+        edits,
+        editor_state.get("edited_rows") if isinstance(editor_state, dict) else None,
+    )
+    st.session_state[_CELL_EDITS] = {"data_id": data_id, "edits": edits}
+    df = apply_cell_edits(df, edits)
 
     numeric_cols = df.select_dtypes("number").columns.tolist()
     # The columns that can place an xrange bar on an axis: numbers OR dates. A superset of
@@ -1333,12 +1359,23 @@ with right.container(border=True, height="stretch"):
             if x_col in numeric_cols
             else st.column_config.Column(pinned=True)
         )
-    st.dataframe(
-        df, height=min(height, 360), hide_index=True, column_config=column_config
+    # Editable (plan #8): cells only (`num_rows="fixed"`, no added or deleted rows). It is given
+    # the EDITED frame: the kept edits are already in it, and the widget's own edits are absolute
+    # cell values, so laying them over it again changes nothing.
+    st.data_editor(
+        df,
+        key=editor_key,
+        num_rows="fixed",
+        height=min(height, 360),
+        hide_index=True,
+        column_config=column_config,
     )
     # Row count lives in the KPI row; the total-column count is what that row
     # (Rows + numeric-column count) doesn't already surface.
-    st.caption(f"{len(df.columns)} columns total")
+    st.caption(
+        f"{len(df.columns)} columns total. Click a cell to edit it; edits reset when you "
+        "change the dataset."
+    )
 
 with left.container(border=True, height="stretch"):
     st.subheader("Highcharts output")

@@ -33,6 +33,22 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.0.0] - 2026-10-07
+
+**1.0: the editor loop is complete.** Data in (samples or a CSV, now editable in place), pick a
+chart (30 types, grouped by family), tweak it (style controls), take it out (PNG/JPEG/SVG from
+the chart, and HTML, JS, JSON or Python from the Export panel). Every item in the plan's planned
+set has shipped, which is the finish line `docs/plan.md` set for 1.0. From here the project
+follows semantic versioning in full: a removal of public API is a major release.
+
+### Added
+
+- **Edit data in place:** click a cell in the Source data table to change it, and the chart,
+  the KPI row and the exports follow. Cells only (no adding or deleting rows). Edits reset when
+  the dataset changes, and survive switching to a chart type that cannot draw the data and back.
+- **Builder API:** `apply_cell_edits(df, edited_rows)` and `merge_cell_edits(kept,
+  edited_rows)`.
+
 ## [0.26.0] - 2026-10-07
 
 A new export, so a minor.
