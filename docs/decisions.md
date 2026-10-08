@@ -762,7 +762,9 @@ ended after **11.4.3**. So the premise was true once and is not now. Two consequ
 - **A big pie draws but cannot be read.** At 1,200 slices it is a dark disc: the slices are so
   thin that their borders, painted the background colour, cover most of the fill. That is
   readability, not breakage, so it was split out as an idea (plan #24, group the tail into
-  "Other") rather than fixed as a bug.
+  "Other") rather than fixed as a bug. Shipped in 1.1.0: a pie past 8 slices and a treemap
+  past 20 tiles fold their tail into "Other", and a funnel or pyramid past 15 stages refuses
+  ([the entry](chart-types.md)).
 
 One practical note for the next person who reads Highcharts' source: `code.highcharts.com` answers
 `403 Missing Referer` to a request without a `Referer` header, which is why scripted fetches of it

@@ -33,6 +33,25 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.1.0] - 2026-10-07
+
+Big part-of-whole charts become readable (plan #24), so a minor.
+
+### Added
+
+- **A pie past 8 slices or a treemap past 20 tiles groups its smallest rows into "Other",** and a
+  caption under the chart says how many rows were grouped. A 1,200-row pie used to draw as a dark
+  disc. The 8 is the palette, so no two slices share a colour; a row already named "Other" absorbs
+  the group rather than appearing twice. The treemap's "Tiles" KPI counts the tiles drawn.
+- **Builder API:** `folded_row_count(df, chart_type, x_col, y_cols)`,
+  `explain_funnel_error(df, chart_type, x_col, value_col)` and `OTHER_LABEL`.
+
+### Changed
+
+- **A funnel or pyramid past 15 stages is refused with a message** instead of drawn. Past that,
+  Highcharts hides the labels of the smallest stages, and a stage's label is the only thing that
+  names it. Its stages are an order, so they are not grouped into "Other" the way a pie's are.
+
 ## [1.0.0] - 2026-10-07
 
 **1.0: the editor loop is complete.** Data in (samples or a CSV, now editable in place), pick a

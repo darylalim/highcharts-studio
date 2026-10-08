@@ -187,7 +187,16 @@ plausible guess the round-trip corrects). The one rendering fact that IS Highcha
 not the builder's: a funnel draws row 0 at the **top** and narrows down, a pyramid draws
 row 0 at the **base** and narrows up to an apex — so the same largest-first frame is a
 funnel pointing down or a pyramid pointing up, which is the whole of the difference
-(verified by rendering)), `sankey` (a node-link flow diagram — the only type
+(verified by rendering)). The four part-of-whole types share **one size policy, split by
+order** (plan #24): past its limit a **pie** (`_PIE_MAX_SLICES`, the palette's 8) or a
+**treemap** (`_TREEMAP_MAX_TILES`, 20) keeps its largest marks in row order and folds the rest
+into one `"Other"` (`_fold_tail`, which a kept row already named "Other" absorbs), while a
+**funnel** or **pyramid** past `_FUNNEL_MAX_STAGES` (15) **refuses** through
+`explain_funnel_error`, since folding "the smallest" would reorder stages that ARE an order.
+Every limit counts marks DRAWN, "Other" included, and the two measured ones were set where
+Highcharts starts hiding labels — the only thing naming a tile or a stage. One computation
+(`_part_of_whole_leaves` + `_fold_tail`) feeds the chart, treemap's "Tiles" KPI and the app's
+"grouped into Other" caption (`folded_row_count`), so the three cannot disagree, `sankey` (a node-link flow diagram — the only type
 that reads the data as *edges of a graph* rather than as series or categories:
 each row is one link, from the node named in `x_col` to the node named in
 `target_col`, weighted by the first `y_cols` column, encoded as
@@ -267,7 +276,8 @@ box** on every node hover (verified by rendering). The node-specific `nodeFormat
 is silently dropped (sankey's `nodeFormat` trap, one type over), so the node format cannot be set
 explicitly at all — and Highcharts' OWN default is correct (it prints the node name), the one and
 only way to get it. So the tooltip is left default (`_themed` still paints its box for dark mode).
-It has a **large-data policy**, the only type that refuses on size: past
+It has a **large-data policy**, refusing on size (as funnel and pyramid now do, past
+`_FUNNEL_MAX_STAGES`, for a label limit rather than a layout one): past
 `_NETWORKGRAPH_MAX_NODES` (150) distinct drawable nodes `build_options` raises and the app warns
 (through `explain_networkgraph_error`). Measured, not chosen: with the simulation off the layout
 runs synchronously at a cost near the square of the node count (0.8s at 140 nodes, 7.4s at 440),
@@ -1812,6 +1822,11 @@ not merely the format string that used to hide the absurd number.
   **size** — an edge list past `_NETWORKGRAPH_MAX_NODES` has a right drawing in principle, but
   not one the viewer's browser can lay out without freezing. Same contract, reached by an
   ordinary uploaded CSV, so the app must warn and stop rather than hang.
+  `explain_funnel_error()` is the fifth, and the second **size**: a funnel or pyramid past
+  `_FUNNEL_MAX_STAGES` draws, but its smallest stages lose the labels that name them. Its
+  part-of-whole cousins pie and treemap have the same problem and **no** `explain_*`, because an
+  unordered whole has a right drawing past its limit (fold the tail into "Other") and an ordered
+  one does not.
   Then `coordinate_columns()`, the
   builder's own answer to "which columns can place a bar on an axis" — the can't-drift rule
   applied to *which options appear in a widget*, so a picker cannot offer a column the builder

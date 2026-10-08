@@ -114,7 +114,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | done (0.25.0) |
 | 12th | 2 | [Export as Python](#2-export-as-python) | S | done (0.26.0) |
 | 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | done (1.0.0) |
-| — | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | idea |
+| 14th | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | done (1.1.0) |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
@@ -231,21 +231,28 @@ before the sidebar runs, and they reset when the dataset changes. The app keeps 
 own store rather than the editor's state, a design forced by a bug only rendering showed. Why:
 [`decisions.md`](decisions.md#editing-data-the-app-keeps-the-edits).
 
-## Ideas
-
 ### 24. Group a big pie's tail into "Other"
 
-- **What & why:** Split out of [#22](#22-large-datasets). A pie, treemap, funnel or pyramid of
-  1,200 rows draws, but cannot be read: the 1,200-slice pie rendered on 2026-10-07 is a dark disc,
-  because the slices are so thin that their borders (painted the background colour) cover most of
-  the fill. Keep the largest slices and fold the rest into one "Other" point, with a caption saying
-  how many were grouped. Funnel and pyramid are ordered stages, not parts to rank, so they may need
-  a row cap with a message instead.
-- **Why an idea, not planned:** nothing breaks, so 1.0 is not incomplete without it (the bar in
-  [Direction](#direction-a-lightweight-chart-editor)).
-- **Open questions:** how many slices to keep (a fixed number, or a share of the total)? Should
-  `count_marks` report the drawn slices or the rows?
-- **Size:** S–M · **Status:** idea
+Done in 1.1.0. A pie past 8 slices and a treemap past 20 tiles keep their largest marks and fold
+the rest into one "Other", with a caption under the chart saying how many rows were grouped; a
+funnel or pyramid past 15 stages is refused with a message instead. The limits, and how the two
+measured ones were measured, are in [`chart-types.md`](chart-types.md#how-a-chart-is-built).
+The three open questions were settled as follows, with the options turned down kept:
+
+- **How many to keep:** a fixed count of marks drawn, "Other" included. The pie's is the palette
+  (7 + "Other" = 8 hues, none repeated); the treemap's was set by rendering. *Rejected:* a share
+  threshold ("fold anything under 2%"), which does not bound the count, since fifty 2% slices all
+  survive; and both together, two numbers to explain where one does the job.
+- **What `count_marks` reports:** the marks drawn, so treemap's "Tiles" KPI matches the chart
+  and the caption carries the folded row count. *Rejected:* the rows, which would make the KPI
+  disagree with the chart, the drift `count_marks` exists to prevent.
+- **Funnel and pyramid:** refused past their limit (networkgraph's contract). *Rejected:* folding
+  them like a pie, which reorders stages that are an order; and leaving them out, which leaves a
+  funnel whose smallest stages lose their labels.
+
+## Ideas
+
+No open ideas.
 
 ## Folded
 
