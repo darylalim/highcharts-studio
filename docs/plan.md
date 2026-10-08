@@ -21,7 +21,8 @@ is not re-proposed without new information.
 editor loop is complete and the next release is **1.0**. That gives the plan a finish line,
 and the Shipping rule's "while below 1.0" clause (see the [Legend](#legend)) a defined end.
 A new item joins the planned set only if 1.0 would be incomplete without it; anything else
-waits until after 1.0.
+waits until after 1.0. **Reached on 2026-10-07:** #8 completed the planned set and shipped as 1.0.0. From
+here, items are ordinary features and fixes under semantic versioning (a removal is a major).
 
 **Kept out on purpose:**
 
@@ -112,7 +113,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 10th | 17 | [Group the chart-type picker by family](#17-group-the-chart-type-picker-by-family) | M | done (0.24.0) |
 | 11th | 15 | [Embeddable outputs: HTML, JS, JSON](#15-embeddable-outputs-html-js-json) | M | done (0.25.0) |
 | 12th | 2 | [Export as Python](#2-export-as-python) | S | done (0.26.0) |
-| 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | planned |
+| 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | done (1.0.0) |
 | — | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | idea |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
@@ -225,13 +226,10 @@ tested: [`decisions.md`](decisions.md#export-as-python-load-dont-inline).
 
 ### 8. Edit data in place
 
-- **What & why:** Swap the read-only `st.dataframe` preview for `st.data_editor`, so a user
-  can fix a typo or try a value without re-uploading.
-- **Touches:** `streamlit_app.py`. The edited frame must replace `df` *before* the pickers
-  and the gate run.
-- **Decided:** edit cells only (no adding or deleting rows, the lightweight answer), and
-  edits reset when the dataset changes: they belong to the data they were made on.
-- **Size:** S · **Status:** planned
+Done in 1.0.0: the Source data table is a `st.data_editor` (cells only), its edits reach the chart
+before the sidebar runs, and they reset when the dataset changes. The app keeps the edits in its
+own store rather than the editor's state, a design forced by a bug only rendering showed. Why:
+[`decisions.md`](decisions.md#editing-data-the-app-keeps-the-edits).
 
 ## Ideas
 

@@ -55,7 +55,8 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
 
 ## Structure
 
-- `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV upload),
+- `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV upload, editable
+  cell by cell in the Source data table, see [Test](#test)),
   a two-step chart-type picker (family pills, then a selectbox of that family's types, both
   read from the builder's `CHART_FAMILIES`; the selectbox's help shows only that family's
   types), column controls (pills for the Y series, falling back to `st.multiselect` on
@@ -449,6 +450,16 @@ separates a correct loss from a bug: a selection may be dropped when it stopped 
 (the widget reconciles it), never when it merely stopped being **rendered**. Verify any change
 here by breaking it; all five mutations are one-liners (the last two: delete either
 `keep_picker_state()` call).
+
+The **data editor** (the editable Source data table) is the case garbage collection cannot be
+patched around, so its edits do not live in widget state at all. A gate that stops above the table
+discards the editor's state, and a data editor cannot be restored from session state, so
+re-assigning its key at the stop (the pickers' fix) kept the edit for the CHART while the redrawn
+table showed the original: worse than losing it, and seen only by rendering. The app keeps its own
+store (`_CELL_EDITS`, one dataset at a time), merges the editor's latest edits into it on every
+run (`merge_cell_edits`), applies them before the pickers read `df` (`apply_cell_edits`), and draws
+the editor over the EDITED frame, which is safe because edits are absolute cell values. AppTest
+cannot type into a data editor; the tests set its session state once, which the store then keeps.
 
 The **style controls** meet garbage collection twice, and each has its own AppTest. A stop above
 them is the pickers' case, closed by listing their keys in `_KEYED_PICKERS`. The new one is a

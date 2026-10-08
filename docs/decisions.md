@@ -34,7 +34,8 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [Style: one object, not one kwarg per control](#style-one-object-not-one-kwarg-per-control) ·
 [Chart-type picker: families, then types](#chart-type-picker-families-then-types) ·
 [Embeddable exports: JSON first](#embeddable-exports-json-first) ·
-[Export as Python: load, don't inline](#export-as-python-load-dont-inline)
+[Export as Python: load, don't inline](#export-as-python-load-dont-inline) ·
+[Editing data: the app keeps the edits](#editing-data-the-app-keeps-the-edits)
 
 ## Packaging: the fact with no second home
 
@@ -1073,3 +1074,40 @@ whose escapes are valid Python and whose double quotes match Ruff; lines stay wi
 **Pinned by running it.** For every type, the snippet is executed with `pd.read_csv` returning the
 test frame, and must emit exactly the JS a direct `make_chart` call emits, with a title and that
 type's style set. That is the only test that can tell the snippet from a plausible-looking one.
+
+## Editing data: the app keeps the edits
+
+Plan #8 made the Source data table editable (`st.data_editor`, cells only), so a typo can be fixed
+or a value tried without re-uploading. Settled before the code: cells only, no added or deleted
+rows (the lightweight answer); and edits reset when the dataset changes, since they belong to the
+data they were made on.
+
+**The edits must reach the chart before the sidebar runs.** The table is drawn in the main panel,
+after the pickers and gates have read `df`. A data editor's edits are in session state before it
+is drawn again, so they can be applied straight after the data loads.
+
+**The first design kept them in the editor's widget state, and rendering showed why that fails.**
+A gate that stops ABOVE the table (timeline's, on data with no date column) means the editor is
+not drawn, so Streamlit discards its state. Re-assigning its key at the stop, the fix the X and Y
+pickers use, did keep the edit in session state, but a data editor cannot be RESTORED from session
+state: the chart still showed the edit while the redrawn table showed the original value. Every
+AppTest passed, because an edit AppTest sets through session state is plain state that is never
+discarded. Only a real edit in the running app showed it.
+
+**So the app keeps its own store** (`_CELL_EDITS`: the dataset's identity and its edits). On every
+run it merges the editor's latest edits into the store (`merge_cell_edits`), applies the store
+before the pickers read `df` (`apply_cell_edits`), and draws the editor over the EDITED frame.
+That last step is safe because edits are absolute cell values, so applying one twice changes
+nothing. After any stop, the table redraws showing exactly what the chart uses. Rendered on
+2026-10-07: a cleared cell drew as a gap; it survived a visit to timeline's stopping gate in both
+the table and the chart; and it was gone after a round trip through another dataset.
+
+**Columns are rebuilt, not assigned cell by cell.** Measured on pandas 3.0.6: assigning `5.5` into
+an int64 column RAISES `TypeError` (while `None` there quietly upcasts to float). Rebuilding each
+edited column from Python values lets its dtype follow the values instead: int edits keep it int,
+a decimal makes it float, and a cleared cell is a gap, as a blank CSV cell is.
+
+**A tooling note from the same session:** a Streamlit dev server left running while tests rewrote
+the source files (the mutation checks) can half-reload its modules and fail every run with an
+import error, which looks exactly like an app that ignores input. Restart the server after
+mutation testing, as `CLAUDE.md`'s Run section already advises for stale state.
