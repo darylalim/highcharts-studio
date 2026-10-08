@@ -14,6 +14,9 @@ Python toolkit; the app uses no native Streamlit charts.
 **Live demo:** <https://highcharts-studio.streamlit.app> (public and non-commercial; it may take a
 moment to wake up after a quiet spell).
 
+![Highcharts Studio: a line chart of monthly revenue and cost, with the chart controls in the
+sidebar and the editable source data beside the chart](docs/images/screenshot.png)
+
 ## Contents
 
 [Features](#features) · [Chart types](#chart-types) · [Quick start](#quick-start) ·
