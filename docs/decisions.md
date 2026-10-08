@@ -544,8 +544,21 @@ would also be *permanent*, outliving the upstream fix by however long nobody not
 Renaming a user's column is the same offence with a plainer face. So the trade taken is:
 **live with the bug, and pin it.**
 
+**How the app got out of it without editing anything (1.3.1, plan #16).** The trade above
+assumed the library owns the serialization. Plan #15 broke that assumption for the embeds,
+which serialize the `build_options` dict with the standard library's `json`; #16 pointed the
+app's iframe at the same call. JSON quotes every string, so `Dates that mattered` and
+`{value:%b %Y}` reach the chart as the strings the user typed — a fix that mutates nothing,
+which is the property every workaround above lacked. `Chart.from_options` still runs, to
+validate the options and resolve the script tags; only its `to_js_literal` is no longer called.
+The render check that cleared it: every supported type drawn both ways in Chrome, and the
+`.highcharts-root` SVGs compared after normalizing Highcharts' generated ids — identical for all
+30, including the treemap, whose `plotOptions.treemap.borderColor` (which `to_js_literal` drops)
+now reaches the chart and paints the colour `levels` already did.
+
 `test_a_string_beginning_with_date_is_emitted_unquoted_by_the_library` therefore asserts
-the bug is **still there**, not that it is fixed. That is the only mechanism by which a
+the bug is **still there**, not that it is fixed. It still earns its place: `make_chart` is
+public API, and the Python snippet hands its reader a `Chart` whose `to_js_literal` has the bug. That is the only mechanism by which a
 repo that chose to live with something learns that the thing changed: fixed upstream, the
 test fails and this section comes out; widened upstream, it fails too. It is the same
 "pin the library's behaviour, not our hope for it" move as the silent-drop tests
@@ -701,7 +714,12 @@ Inside the app's sandboxed iframe that only broke the uploader's own chart. On a
 else embeds (plan #15's exports) it would be a script-injection hole, which is why it was fixed
 before anything else.
 
-`_escape_for_script_element` replaces every `</` with `<\/` and every `<!--` with `<\!--`. The
+**Superseded in 1.3.1.** Plan #16 moved the app's chart onto the exports' JSON (`_options_json`),
+which writes every `<` as `\u003c` — so neither `</` nor `<!--` can occur in the call at all, and
+`_escape_for_script_element` was deleted. The sweep below still runs, now against that encoding.
+What follows is the escape as it was.
+
+`_escape_for_script_element` replaced every `</` with `<\/` and every `<!--` with `<\!--`. The
 second is the other way in: `<!--` can switch the parser into a mode where a later `<script`
 hides the real close. **Why this is not editing what the user typed:** inside a JS string `\/`
 *is* `/` and `\!` *is* `!`, so the string the chart receives is byte-for-byte the original.
@@ -1030,9 +1048,10 @@ every type, failing on any new dropped key until it is fixed or listed with a re
 - **JSON: standard-library `json`** over the `build_options` dict, with `EnforcedNull`
   written as `null` and `allow_nan=False`. Not `chart.to_json()`. Charts still pass through
   `highcharts-core` (`make_chart` validates them) everywhere else.
-- **The app's own iframe stays on `to_js_literal` for now.** Switching it is
-  [#16](#16-switch-the-apps-iframe-to-the-json-built-js), deferred, so #15 only changes the
-  exports.
+- **The app's own iframe stayed on `to_js_literal` at first.** Switching it was split out as
+  [plan #16](plan.md#16-switch-the-apps-iframe-to-the-json-built-js) and done in 1.3.1: the
+  iframe now draws `exports.js` itself
+  ([what it fixed](#the-strings-highcharts-core-emits-unquoted)).
 - **Container id: generated, overridable.** By default, a stable id derived from the
   options (e.g. `hc-3f9a`), so the same chart always gets the same id; an optional text box
   sets your own to match an existing `<div>`. Two *identical* charts on one page would share

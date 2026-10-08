@@ -220,7 +220,7 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
 # build_options() -> Chart.from_options() -> set container, in one call:
 chart = make_chart(df, chart_type, x_col, y_cols, title=title)
 
-# interactive: get_script_tags() + to_js_literal() wrapped as HTML for st.iframe
+# interactive: get_script_tags() + the options as JSON, wrapped as HTML for st.iframe
 html = build_chart_html(df, chart_type, x_col, y_cols, height=height, title=title)
 
 # downloads: none — every chart carries Highcharts' ☰ menu (`_EXPORTING`), which draws
@@ -234,13 +234,15 @@ exports.json, exports.js, exports.html_snippet, exports.html_page
 code = python_snippet(chart_type, x_col, y_cols, csv_name="data.csv", style=style)
 ```
 
-The exports are serialized by the standard library's `json`, not `to_js_literal`, so they are
-immune to both strings highcharts-core emits unquoted, and `<`, `>`, `&` are written as `\u003c`
-etc. so user text cannot close the `<script>` a snippet is pasted into. The app's own iframe still
-uses `to_js_literal` (switching it is plan #16).
-`test_no_option_the_builder_sets_is_silently_dropped` keeps the two paths from drawing different
-charts: it fails on any key the builder sets that highcharts-core drops on the way to the JS, which
-is how the treemap tile border went unapplied until 0.25.0.
+The chart is serialized by the standard library's `json`, not `to_js_literal`, so it is immune
+to both strings highcharts-core emits unquoted, and `<`, `>`, `&` are written as `\u003c` etc. so
+user text cannot close the `<script>` it sits in. That holds for the app's own iframe too: its
+call **is** `exports.js` (for the same container id), byte for byte, pinned by
+`test_the_apps_chart_draws_the_exports_call`, so the app and the embeds are one encoding.
+`test_no_option_the_builder_sets_is_silently_dropped` still guards the other path, the Python
+API's `make_chart(...).to_js_literal()`: it fails on any key the builder sets that highcharts-core
+drops on the way to the JS, which is how the treemap tile border went unapplied in the app until
+0.25.0.
 
 Neither takes a mode flag: `_themed` applies the dark chrome unconditionally, because
 `.streamlit/config.toml` is a single `[theme]` and every viewer therefore gets the dark
@@ -657,10 +659,14 @@ conventions in their original, fully-enumerated form); the argument behind each 
   **empty** column sums to `0.0`, the additive **identity** — a confident claim of "the
   total is zero" where the truth is "there is no data" — so `_gauge_value` tests for empty
   **above** the reducer. Only `sum` lies, which makes it worse rather than better.
-- **Two string shapes the serializer emits UNQUOTED**, and both blank the **iframe** — and
-  its download, which re-renders it in the browser (the retired export server, built from JSON,
-  rendered them perfectly, which is how they hid). No options-dict test can see it, so
-  assert on `to_js_literal()` output, never on the dict. (1) A value that opens `{`, closes `}`
+- **Two string shapes `to_js_literal` emits UNQUOTED.** Each makes the chart call a
+  `SyntaxError`, and each used to blank the app's iframe and its download. Since 1.3.1 (plan #16)
+  nothing the app draws calls `to_js_literal` — the iframe and every export are JSON — so they now
+  reach only a caller of the Python API (`make_chart(...).to_js_literal()`, which is where the
+  Export panel's Python snippet points its reader). `test_the_apps_chart_survives_the_strings_the_library_emits_unquoted`
+  pins the app's side. The serializer is still the public API's, so it is still swept: no
+  options-dict test can see either shape, so assert on `to_js_literal()` output, never on the
+  dict. (1) A value that opens `{`, closes `}`
   and carries **at least as many colons as brace-pairs** is written as a bare JS object on **any
   key and any axis** —
   `{"format": "{value:%b %Y}"}` becomes `format: {value:%b %Y}`. It is a property of the VALUE:

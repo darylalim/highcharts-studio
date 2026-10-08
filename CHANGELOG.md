@@ -33,6 +33,19 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.3.1] - 2026-10-08
+
+The app's chart draws from the same JSON as the exports (plan #16), so a patch.
+
+### Fixed
+
+- **A chart titled, or with a column named, something beginning `Date` (such as `Dates that
+  mattered` or `Date added`) now draws.** It used to come up blank, because the library that
+  writes the chart's JavaScript left such strings unquoted. The app's chart is now written with
+  the same JSON encoding as the Export panel, which quotes every string, so the app and its
+  exports always draw the same chart. Nothing else changes: all 30 chart types draw exactly as
+  before.
+
 ## [1.3.0] - 2026-10-07
 
 Dates on the X axis are spaced by time (plan #4), so a minor.
