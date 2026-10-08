@@ -115,10 +115,10 @@ In build order. Numbers are stable IDs, not priorities.
 | 12th | 2 | [Export as Python](#2-export-as-python) | S | done (0.26.0) |
 | 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | done (1.0.0) |
 | 14th | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | done (1.1.0) |
+| 15th | 9 | [Delimiter sniffing (Excel dropped)](#9-delimiter-sniffing) | S | done (1.2.0) |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
-| — | 9 | [Delimiter sniffing (Excel dropped)](#9-delimiter-sniffing) | S | deferred |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
 | — | 7 | [Data prep: aggregate, sort, top-N, filter](#7-data-prep) | M | deferred |
 | — | 10 | [New chart types](#10-new-chart-types) | M each | deferred |
@@ -250,6 +250,21 @@ The three open questions were settled as follows, with the options turned down k
   them like a pie, which reorders stages that are an order; and leaving them out, which leaves a
   funnel whose smallest stages lose their labels.
 
+### 9. Delimiter sniffing
+
+Done in 1.2.0. An upload delimited by semicolons, tabs or pipes now splits into its columns, and
+the Python tab writes the same `sep=`. Excel stays **dropped** (a new `openpyxl` dependency,
+against "lightweight"). The plan's one-liner, `sep=None, engine="python"`, was rejected after a
+probe: it splits a one-column file on a letter of its header. Why, and what was built instead:
+[`decisions.md`](decisions.md#csv-delimiters-sniff-from-a-short-list). The open question was
+settled as follows:
+
+- **Comma decimals (`1,5`):** no widget, and no guessing. A semicolon file's comma-decimal column
+  still loads as text, so it is not offered as a Y series. *Rejected:* `decimal=","` whenever the
+  delimiter is a semicolon, which would misread a semicolon file that writes `1,000` as a
+  thousands separator, silently and by a factor of a thousand; and a widget, a control for one
+  locale's files.
+
 ## Ideas
 
 No open ideas.
@@ -281,15 +296,6 @@ Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.
 - **Open questions when picked up:** Should a date X be sniffed automatically, or a toggle?
   Its sample would lead with a date column, which breaks the
   [first-column rule](chart-types.md#the-sample-datasets).
-
-### 9. Delimiter sniffing
-
-- **Why deferred, and narrowed:** Excel upload is **dropped** (it needs a new `openpyxl`
-  dependency, against "lightweight"). Only the cheap half stays: `load_csv` is a bare
-  `pd.read_csv(file)`, so a semicolon-delimited CSV (common outside the US) loads as one
-  column. `sep=None, engine="python"` sniffs the delimiter, with no new control.
-- **Open questions when picked up:** Comma-decimal numbers (`1,5`) still need an explicit
-  option; is that worth a widget?
 
 ### 3. Shareable link
 

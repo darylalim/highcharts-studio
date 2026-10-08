@@ -33,6 +33,24 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.2.0] - 2026-10-07
+
+Uploads split on more than commas (plan #9), so a minor.
+
+### Added
+
+- **A CSV delimited by semicolons, tabs or pipes loads as columns.** It used to arrive as one
+  column named after the whole header line, with nothing to plot. Semicolons are the usual
+  delimiter where the comma is the decimal separator. The delimiter is detected, with no new
+  control, and a one-column file still reads exactly as before.
+- **The Python tab writes the delimiter:** `pd.read_csv("data.csv", sep=";")`, so the exported
+  code reads the file the same way the app did.
+- **Builder API:** `sniff_delimiter(sample)`, `CSV_DELIMITERS`, and `python_snippet(sep=)`.
+
+### Known limitations
+
+- Comma decimals (`1,5`) still load as text, so such a column is not offered as a Y series.
+
 ## [1.1.0] - 2026-10-07
 
 Big part-of-whole charts become readable (plan #24), so a minor.
