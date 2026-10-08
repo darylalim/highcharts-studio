@@ -52,6 +52,7 @@ from highcharts_builder import (
     merge_cell_edits,
     picker_columns,
     python_snippet,
+    sniff_delimiter,
     style_controls_for,
 )
 from sample_data import SAMPLES
@@ -404,8 +405,14 @@ st.set_page_config(
 # layer gets the tighter cap: an uploaded CSV DataFrame can be multi-MB
 # (load_csv=8); the HTML and JS are small strings that share the looser 128 cap.
 @st.cache_data(show_spinner=False, max_entries=8)
-def load_csv(file) -> pd.DataFrame:
-    return pd.read_csv(file)
+def load_csv(file) -> tuple[pd.DataFrame, str]:
+    # The delimiter is sniffed from the opening 64 KB (plan #9) and handed to the C parser,
+    # rather than read with pandas' `sep=None`: that needs the slow python engine AND lets the
+    # sniffer split a one-column file on a letter of its header (`sniff_delimiter` says how).
+    # Returned beside the frame so the Python export reads the file the same way.
+    sep = sniff_delimiter(file.read(65536).decode("utf-8", errors="replace"))
+    file.seek(0)
+    return pd.read_csv(file, sep=sep), sep
 
 
 @st.cache_data(show_spinner="Rendering Highcharts…", max_entries=128)
@@ -567,6 +574,7 @@ with st.sidebar:
     # data the same way — a sample by its label, an upload by its file name.
     data_sample: str | None = None
     data_csv: str | None = None
+    data_sep = ","
     if source == "Sample dataset":
         name = st.selectbox("Dataset", list(SAMPLES))
         df = SAMPLES[name]()
@@ -589,7 +597,7 @@ with st.sidebar:
                 icon=":material/upload_file:",
             )
             st.stop()
-        df = load_csv(uploaded)
+        df, data_sep = load_csv(uploaded)
         data_csv = uploaded.name
         data_id = f"csv:{uploaded.file_id}"
 
@@ -1753,6 +1761,7 @@ with left.container(border=True, height="stretch"):
                 list(y_cols),
                 sample=data_sample,
                 csv_name=data_csv,
+                sep=data_sep,
                 title=title,
                 size_col=size_col,
                 target_col=target_col,

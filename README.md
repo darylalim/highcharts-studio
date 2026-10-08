@@ -24,7 +24,8 @@ sidebar and the editable source data beside the chart](docs/images/screenshot.pn
 
 ## Features
 
-- **Data in.** Built-in sample datasets or your own CSV. Map columns with pills, which fall back
+- **Data in.** Built-in sample datasets or your own CSV (comma, semicolon, tab or pipe
+  delimited, detected for you). Map columns with pills, which fall back
   to a multiselect on wide CSVs.
 - **Edit in place.** Click a cell in the Source data table to fix a typo or try a value, and the
   chart follows. Cells only (no adding or deleting rows); edits reset when you change dataset.

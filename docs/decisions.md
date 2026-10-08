@@ -1113,3 +1113,26 @@ a decimal makes it float, and a cleared cell is a gap, as a blank CSV cell is.
 the source files (the mutation checks) can half-reload its modules and fail every run with an
 import error, which looks exactly like an app that ignores input. Restart the server after
 mutation testing, as `CLAUDE.md`'s Run section already advises for stale state.
+
+## CSV delimiters: sniff from a short list
+
+**The plan's fix was one argument, and a probe disproved it.** `pd.read_csv(file, sep=None,
+engine="python")` does sniff a semicolon file correctly, but on a file with ONE column
+(`value\n1\n2`) there is no delimiter to find, and pandas' sniffer picks a character anyway: the
+`v` of the header, so the frame arrives as `Unnamed: 0` and `alue`. That file read correctly before
+sniffing existed, so the obvious fix was a regression. Measured on pandas 3.0.6 and Python 3.12.
+
+**So the app sniffs for itself, from a short list.** `sniff_delimiter` hands Python's
+`csv.Sniffer` only `CSV_DELIMITERS` (comma, semicolon, tab, pipe). Given that list, the sniffer
+REFUSES a one-column file instead of guessing, and the refusal falls back to the comma, which is
+exactly the old read. The last line of the sample is dropped, because a sample cut at a byte budget
+usually ends mid-row. The sniffed delimiter then goes to pandas' default C parser, so a large
+upload does not pay for the slower python engine.
+
+**The delimiter travels with the frame.** `load_csv` returns it beside the DataFrame, and
+`python_snippet(sep=)` writes it into the Python tab's `pd.read_csv`. Without that, the export
+promising "the Python that rebuilds this chart" would read a semicolon file as one column, the bug
+this item fixed, in the one place the user takes the code away.
+
+`test_app_reads_a_one_column_csv_as_one_column` pins the regression at the layer where it happens:
+put the plan's one-liner back into `load_csv` and it fails with `['Unnamed: 0', 'alue']`.

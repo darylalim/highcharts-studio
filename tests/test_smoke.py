@@ -1859,6 +1859,55 @@ def test_python_snippet_writes_only_what_differs_from_the_defaults():
     compile(quoted, "<snippet>", "exec")  # a quote in a column name stays valid Python
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("month,revenue\nJan,1\nFeb,2\n", ","),
+        ("month;revenue\nJan;1\nFeb;2\n", ";"),
+        (
+            "month;revenue\nJan;1,5\nFeb;2,5\n",
+            ";",
+        ),  # comma decimals: still the semicolon
+        ("month\trevenue\nJan\t1\nFeb\t2\n", "\t"),
+        ("month|revenue\nJan|1\nFeb|2\n", "|"),
+        ('name,v\n"Smith; J",1\n"Doe; A",2\n', ","),  # a quoted semicolon is text
+        ("month;revenue\n", ";"),  # header only: a row-less frame, still split
+        ("month;revenue\nJan;1\nFeb;2\nMa", ";"),  # a sample cut mid-row
+        ("value\n1\n2\n3\n", ","),  # one column: nothing to find, the old read
+        ("name\nalice\nbob\n", ","),
+        ("", ","),
+    ],
+)
+def test_sniff_delimiter_finds_the_delimiter_or_falls_back_to_the_comma(text, expected):
+    from highcharts_builder import sniff_delimiter
+
+    assert sniff_delimiter(text) == expected
+
+
+def test_sniffed_one_column_csv_reads_as_it_did_before_sniffing():
+    # The case pandas' own `sep=None` gets wrong (plan #9): it splits `value` on a letter of the
+    # header. The comma fallback must give back exactly the frame a plain read_csv gave.
+    import io
+
+    from highcharts_builder import sniff_delimiter
+
+    text = "value\n1\n2\n3\n"
+    sniffed = pd.read_csv(io.StringIO(text), sep=sniff_delimiter(text))
+    pd.testing.assert_frame_equal(sniffed, pd.read_csv(io.StringIO(text)))
+
+
+def test_python_snippet_writes_sep_only_for_a_non_comma_delimiter():
+    from highcharts_builder import python_snippet
+
+    semi = python_snippet("line", "month", ["revenue"], csv_name="d.csv", sep=";")
+    assert 'pd.read_csv("d.csv", sep=";")' in semi
+    tab = python_snippet("line", "month", ["revenue"], csv_name="d.csv", sep="\t")
+    assert 'pd.read_csv("d.csv", sep="\\t")' in tab
+    compile(tab, "<snippet>", "exec")
+    comma = python_snippet("line", "month", ["revenue"], csv_name="d.csv", sep=",")
+    assert 'pd.read_csv("d.csv")' in comma
+
+
 # --------------------------------------------------------------------------- #
 # Edit data in place (plan #8): the data editor's cell edits
 # --------------------------------------------------------------------------- #
@@ -11386,6 +11435,33 @@ def test_app_export_panel_has_a_python_tab(app):
     _reveal_config(app)
     python = next(code for code in app.code if code.language == "python").value
     assert 'pd.read_csv("my sales.csv")' in python
+
+
+def test_app_reads_a_semicolon_csv_as_columns(app):
+    # Plan #9: a semicolon-delimited upload (common where the comma is the decimal separator)
+    # used to load as ONE column named "month;revenue;cost", offering nothing to plot. It splits,
+    # its numeric columns reach the Y picker, and the Python tab reads the file the same way.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(
+        ("eu.csv", b"month;revenue;cost\nJan;10;4\nFeb;12;5\n", "text/csv")
+    ).run()
+    assert not app.exception
+    assert list(_y_pills(app)[0].options) == ["revenue", "cost"]
+    _reveal_config(app)
+    python = next(code for code in app.code if code.language == "python").value
+    assert 'pd.read_csv("eu.csv", sep=";")' in python
+
+
+def test_app_reads_a_one_column_csv_as_one_column(app):
+    # The regression the obvious fix (`pd.read_csv(file, sep=None, engine="python")`) causes:
+    # with no delimiter to find, pandas' sniffer splits the header on one of its LETTERS, so
+    # `value` arrives as `Unnamed: 0` and `alue`. A file that read fine before plan #9 must
+    # still read the same.
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("one.csv", b"value\n1\n2\n3\n", "text/csv")).run()
+    assert not app.exception
+    x = next(sb for sb in app.selectbox if sb.label == "Category (X) axis")
+    assert list(x.options) == ["value"]
 
 
 def test_app_export_container_id_flows_and_a_bad_one_warns(app):

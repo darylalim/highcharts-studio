@@ -14,6 +14,7 @@ The flow mirrors the highcharts-core pattern (an options ``dict`` ->
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import html
 import itertools
@@ -6512,6 +6513,29 @@ def _py(value: object) -> str:
     return repr(value)
 
 
+# The delimiters a CSV upload may use (plan #9): comma, semicolon (the usual one where the comma
+# is the decimal separator), tab and pipe. Restricting the sniffer to these is the point, not a
+# nicety: pandas' own ``sep=None`` lets the sniffer pick ANY character, and on a one-column file
+# (``value\n1\n2``) it picks a letter of the header, splitting ``value`` into ``Unnamed: 0`` and
+# ``alue``. A file that worked as a plain comma read must not break because sniffing exists.
+CSV_DELIMITERS = ",;\t|"
+
+
+def sniff_delimiter(sample: str) -> str:
+    """The delimiter of the CSV whose opening text is ``sample``; ``","`` when it cannot tell.
+
+    One of ``CSV_DELIMITERS``. A one-column file has no delimiter to find, and the comma fallback
+    reads it exactly as ``pd.read_csv`` always did. The last line is dropped when there are
+    several, since a sample cut at a byte budget usually ends mid-row.
+    """
+    lines = sample.splitlines()
+    text = "\n".join(lines[:-1] if len(lines) > 1 else lines)
+    try:
+        return csv.Sniffer().sniff(text, delimiters=CSV_DELIMITERS).delimiter
+    except csv.Error:
+        return ","
+
+
 def python_snippet(
     chart_type: str,
     x_col: str | None,
@@ -6519,6 +6543,7 @@ def python_snippet(
     *,
     sample: str | None = None,
     csv_name: str | None = None,
+    sep: str = ",",
     title: str | None = None,
     size_col: str | None = None,
     target_col: str | None = None,
@@ -6537,7 +6562,8 @@ def python_snippet(
 
     The data is LOADED, not inlined (plan #2): ``SAMPLES[sample]()`` for one of the app's samples,
     which names it and runs as is in this repo, or ``pd.read_csv(csv_name)`` for an upload (the
-    user has the file). One shape at any data size. Every keyword is written only when it differs
+    user has the file), with ``sep=`` written only for a delimiter other than the comma (plan #9).
+    One shape at any data size. Every keyword is written only when it differs
     from its default, and the style only with the fields this type takes (``style_controls_for``)
     and set away from their defaults, so the snippet is the smallest call that builds the chart.
     """
@@ -6579,7 +6605,8 @@ def python_snippet(
         )
     else:
         imports = ["import pandas as pd"]
-        load = f"df = pd.read_csv({_py(csv_name or 'your-file.csv')})"
+        sep_arg = "" if sep == "," else f", sep={_py(sep)}"
+        load = f"df = pd.read_csv({_py(csv_name or 'your-file.csv')}{sep_arg})"
     names = ["ChartStyle", "make_chart"] if style_fields else ["make_chart"]
     imports.append(f"from highcharts_builder import {', '.join(names)}")
 

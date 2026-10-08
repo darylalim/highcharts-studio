@@ -55,7 +55,8 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
 
 ## Structure
 
-- `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV upload, editable
+- `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV upload, its
+  delimiter sniffed by the builder's `sniff_delimiter` from a short list, editable
   cell by cell in the Source data table, see [Test](#test)),
   a two-step chart-type picker (family pills, then a selectbox of that family's types, both
   read from the builder's `CHART_FAMILIES`; the selectbox's help shows only that family's
