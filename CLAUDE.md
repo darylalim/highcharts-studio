@@ -94,14 +94,14 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
   Highcharts options `dict`, a `Chart`, and embeddable HTML. Independently
   importable and unit-testable. It also owns three things that would otherwise drift from
   it: the **diagnosis** of its own failures (`explain_tree_error`, `explain_xrange_error`,
-  `explain_gauge_error`, `explain_networkgraph_error` — so a message can't drift from the error
+  `explain_gauge_error`, `explain_networkgraph_error`, `explain_funnel_error` — so a message can't drift from the error
   it stands in for), the **options** its widgets
   offer (`picker_columns` — one sniff of the frame answering both coordinate pickers at once,
   with `coordinate_columns` / `date_columns` as thin wrappers over its two halves — the app
   reads the pair, and the wrappers stay for the pure-API caller and their own tests. What the one
   sniff makes structural is that both lists answer the same question once; "every date column is a
   coordinate column" is one membership test apart against named kind tuples — and the subset itself pinned by `test_picker_columns_answers_both_pickers_from_one_sniff`, since `_DATE_KINDS` is a second literal rather than something derived from `_COORDINATE_KINDS` — plus `GAUGE_AGGREGATIONS` and `gauge_dial`), and
-  `count_marks`, which reuses the same drop predicates — or, for sunburst, xrange and
+  `count_marks`, which reuses the same drop predicates — or, for sunburst, treemap, xrange and
   timeline, the whole build — so the KPI can't drift from the chart. Timeline adds **no**
   `explain_*` of its own, and that is the design: `date_columns` narrows its picker to
   columns that already pass, so its one contradiction is **unreachable** from the app rather

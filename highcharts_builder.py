@@ -675,6 +675,31 @@ _NETWORKGRAPH_NODE_LABEL = {"enabled": True}
 # along the edges, which reads worse than the exact layout at every size tried.
 _NETWORKGRAPH_MAX_NODES = 150
 
+# The part-of-whole size limits (plan #24). Past ~1,000 rows a pie draws as a dark disc — its
+# slices so thin that their borders, painted the background colour, cover the fill — and a treemap
+# as a mosaic of unlabelled specks. Neither breaks, but neither can be read, so:
+#
+# * A PIE or TREEMAP past its limit keeps its largest marks and folds the rest into ONE "Other"
+#   point (`_fold_tail`). A part-of-whole chart is still TRUE with a tail folded: "Other" is a part
+#   of the same whole, and the slices' shares are unchanged.
+# * A FUNNEL or PYRAMID past its limit is REFUSED with a message (`_funnel_stages`), networkgraph's
+#   contract. Its stages are an ORDERED sequence, not parts to rank, so keeping "the largest"
+#   would reorder the funnel, and an "Other" stage would sit at no meaningful step of it.
+#
+# Each limit counts MARKS DRAWN, "Other" included. The pie's is the palette: 7 slices + "Other"
+# give every slice a hue of its own, where a ninth slice would repeat the first one's blue. The
+# treemap's and the funnel's were measured (Highcharts 13.1.1, 2026-10-07, ~450px tall, a skewed
+# lognormal sample): a treemap labels every tile at 20 and leaves its smallest as unlabelled
+# slivers by 30; a funnel labels every stage at 15 and, by 20, Highcharts hides the labels of the
+# smallest stages — and a label is the ONLY thing naming a stage or a tile, since neither type
+# draws a legend.
+_PIE_MAX_SLICES = len(DEFAULT_COLORS)
+_TREEMAP_MAX_TILES = 20
+_FUNNEL_MAX_STAGES = 15
+# The folded point's name. A row the data ALREADY calls "Other" is merged into it when it is kept,
+# so the chart never draws two slices with one name (`_fold_tail`).
+OTHER_LABEL = "Other"
+
 # Tukey's constant: a boxplot's whiskers reach the most extreme observation still within
 # 1.5 x IQR of the box, and anything past that is drawn as an individual outlier. Named
 # rather than inlined because both fences read it, and because the number IS the
@@ -2266,6 +2291,98 @@ def _cycle_chain(loop: list[str], name_of: dict[str, str]) -> str:
     if len(labels) > _SUNBURST_CYCLE_PREVIEW + 1:
         labels = [*labels[:_SUNBURST_CYCLE_PREVIEW], "...", labels[-1]]
     return " → ".join(labels)
+
+
+def _part_of_whole_leaves(
+    df: pd.DataFrame, x_col: str, value_col: str
+) -> list[tuple[str, float]]:
+    """The ``(name, value)`` pairs a pie, treemap, funnel or pyramid draws, in row order.
+
+    A row is dropped when its label is not drawable or its value cannot be plotted — the four
+    types' shared single-value rule. Applies the ``x_col`` filter itself (idempotent after
+    ``build_options``' up-front one) so ``count_marks``, ``folded_row_count`` and the
+    ``explain_*`` helpers can hand it the RAW frame and still see exactly what the chart draws.
+    """
+    return [
+        (str(name), float(value))
+        for name, value in zip(df[x_col], df[value_col], strict=True)
+        if _label_ok(name) and _plottable(value)
+    ]
+
+
+def _fold_tail(
+    leaves: list[tuple[str, float]], max_marks: int
+) -> tuple[list[tuple[str, float]], int]:
+    """Fold all but the ``max_marks - 1`` largest leaves into one ``OTHER_LABEL`` leaf.
+
+    Returns ``(leaves, folded)``: the leaves to draw and how many rows went into "Other" (``0``
+    when the chart is within its limit and is returned untouched). Past the limit at least TWO rows
+    always fold, so "Other" is never a single slice renamed.
+
+    The kept leaves stay in ROW order, with "Other" appended last: the fold changes which slices
+    are drawn, never the order of the ones the user's data put there. Ties at the cut keep the
+    earlier row (a stable sort). A kept row the data already names "Other" absorbs the fold rather
+    than being joined by a second "Other".
+
+    Shared by ``build_options``, ``count_marks`` and ``folded_row_count``, so the chart, its KPI
+    and the app's caption are one computation rather than three that agree.
+    """
+    if len(leaves) <= max_marks:
+        return leaves, 0
+    ranked = sorted(range(len(leaves)), key=lambda i: leaves[i][1], reverse=True)
+    kept_rows = set(ranked[: max_marks - 1])
+    kept = [leaf for i, leaf in enumerate(leaves) if i in kept_rows]
+    folded = [leaves[i] for i in ranked[max_marks - 1 :]]
+    # Rounded to 10 places to shed binary float noise: the label prints the raw value, and a sum
+    # of one-decimal values reads `1234.5000000000002` without it. Ten places is far below any
+    # precision a CSV of chart data carries, so nothing real is lost.
+    total = round(math.fsum(value for _, value in folded), 10)
+    names = [name for name, _ in kept]
+    if OTHER_LABEL in names:
+        at = names.index(OTHER_LABEL)
+        kept[at] = (OTHER_LABEL, round(kept[at][1] + total, 10))
+    else:
+        kept.append((OTHER_LABEL, total))
+    return kept, len(folded)
+
+
+# Which types fold a tail, and at how many marks. Read by `folded_row_count`; the build branches
+# name their own constant, as every other per-type limit in this module does.
+_FOLD_LIMITS = dict.fromkeys(SINGLE_VALUE_TYPES, _PIE_MAX_SLICES) | dict.fromkeys(
+    TREEMAP_TYPES, _TREEMAP_MAX_TILES
+)
+
+
+def folded_row_count(
+    df: pd.DataFrame, chart_type: str, x_col: str | None, y_cols: list[str]
+) -> int:
+    """How many rows a pie or treemap folds into "Other" — ``0`` for every other type, and for a
+    pie or treemap within its limit. Read by the app's caption, from the very ``_fold_tail`` the
+    chart is drawn by, so the caption cannot claim a fold the chart did not make.
+    """
+    if chart_type not in _FOLD_LIMITS or x_col is None or not y_cols:
+        return 0
+    leaves = _part_of_whole_leaves(df, x_col, y_cols[0])
+    return _fold_tail(leaves, _FOLD_LIMITS[chart_type])[1]
+
+
+def _funnel_stages(
+    df: pd.DataFrame, chart_type: str, x_col: str, value_col: str
+) -> tuple[list[tuple[str, float]], str | None]:
+    """A funnel's or pyramid's stages, or ``([], message)`` past ``_FUNNEL_MAX_STAGES``.
+
+    ``_networkgraph_edges``' split, for the same reason: ``build_options`` raises the message and
+    the app shows it (through ``explain_funnel_error``), from this one place, so the two can't
+    drift. The limit counts DRAWABLE stages — a dropped row names no stage.
+    """
+    stages = _part_of_whole_leaves(df, x_col, value_col)
+    if len(stages) > _FUNNEL_MAX_STAGES:
+        return [], (
+            f"This {chart_type} has {len(stages):,} stages, and a {chart_type} is limited to "
+            f"{_FUNNEL_MAX_STAGES}: past that its smallest stages lose their labels, which are "
+            "the only thing naming them. Filter the data to fewer stages."
+        )
+    return stages, None
 
 
 def _networkgraph_edges(
@@ -4141,11 +4258,11 @@ def _build_options(
 
     if chart_type in SINGLE_VALUE_TYPES:  # pie
         value_col = y_cols[0]
-        data = [
-            {"name": str(name), "y": float(value)}
-            for name, value in zip(df[x_col], df[value_col], strict=True)
-            if _plottable(value)
-        ]
+        # Past `_PIE_MAX_SLICES` the smallest slices fold into one "Other" (`_fold_tail`).
+        leaves, _folded = _fold_tail(
+            _part_of_whole_leaves(df, x_col, value_col), _PIE_MAX_SLICES
+        )
+        data = [{"name": name, "y": value} for name, value in leaves]
         return _themed(
             {
                 "chart": {"type": "pie"},
@@ -4175,11 +4292,11 @@ def _build_options(
         # without a value) — not the heatmap keep-as-EnforcedNull path. The leaf
         # key is "value" (NOT pie's "y"): highcharts-core's treemap point model
         # reads "value" and silently ignores a stray "y".
-        data = [
-            {"name": str(name), "value": float(value)}
-            for name, value in zip(df[x_col], df[value_col], strict=True)
-            if _plottable(value)
-        ]
+        # Past `_TREEMAP_MAX_TILES` the smallest tiles fold into one "Other" (`_fold_tail`).
+        leaves, _folded = _fold_tail(
+            _part_of_whole_leaves(df, x_col, value_col), _TREEMAP_MAX_TILES
+        )
+        data = [{"name": name, "value": value} for name, value in leaves]
         return _themed(
             {
                 "chart": {"type": "treemap"},
@@ -4242,11 +4359,13 @@ def _build_options(
         # free, exactly as a pie slice is. No neck/width/height geometry either: Highcharts'
         # defaults render correctly at every height the app offers (verified across the sample
         # renders), so there is nothing to steer (see FUNNEL_TYPES).
-        data = [
-            {"name": str(name), "y": float(value)}
-            for name, value in zip(df[x_col], df[value_col], strict=True)
-            if _plottable(value)
-        ]
+        #
+        # Past `_FUNNEL_MAX_STAGES` it raises rather than fold a tail, because a funnel's stages
+        # are ordered: see the constant. The message is the one `explain_funnel_error` hands the app.
+        stages, problem = _funnel_stages(df, chart_type, x_col, value_col)
+        if problem:
+            raise ValueError(problem)
+        data = [{"name": name, "y": value} for name, value in stages]
         return _themed(
             {
                 "chart": {"type": chart_type},
@@ -5516,6 +5635,18 @@ def explain_networkgraph_error(
     return _networkgraph_edges(df, x_col, target_col)[1]
 
 
+def explain_funnel_error(
+    df: pd.DataFrame, chart_type: str, x_col: str, value_col: str
+) -> str | None:
+    """``None`` when a funnel or pyramid has few enough stages to label; otherwise the reason it
+    doesn't — the very message ``build_options`` raises.
+
+    ``explain_networkgraph_error``'s contract, for a stage limit: an uploaded CSV of a few dozen
+    rows reaches it with no code at all, and the interactive path does NOT catch builder errors.
+    """
+    return _funnel_stages(df, chart_type, x_col, value_col)[1]
+
+
 def explain_xrange_error(
     df: pd.DataFrame, x_col: str, start_col: str, end_col: str
 ) -> str | None:
@@ -5678,8 +5809,9 @@ def count_marks(
     ``EnforcedNull``) plus its appended total. The MAGNITUDE_RANGE types (columnrange and its
     filled-band mirror arearange) are waterfall without that total: one mark per drawable label, a
     missing/inverted range kept as an ``EnforcedNull`` slot, so their value columns are never read
-    here. Sunburst, xrange and timeline are the three types whose
-    count is not a row filter at all — see their branches, which reuse the whole build rather
+    here. Sunburst, treemap, xrange and timeline are the four types whose
+    count is not a row filter at all (treemap's because past ``_TREEMAP_MAX_TILES`` its tail folds
+    into one "Other" tile) — see their branches, which reuse the whole build rather
     than the predicates — and sunburst's, like waterfall's, exceeds its drawable row count, by
     the appended root. Xrange's does not: it appends nothing, so it is one bar per surviving
     row. Timeline's is one bar per surviving row too, but it is reached by NEITHER of their
@@ -5867,7 +5999,10 @@ def count_marks(
         return int((label_ok & has_manager).sum())
     value_ok = df[y_cols[0]].map(_plottable).astype(bool)
     if chart_type in TREEMAP_TYPES:
-        return int((label_ok & value_ok).sum())
+        # Whole-build reuse rather than the masks: past `_TREEMAP_MAX_TILES` the tail folds into
+        # one "Other" tile, so the count is the tiles DRAWN, not the rows that survive the masks.
+        leaves = _part_of_whole_leaves(df, x_col, y_cols[0])
+        return len(_fold_tail(leaves, _TREEMAP_MAX_TILES)[0])
     if chart_type in FUNNEL_TYPES:
         # One stage per drawable {name, y} leaf — treemap's rule exactly, since a funnel drops a
         # valueless row the same way (no EnforcedNull slot to keep). Unlike pie, funnel opts INTO

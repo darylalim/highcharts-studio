@@ -28,6 +28,7 @@ from highcharts_builder import (
     NETWORKGRAPH_TYPES,
     NODE_LINK_TYPES,
     ORGANIZATION_TYPES,
+    OTHER_LABEL,
     STACKING_MODES,
     TIMELINE_TYPES,
     UNWEIGHTED_NODE_LINK_TYPES,
@@ -40,10 +41,12 @@ from highcharts_builder import (
     build_chart_exports,
     build_chart_html,
     count_marks,
+    explain_funnel_error,
     explain_gauge_error,
     explain_networkgraph_error,
     explain_tree_error,
     explain_xrange_error,
+    folded_row_count,
     gauge_dial,
     log_scale_ok,
     merge_cell_edits,
@@ -1570,6 +1573,14 @@ with left.container(border=True, height="stretch"):
         if problem:
             st.warning(problem, icon=":material/warning:")
             st.stop()
+    # And a funnel or pyramid past its stage limit (plan #24): networkgraph's contract for a size
+    # the type cannot LABEL rather than one it cannot lay out. A pie or treemap past its limit is
+    # not stopped at all — it folds its tail into "Other" and says so in the caption below.
+    if chart_type in FUNNEL_TYPES and x_col is not None and y_cols:
+        problem = explain_funnel_error(df, chart_type, x_col, y_cols[0])
+        if problem:
+            st.warning(problem, icon=":material/warning:")
+            st.stop()
 
     st.badge(f"{chart_type.title()} chart", icon=":material/bar_chart:", color="grey")
 
@@ -1615,6 +1626,14 @@ with left.container(border=True, height="stretch"):
         "Interactive chart — Highcharts JS is loaded from the CDN in the browser. "
         "Use the chart's ☰ menu to download it as PNG, JPEG or SVG."
     )
+    # A pie or treemap past its limit folds its smallest rows into one "Other" mark (plan #24).
+    # The chart cannot say how many it folded, so the caption does, from the same `_fold_tail`.
+    folded = folded_row_count(df, chart_type, x_col, y_cols)
+    if folded:
+        st.caption(
+            f":material/info: The {folded:,} smallest rows are grouped into “{OTHER_LABEL}” "
+            "so the chart stays readable. Filter the data to see them individually."
+        )
 
     # The Export panel (plan #15): the chart in the four forms other pages take. It replaced the
     # "show the generated config" toggle and keeps its reason for being a toggle: nothing is built

@@ -140,6 +140,7 @@ from highcharts_builder import (  # noqa: E402
     count_marks,
     explain_gauge_error,
     explain_xrange_error,
+    folded_row_count,
     gauge_dial,
     make_chart,
 )
@@ -3804,6 +3805,114 @@ def test_explain_networkgraph_error_is_the_message_build_options_raises():
         build_options(past, "networkgraph", "src", [], target_col="dst")
     assert str(raised.value) == message
     assert explain_networkgraph_error(_star_edges(3), "src", "dst") is None
+
+
+# --------------------------------------------------------------------------- #
+# Part-of-whole size limits (plan #24): a pie or treemap past its limit folds its
+# smallest rows into one "Other" mark; a funnel or pyramid past its limit refuses.
+# --------------------------------------------------------------------------- #
+def _shares(n: int) -> pd.DataFrame:
+    """``n`` labelled rows whose values are NOT in rank order, so a fold that kept the first rows
+    rather than the largest ones (or re-sorted the kept ones) is visible."""
+    return pd.DataFrame(
+        {
+            "name": [f"r{i}" for i in range(n)],
+            "v": [float((i * 7) % n + 1) for i in range(n)],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("chart_type", "limit_name", "key"),
+    [("pie", "_PIE_MAX_SLICES", "y"), ("treemap", "_TREEMAP_MAX_TILES", "value")],
+)
+def test_part_of_whole_folds_its_smallest_rows_into_other_past_its_limit(
+    chart_type, limit_name, key
+):
+    # A 1,200-slice pie drew as a dark disc (its slice borders covering the fill), so past the
+    # limit the chart keeps its largest marks and folds the rest into ONE "Other". The limit counts
+    # marks DRAWN, "Other" included; the kept marks stay in ROW order with "Other" last; and the
+    # fold conserves the whole, since a part-of-whole chart must still sum to the same total.
+    import highcharts_builder as hb
+
+    limit = getattr(hb, limit_name)
+    at_limit = _shares(limit)
+    data = build_options(at_limit, chart_type, "name", ["v"])["series"][0]["data"]
+    assert [p["name"] for p in data] == list(at_limit["name"])  # within it: untouched
+    assert folded_row_count(at_limit, chart_type, "name", ["v"]) == 0
+
+    df = _shares(limit + 5)
+    data = build_options(df, chart_type, "name", ["v"])["series"][0]["data"]
+    assert len(data) == limit
+    assert data[-1]["name"] == hb.OTHER_LABEL
+    largest = set(df.nlargest(limit - 1, "v")["name"])
+    kept = [p["name"] for p in data[:-1]]
+    assert set(kept) == largest
+    assert kept == [n for n in df["name"] if n in largest]  # row order, not rank order
+    assert sum(p[key] for p in data) == pytest.approx(df["v"].sum())
+    # limit + 5 rows, limit - 1 kept: six fold, the five over the limit plus the slot "Other" takes.
+    assert folded_row_count(df, chart_type, "name", ["v"]) == 6
+    # The KPI counts the marks drawn, "Other" included (pie has no KPI of its own).
+    if chart_type == "treemap":
+        assert count_marks(df, chart_type, "name", ["v"]) == limit
+
+
+def test_fold_merges_into_a_row_the_data_already_calls_other():
+    # A kept row named "Other" absorbs the fold, so the chart never draws two slices with one name.
+    from highcharts_builder import _PIE_MAX_SLICES, OTHER_LABEL
+
+    df = _shares(_PIE_MAX_SLICES + 3)
+    df.loc[df["v"].idxmax(), "name"] = OTHER_LABEL
+    data = build_options(df, "pie", "name", ["v"])["series"][0]["data"]
+    assert [p["name"] for p in data].count(OTHER_LABEL) == 1
+    assert len(data) == _PIE_MAX_SLICES - 1
+    assert sum(p["y"] for p in data) == pytest.approx(df["v"].sum())
+
+
+def test_fold_counts_only_drawable_rows_and_sheds_float_noise():
+    # Rows the chart drops (a missing label or value) are not slices, so they cannot push a pie
+    # over its limit; and the folded total is printed in a label, so 0.1 + 0.2 must read 0.3.
+    from highcharts_builder import _PIE_MAX_SLICES, OTHER_LABEL
+
+    df = _shares(_PIE_MAX_SLICES)
+    padded = pd.concat(
+        [df, pd.DataFrame({"name": [None, "x"], "v": [1.0, float("nan")]})],
+        ignore_index=True,
+    )
+    assert folded_row_count(padded, "pie", "name", ["v"]) == 0
+
+    tiny = pd.DataFrame(
+        {
+            "name": [f"big{i}" for i in range(_PIE_MAX_SLICES - 1)] + ["a", "b"],
+            "v": [100.0] * (_PIE_MAX_SLICES - 1) + [0.1, 0.2],
+        }
+    )
+    data = build_options(tiny, "pie", "name", ["v"])["series"][0]["data"]
+    assert data[-1] == {"name": OTHER_LABEL, "y": 0.3}
+
+
+@pytest.mark.parametrize("chart_type", ["funnel", "pyramid"])
+def test_funnel_refuses_past_its_stage_limit_rather_than_fold(chart_type):
+    # A funnel's stages are ORDERED, so folding "the smallest" would reorder it: past the limit the
+    # builder refuses, and the app's warning is the builder's own message (one place, no drift).
+    from highcharts_builder import _FUNNEL_MAX_STAGES, explain_funnel_error
+
+    at_limit = _shares(_FUNNEL_MAX_STAGES)
+    opts = build_options(at_limit, chart_type, "name", ["v"])
+    assert len(opts["series"][0]["data"]) == _FUNNEL_MAX_STAGES
+    assert explain_funnel_error(at_limit, chart_type, "name", "v") is None
+    assert (
+        folded_row_count(at_limit, chart_type, "name", ["v"]) == 0
+    )  # funnels never fold
+
+    past = _shares(_FUNNEL_MAX_STAGES + 1)
+    message = explain_funnel_error(past, chart_type, "name", "v")
+    assert message and f"limited to {_FUNNEL_MAX_STAGES}" in message
+    with pytest.raises(ValueError) as raised:
+        build_options(past, chart_type, "name", ["v"])
+    assert str(raised.value) == message
+    # The KPI runs ABOVE the app's guard, so count_marks must stay total on the refused funnel.
+    assert count_marks(past, chart_type, "name", ["v"]) == len(past)
 
 
 # --------------------------------------------------------------------------- #
@@ -10305,6 +10414,47 @@ def test_app_networkgraph_past_its_node_limit_warns_instead_of_freezing(app):
     assert f"limited to {_NETWORKGRAPH_MAX_NODES}" in app.warning[0].value
     # ...and the KPI still reports the links in the data, above the warning.
     assert _metrics(app)["Links"] == f"{_NETWORKGRAPH_MAX_NODES:,}"
+
+
+def _upload_shares(app, n: int) -> None:
+    rows = "\n".join(f"r{i},{(i * 7) % n + 1}" for i in range(n))
+    csv = f"name,v\n{rows}\n".encode()
+    app.segmented_control[0].set_value("Upload CSV").run()  # Source
+    app.file_uploader[0].set_value(("shares.csv", csv, "text/csv")).run()
+
+
+def test_app_pie_past_its_limit_draws_and_says_how_many_rows_were_grouped(app):
+    # A pie past its limit is NOT stopped: it draws, with its tail folded into "Other", and the
+    # caption under the chart says how many rows that hid — the chart itself cannot.
+    from highcharts_builder import _PIE_MAX_SLICES
+
+    _upload_shares(app, _PIE_MAX_SLICES + 40)
+    _select_chart_type(app, "pie")
+    assert not app.exception
+    assert not app.warning
+    grouped = [c.value for c in app.caption if "grouped into" in c.value]
+    assert grouped and "The 41 smallest rows" in grouped[0]
+
+
+def test_app_pie_within_its_limit_shows_no_grouping_caption(app):
+    from highcharts_builder import _PIE_MAX_SLICES
+
+    _upload_shares(app, _PIE_MAX_SLICES)
+    _select_chart_type(app, "pie")
+    assert not app.exception
+    assert not [c for c in app.caption if "grouped into" in c.value]
+
+
+def test_app_funnel_past_its_stage_limit_warns_instead_of_drawing(app):
+    # The interactive path does not catch builder errors, so the app stops on the builder's own
+    # message first; without that guard this page would be a traceback.
+    from highcharts_builder import _FUNNEL_MAX_STAGES
+
+    _upload_shares(app, _FUNNEL_MAX_STAGES + 1)
+    _select_chart_type(app, "funnel")
+    assert not app.exception
+    assert app.warning
+    assert f"limited to {_FUNNEL_MAX_STAGES}" in app.warning[0].value
 
 
 def test_app_networkgraph_kpi_shows_links(app):
