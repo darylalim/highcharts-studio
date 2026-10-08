@@ -41,6 +41,7 @@ from highcharts_builder import (
     build_chart_exports,
     build_chart_html,
     count_marks,
+    date_x_axis,
     explain_funnel_error,
     explain_gauge_error,
     explain_networkgraph_error,
@@ -1636,6 +1637,13 @@ with left.container(border=True, height="stretch"):
     )
     # A pie or treemap past its limit folds its smallest rows into one "Other" mark (plan #24).
     # The chart cannot say how many it folded, so the caption does, from the same `_fold_tail`.
+    if date_x_axis(df, chart_type, x_col):
+        # Plan #4: the time axis is detected, not toggled, so say so; a user who expected evenly
+        # spaced labels learns why the points moved.
+        st.caption(
+            f":material/calendar_month: “{x_col}” reads as dates, so points are spaced by time "
+            "and a missing day leaves a gap."
+        )
     folded = folded_row_count(df, chart_type, x_col, y_cols)
     if folded:
         st.caption(

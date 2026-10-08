@@ -146,6 +146,29 @@ omitted. (`dial` is not called `scale=` because `build_chart_png` — retired wi
 mode in 0.21.0 — already had a `scale: int = 2`, the image's pixel density, which means something
 completely different and got there first; the export's `scale` lives on as `_EXPORTING["scale"]`.)
 
+**A date X puts five of the cartesian types on a time axis** (`DATE_X_TYPES`: `line`, `spline`,
+`area`, `areaspline`, `column`; plan #4). Drawn as categories, a series with a missing week is
+spaced evenly and says the week happened. When `_coordinates` reads the X column as dates (the
+sniff xrange and timeline already use, so `Jan`/`Feb` and numeric years stay categories), the
+branch emits `xAxis.type: "datetime"` and `[epoch ms, y]` points instead. Four choices, each
+settled by looking:
+
+- **Detected, not toggled.** A date column is a claim about time, and an evenly spaced one is
+  never the honest default. The app says so in a caption, read from `date_x_axis`, the public
+  wrapper over the same `_date_x` the branch uses, so the caption cannot claim an axis the chart
+  did not draw.
+- **Sorted by date.** A category axis drew rows in file order; a time axis with descending x
+  draws a scribble back across the plot (Highcharts error #15). A row whose X did not parse
+  drops, since its point has nowhere to go; a missing Y keeps its slot as a null, the family's
+  policy.
+- **The tooltip names the day**, or the minute when any point carries a clock time:
+  `_TOOLTIP_DAY`/`_TOOLTIP_INSTANT` again, as `xDateFormat`, which opens with `%` and so is out
+  of the unquoted-object trap.
+- **`bar` and `radar` stay on categories.** A bar's X runs down the page, where a time axis
+  reads as a list; time is not angular. Columns on a time axis were the open worry (Highcharts
+  sizes them by the closest pair of dates): rendered on the steps sample, they come out one day
+  wide with the gaps open, which is the reading wanted.
+
 Supported chart types: `line`, `spline`, `area`, `areaspline`, `column`, `bar`,
 `pie`, `scatter`, `bubble` (scatter plus a `size_col` marker-size dimension),
 `radar` (a polar spider/web line chart — shares the cartesian category-X data
@@ -1906,6 +1929,11 @@ not merely the format string that used to hide the absurd number.
 
 - `sample_data.py` — pure (Streamlit-free) built-in sample datasets and the
   `SAMPLES` registry the app offers when no CSV is uploaded.
+  `Daily steps, with unlogged days (line/column)` is the **date-axis** sample, and it carries
+  its days twice: `day` (`Mon 2 Mar`) leads, so the landing chart draws it as evenly spaced
+  categories, and `date` (the same days in ISO-8601) puts the chart on a time axis where the
+  unlogged days open as gaps. The pair is the mirror: the bug plan #4 fixed, and its fix, from
+  one frame. Pinned by `test_daily_steps_sample_labels_its_dates_and_has_gaps`.
   `Monthly revenue by channel (stacked column/area)` is the **stackable** sample, and the
   landing dataset is its mirror: both are multi-series, but its four channels are **parts of
   one whole** (each month's channels sum to its revenue), while cost is not a part of revenue,

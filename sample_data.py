@@ -916,6 +916,71 @@ def _market_share_shift() -> pd.DataFrame:
     )
 
 
+def _daily_steps() -> pd.DataFrame:
+    """A step counter's log with UNLOGGED days — the date-axis sample (plan #4).
+
+    Twelve logged days across three weeks of March 2026, and nine days with no reading: the
+    weekends, the Thursdays, and the whole of 12–15 March. It carries its days TWICE, and the pair
+    is the point, the mirror this file uses to show that a difference lives in the data:
+
+    * ``day`` is a LABEL (``Mon 2 Mar``). It leads, so the landing chart (``line``, first column as
+      X) draws it as categories, evenly spaced: the four-day gap after ``Wed 11 Mar`` takes the
+      same width as one night, and the chart quietly says the walking never stopped.
+    * ``date`` is the same day as ISO-8601 (an object column, as ``read_csv`` gives it). Picked
+      as X, it puts the chart on a time axis, and the gaps open where the days were missed.
+
+    The label leads rather than the date because the app opens on the first column as X, and the
+    first-column rule keeps every sample but the scatter one on a category axis at landing (see
+    ``CLAUDE.md``'s Structure).
+    """
+    return pd.DataFrame(
+        {
+            "day": [
+                "Mon 2 Mar",
+                "Tue 3 Mar",
+                "Wed 4 Mar",
+                "Fri 6 Mar",
+                "Mon 9 Mar",
+                "Tue 10 Mar",
+                "Wed 11 Mar",
+                "Mon 16 Mar",
+                "Tue 17 Mar",
+                "Wed 18 Mar",
+                "Fri 20 Mar",
+                "Mon 23 Mar",
+            ],
+            "date": [
+                "2026-03-02",
+                "2026-03-03",
+                "2026-03-04",
+                "2026-03-06",
+                "2026-03-09",
+                "2026-03-10",
+                "2026-03-11",
+                "2026-03-16",
+                "2026-03-17",
+                "2026-03-18",
+                "2026-03-20",
+                "2026-03-23",
+            ],
+            "steps": [
+                8420,
+                9110,
+                7650,
+                10230,
+                8890,
+                9540,
+                7980,
+                6120,
+                8310,
+                9020,
+                11240,
+                8760,
+            ],
+        }
+    )
+
+
 def _company_milestones() -> pd.DataFrame:
     """A young company's first year as INSTANTS — one row per dated event, each a moment rather
     than a span.
@@ -1143,6 +1208,7 @@ SAMPLES = {
     "Monthly revenue by channel (stacked column/area)": _revenue_by_channel,
     "Height vs weight (scatter)": _height_vs_weight,
     "Daily temperature (areaspline)": _daily_temperature,
+    "Daily steps, with unlogged days (line/column)": _daily_steps,
     "Country economics, ~2023 (bubble)": _country_economics,
     "Product ratings (radar)": _product_ratings,
     "Company market cap, ~2024 (treemap)": _company_market_cap,

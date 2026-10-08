@@ -26,7 +26,8 @@ sidebar and the editable source data beside the chart](docs/images/screenshot.pn
 
 - **Data in.** Built-in sample datasets or your own CSV (comma, semicolon, tab or pipe
   delimited, detected for you). Map columns with pills, which fall back
-  to a multiselect on wide CSVs.
+  to a multiselect on wide CSVs. A date X column puts line, area and column charts on a time
+  axis, so missing days show as gaps.
 - **Edit in place.** Click a cell in the Source data table to fix a typo or try a value, and the
   chart follows. Cells only (no adding or deleting rows); edits reset when you change dataset.
 - **Chart types by family.** Pick a family, then a type within it, so the 30 types never sit in

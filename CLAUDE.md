@@ -124,7 +124,9 @@ downloads are drawn in the browser too, so the app never contacts `export.highch
   difference is in the data, not in the drawing. The stackable sample (`Monthly revenue by
   channel`) mirrors the landing dataset the same way: both are multi-series, but only its
   series are **parts of one whole**, which is the property that makes a stacked total mean
-  something. Per-sample rationale:
+  something. The date-axis sample (`Daily steps, with unlogged days`) is a mirror **within one
+  frame**: its leading `day` label draws evenly spaced categories, its `date` column a time axis
+  with the unlogged days showing as gaps. Per-sample rationale:
   [`docs/chart-types.md`](docs/chart-types.md#the-sample-datasets).
 - `tests/test_smoke.py` — builder unit tests (every chart type, the missing-data and edge
   cases, the validation guards, and an end-to-end pass driving every supported type

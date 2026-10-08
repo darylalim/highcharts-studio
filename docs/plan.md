@@ -116,9 +116,9 @@ In build order. Numbers are stable IDs, not priorities.
 | 13th | 8 | [Edit data in place](#8-edit-data-in-place) | S | done (1.0.0) |
 | 14th | 24 | [Group a big pie's tail into "Other"](#24-group-a-big-pies-tail-into-other) | S–M | done (1.1.0) |
 | 15th | 9 | [Delimiter sniffing (Excel dropped)](#9-delimiter-sniffing) | S | done (1.2.0) |
+| 16th | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | done (1.3.0) |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
-| — | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | deferred |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
 | — | 7 | [Data prep: aggregate, sort, top-N, filter](#7-data-prep) | M | deferred |
 | — | 10 | [New chart types](#10-new-chart-types) | M each | deferred |
@@ -265,6 +265,21 @@ settled as follows:
   thousands separator, silently and by a factor of a thousand; and a widget, a control for one
   locale's files.
 
+### 4. Date X axis for line-family charts
+
+Done in 1.3.0. When the X column reads as dates, `line`, `spline`, `area`, `areaspline` and
+`column` draw a time axis, so a missing day leaves a gap instead of being closed up; a caption
+says so. The design is in [`chart-types.md`](chart-types.md#how-a-chart-is-built) and the
+argument in [`decisions.md`](decisions.md#date-x-detected-not-toggled). The two open questions
+were settled as follows:
+
+- **Sniffed or toggled:** sniffed, by the `_coordinates` rule xrange and timeline use.
+  *Rejected:* a toggle, which keeps the misleading chart as the default; and auto with an
+  opt-out, a widget for wanting the bug back.
+- **The sample:** `Daily steps, with unlogged days`, leading with a day LABEL and carrying the
+  ISO date second, so the first-column rule holds. *Rejected:* leading with the date (a second
+  counterexample to the rule) and no sample.
+
 ## Ideas
 
 No open ideas.
@@ -283,19 +298,6 @@ Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.
 **HTML page** tab: CDN-linked only, no inlined Highcharts JavaScript.
 
 ## Deferred
-
-### 4. Date X axis for line-family charts
-
-- **Why deferred:** a real correctness fix, not an editing feature, so it sits outside the
-  editor's loop and can be picked up as a standalone fix at any time.
-- **The problem:** `line`/`spline`/`area`/`areaspline`/`column` treat X as **categories**,
-  so a time series with uneven dates (a missing week, say) is drawn evenly spaced and
-  silently misrepresents time. The fix is `xAxis.type: "datetime"` with `[millis, y]`
-  points, reusing `picker_columns` and `_TOOLTIP_DAY`/`_TOOLTIP_INSTANT` from
-  xrange/timeline.
-- **Open questions when picked up:** Should a date X be sniffed automatically, or a toggle?
-  Its sample would lead with a date column, which breaks the
-  [first-column rule](chart-types.md#the-sample-datasets).
 
 ### 3. Shareable link
 

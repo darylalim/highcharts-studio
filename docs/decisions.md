@@ -1136,3 +1136,28 @@ this item fixed, in the one place the user takes the code away.
 
 `test_app_reads_a_one_column_csv_as_one_column` pins the regression at the layer where it happens:
 put the plan's one-liner back into `load_csv` and it fails with `['Unnamed: 0', 'alue']`.
+
+## Date X: detected, not toggled
+
+**The bug was silent by construction.** The line family treated every X as a category, so twelve
+logged days with nine missing ones drew as twelve evenly spaced points: the four-day gap after
+11 March took the width of one night. Nothing was wrong in the data or the code that drew it; the
+axis type made a claim about time that the data did not support.
+
+**Detection over a toggle.** A toggle would have left the misleading chart as the default and
+asked the user to know about the problem first. Detection reuses `_coordinates`, which already
+answered "is this column dates?" for xrange and timeline with the hard cases settled (numbers
+are never shown to the date parser, only ISO-8601 parses, the majority kind wins), so month names
+and numeric years stay categories and no landing chart changes. *Rejected:* a toggle; and
+detection with an opt-out, a widget for the one case (wanting evenly spaced dates) that is the
+bug. The cost of detection is that a chart can change under a user who expected categories, so
+the app says so in a caption, read from the same function the chart is built by.
+
+**The sample leads with a label, not the date.** The app opens on the first column as X, and the
+first-column rule keeps landing charts on categories. So the steps sample carries its days
+twice, a label first and the ISO date second, and the two X choices draw the bug and its fix from
+one frame. *Rejected:* leading with the date, which would make a second counterexample to the rule
+beside the scatter sample; and no sample, which would leave the fix reachable only from an upload.
+
+Rendered on 2026-10-07 (line, column and area on the sample): the gap opens, columns are one day
+wide, the dark chrome reaches the datetime labels, and the tooltip header reads `2026-03-16`.
