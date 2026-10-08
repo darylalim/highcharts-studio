@@ -33,6 +33,25 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.3.0] - 2026-10-07
+
+Dates on the X axis are spaced by time (plan #4), so a minor.
+
+### Fixed
+
+- **A line, spline, area, areaspline or column chart whose X column holds dates now draws a time
+  axis.** It used to treat the dates as labels and space them evenly, so a missing week was
+  closed up and the chart misstated time. Points are sorted by date, the tooltip names the day
+  (or the minute, when the data has clock times), and a caption under the chart says the axis
+  is a time axis. Month names and plain numbers such as years stay labels; `bar` and `radar` are
+  unchanged.
+
+### Added
+
+- **A sample dataset, `Daily steps, with unlogged days`:** pick `day` as X for evenly spaced
+  labels, `date` for the time axis with the gaps showing.
+- **Builder API:** `date_x_axis(df, chart_type, x_col)` and `DATE_X_TYPES`.
+
 ## [1.2.0] - 2026-10-07
 
 Uploads split on more than commas (plan #9), so a minor.

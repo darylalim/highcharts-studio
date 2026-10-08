@@ -1909,6 +1909,129 @@ def test_python_snippet_writes_sep_only_for_a_non_comma_delimiter():
 
 
 # --------------------------------------------------------------------------- #
+# Date X axis (plan #4): a date column puts the line family on a time axis
+# --------------------------------------------------------------------------- #
+_DATED = pd.DataFrame(
+    {
+        # Out of order, with a gap, one unparseable cell, a missing Y and an infinite Y.
+        "when": ["2026-03-09", "2026-03-02", "2026-03-23", "not a date", "2026-03-03"],
+        "v": [2.0, 1.0, None, 4.0, float("inf")],
+        "w": [20, 10, 30, 40, 15],
+    }
+)
+
+
+@pytest.mark.parametrize(
+    "chart_type", ("line", "spline", "area", "areaspline", "column")
+)
+def test_date_x_draws_a_time_axis_in_every_date_x_type(chart_type):
+    import datetime
+
+    from highcharts_builder import DATE_X_TYPES, EnforcedNull
+
+    assert chart_type in DATE_X_TYPES
+    options = build_options(_DATED, chart_type, "when", ["v", "w"])
+    assert options["xAxis"]["type"] == "datetime"
+    assert "categories" not in options["xAxis"]
+    assert options["tooltip"]["xDateFormat"] == "%Y-%m-%d"
+    epoch = datetime.date(1970, 1, 1)
+    mar = {
+        d: (datetime.date(2026, 3, d) - epoch).days * 86_400_000 for d in (2, 3, 9, 23)
+    }
+    # Sorted by date; the unparseable row dropped; missing and infinite Y keep their slots as nulls.
+    assert options["series"][0]["data"] == [
+        [mar[2], 1.0],
+        [mar[3], EnforcedNull],
+        [mar[9], 2.0],
+        [mar[23], EnforcedNull],
+    ]
+    assert [x for x, _y in options["series"][1]["data"]] == sorted(mar.values())
+    js = "".join(
+        (make_chart(_DATED, chart_type, "when", ["v"]).to_js_literal() or "").split()
+    )
+    assert "type:'datetime'" in js and "xDateFormat:'%Y-%m-%d'" in js
+    assert "inf" not in js.replace("Infinity", "")
+    dropped = _option_paths(options) - _option_paths(
+        make_chart(_DATED, chart_type, "when", ["v", "w"]).options.to_dict()  # ty: ignore[unresolved-attribute]
+    )
+    assert dropped <= _KEYS_HIGHCHARTS_CORE_DROPS
+
+
+@pytest.mark.parametrize(
+    ("frame", "chart_type"),
+    [
+        (
+            pd.DataFrame({"x": ["Jan", "Feb", "Mar"], "v": [1, 2, 3]}),
+            "line",
+        ),  # never parses
+        (
+            pd.DataFrame({"x": [2023, 2024, 2026], "v": [1, 2, 3]}),
+            "line",
+        ),  # numbers, not dates
+        (pd.DataFrame({"x": ["2026-03-02", "2026-03-09"], "v": [1, 2]}), "bar"),
+        (pd.DataFrame({"x": ["2026-03-02", "2026-03-09"], "v": [1, 2]}), "radar"),
+        (pd.DataFrame({"x": pd.Series([], dtype=object), "v": []}), "line"),  # row-less
+    ],
+)
+def test_date_x_leaves_non_dates_and_other_types_on_categories(frame, chart_type):
+    from highcharts_builder import date_x_axis
+
+    options = build_options(frame, chart_type, "x", ["v"])
+    assert "categories" in options["xAxis"] and "type" not in options["xAxis"]
+    assert not date_x_axis(frame, chart_type, "x")
+
+
+def test_date_x_tooltip_names_the_minute_when_a_point_carries_a_clock_time():
+    frame = pd.DataFrame({"t": ["2026-03-02T00:00", "2026-03-02T09:30"], "v": [1, 2]})
+    assert build_options(frame, "line", "t", ["v"])["tooltip"]["xDateFormat"] == (
+        "%Y-%m-%d %H:%M"
+    )
+
+
+def test_date_x_axis_agrees_with_the_chart_on_the_sample():
+    # The app's caption reads `date_x_axis`; the chart reads `_date_x`. One must never claim a
+    # time axis the other did not draw.
+    from highcharts_builder import CATEGORY_X_TYPES, date_x_axis
+    from sample_data import SAMPLES
+
+    frames = [
+        (
+            SAMPLES["Daily steps, with unlogged days (line/column)"](),
+            ("day", "date"),
+            "steps",
+        ),
+        (_DATED, ("when",), "w"),
+        (pd.DataFrame({"m": ["Jan", "Feb"], "v": [1, 2]}), ("m",), "v"),
+    ]
+    seen = set()
+    for df, x_cols, y_col in frames:
+        for chart_type in CATEGORY_X_TYPES:
+            for x_col in x_cols:
+                drawn = build_options(df, chart_type, x_col, [y_col])["xAxis"].get(
+                    "type"
+                )
+                assert date_x_axis(df, chart_type, x_col) == (drawn == "datetime")
+                seen.add(drawn == "datetime")
+    assert seen == {
+        True,
+        False,
+    }  # both answers reached, so the agreement is not vacuous
+
+
+def test_daily_steps_sample_labels_its_dates_and_has_gaps():
+    # The mirror the sample exists for: `day` names the same days as `date`, and the dates skip
+    # days, so the category axis (evenly spaced) and the time axis draw visibly different charts.
+    from sample_data import SAMPLES
+
+    df = SAMPLES["Daily steps, with unlogged days (line/column)"]()
+    assert list(df.columns)[0] == "day"  # the first-column rule: a label leads
+    dates = pd.to_datetime(df["date"], format="ISO8601")
+    assert [f"{d:%a} {d.day} {d:%b}" for d in dates] == df["day"].tolist()
+    assert dates.is_monotonic_increasing
+    assert dates.diff().dropna().max() > pd.Timedelta(days=1)
+
+
+# --------------------------------------------------------------------------- #
 # Edit data in place (plan #8): the data editor's cell edits
 # --------------------------------------------------------------------------- #
 def test_apply_cell_edits_changes_cells_and_keeps_column_types():
@@ -11450,6 +11573,23 @@ def test_app_reads_a_semicolon_csv_as_columns(app):
     _reveal_config(app)
     python = next(code for code in app.code if code.language == "python").value
     assert 'pd.read_csv("eu.csv", sep=";")' in python
+
+
+def test_app_draws_a_date_x_on_a_time_axis_and_says_so(app):
+    # Plan #4: picking the sample's date column as X switches the chart to a time axis, and a
+    # caption says why the points moved. Its label column, picked as X, does neither.
+    next(sb for sb in app.selectbox if sb.label == "Dataset").set_value(
+        "Daily steps, with unlogged days (line/column)"
+    ).run()
+    assert not app.exception
+    assert not any("reads as dates" in c.value for c in app.caption)
+    next(sb for sb in app.selectbox if sb.label == "Category (X) axis").set_value(
+        "date"
+    ).run()
+    assert not app.exception
+    assert any("reads as dates" in c.value for c in app.caption)
+    _reveal_config(app)
+    assert '"type":"datetime"' in _config_text(app)
 
 
 def test_app_reads_a_one_column_csv_as_one_column(app):

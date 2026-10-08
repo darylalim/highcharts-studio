@@ -433,6 +433,13 @@ def chart_family(chart_type: str) -> str:
 # shape doesn't share.
 CATEGORY_X_TYPES = CARTESIAN_TYPES + POLAR_TYPES
 
+# The category-x types whose X becomes a TIME axis when the X column reads as dates (plan #4).
+# Drawn as categories, a weekly series with a missing week is spaced evenly and silently
+# misstates time; on a `datetime` axis the gap shows. Detected, not toggled: a date column is a
+# claim about time, and spacing it evenly is never the honest default. `bar` is left out (its X
+# runs down the page, where a time axis reads as a list), and so is radar (time is not angular).
+DATE_X_TYPES = ("line", "spline", "area", "areaspline", "column")
+
 # The full set the x-in-y guard rejects (x_col can't also be a y series): the
 # category-axis types plus heatmap, boxplot and waterfall, whose x_col is likewise a
 # category axis (heatmap's values label the columns; boxplot's name the boxes;
@@ -953,12 +960,13 @@ _XRANGE_POINT_WIDTH = 20
 _MILLIS_PER_DAY = 86_400_000
 
 # The two tooltip precisions, picked per frame by the `sub_day` that `_timeline_events` and
-# `_xrange_bars` each return. Named `_TOOLTIP_*` rather than `_TIMELINE_*`: they arrived with
-# timeline and xrange took them the same day its rule was written down, so a type name on
-# them would already be a lie. Both are
-# Highcharts date-format strings, and both are interpolated into a `pointFormat` that OPENS with
-# `<b>` — which is what keeps them out of the unquoted-object trap: a value that opened `{` and
-# carried a colon would serialize as a bare JS object (see the branch's note).
+# `_xrange_bars` each return, and by the line family's date-X branch (plan #4). Named
+# `_TOOLTIP_*` rather than `_TIMELINE_*`: they arrived with timeline and xrange took them the
+# same day its rule was written down, so a type name on them would already be a lie. Both are
+# Highcharts date-format strings. Timeline and xrange interpolate them into a `pointFormat` that
+# OPENS with `<b>` — which is what keeps them out of the unquoted-object trap: a value that opened
+# `{` and carried a colon would serialize as a bare JS object (see the branch's note). The date-X
+# branch passes one bare, as `tooltip.xDateFormat`, which opens with `%` and so cannot trip it.
 _TOOLTIP_DAY = "%Y-%m-%d"
 _TOOLTIP_INSTANT = "%Y-%m-%d %H:%M"
 
@@ -2913,6 +2921,27 @@ def _category_labels(df: pd.DataFrame, x_col: str) -> list[str]:
     cartesian/radar branches — highcharts-core rejects non-string categories, so a
     numeric x_col must be stringified here rather than passed through."""
     return [str(value) for value in df[x_col].tolist()]
+
+
+def _date_x(df: pd.DataFrame, chart_type: str, x_col: str | None) -> pd.Series | None:
+    """The X column as epoch milliseconds when this chart draws it on a time axis, else ``None``.
+
+    Decided by ``_coordinates``, the sniff xrange and timeline already trust, so the rules carry
+    over unchanged: a numeric column (``2023``, ``2024``) is a NUMBER and stays a category, month
+    names never parse (ISO-8601 only), and an object column goes to whichever kind most of its
+    cells are, a minority cell coming back ``NaN`` and dropping its row. ``_COORD_EMPTY`` is no
+    date: a row-less frame keeps the category axis it always drew.
+    """
+    if chart_type not in DATE_X_TYPES or x_col is None or x_col not in df:
+        return None
+    millis, kind = _coordinates(df[x_col])
+    return millis if kind == _COORD_DATE else None
+
+
+def date_x_axis(df: pd.DataFrame, chart_type: str, x_col: str | None) -> bool:
+    """True when ``chart_type`` draws ``x_col`` on a time axis (plan #4). Read by the app's
+    caption, from the same ``_date_x`` the chart is built by, so the two cannot disagree."""
+    return _date_x(df, chart_type, x_col) is not None
 
 
 def _xy_x_axis(df: pd.DataFrame, x_col: str, *, numeric_x: bool) -> dict[str, object]:
@@ -5559,6 +5588,46 @@ def _build_options(
                 # key IS the gate. Printing them would also collide head-on: two labels per
                 # category, at the two ends of a connector that is often shorter than the text.
                 "series": [{"name": f"{before_col}→{after_col}", "data": points}],
+            },
+        )
+
+    millis = _date_x(df, chart_type, x_col)
+    if millis is not None:
+        # A date X (plan #4): a `datetime` axis with `[epoch ms, y]` points, so a missing week
+        # leaves a gap rather than being closed up. Rows are SORTED by date: Highcharts expects
+        # ascending x and draws a scribble back across the plot otherwise (its error #15), while a
+        # category axis simply drew rows in file order. A row whose X did not parse drops (its
+        # point has nowhere to go); a missing Y keeps its slot as `_num`'s null, as on the
+        # category axis. The tooltip names the day, or the minute when any point carries a clock
+        # time: xrange's and timeline's precision rule, so a header never shows a midnight that
+        # is not in the data.
+        xs = millis.tolist()
+        order = sorted(
+            (i for i, x in enumerate(xs) if _plottable(x)), key=lambda i: xs[i]
+        )
+        sub_day = any(xs[i] % _MILLIS_PER_DAY for i in order)
+        series = [
+            {
+                "name": col,
+                "data": [
+                    [int(xs[i]), _num(v)]
+                    for i, v in ((i, df[col].iloc[i]) for i in order)
+                ],
+            }
+            for col in y_cols
+        ]
+        return _themed(
+            {
+                "chart": {"type": chart_type},
+                "colors": colors,
+                "title": {"text": title},
+                "xAxis": {"type": "datetime", "title": {"text": x_col}},
+                "yAxis": {"title": {"text": ", ".join(y_cols)}},
+                "tooltip": {
+                    "xDateFormat": _TOOLTIP_INSTANT if sub_day else _TOOLTIP_DAY
+                },
+                "legend": {"enabled": len(series) > 1},
+                "series": series,
             },
         )
 
