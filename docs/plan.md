@@ -118,12 +118,12 @@ In build order. Numbers are stable IDs, not priorities.
 | 15th | 9 | [Delimiter sniffing (Excel dropped)](#9-delimiter-sniffing) | S | done (1.2.0) |
 | 16th | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | done (1.3.0) |
 | 17th | 16 | [Switch the app's iframe to the JSON-built JS](#16-switch-the-apps-iframe-to-the-json-built-js) | M | done (1.3.1) |
+| 18th | 14 | [Spike: run the app in the browser (stlite)](#14-spike-run-the-app-in-the-browser-stlite) | M (spike) | planned |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
 | — | 7 | [Data prep: aggregate, sort, top-N, filter](#7-data-prep) | M | deferred |
 | — | 10 | [New chart types](#10-new-chart-types) | M each | deferred |
-| — | 14 | [Spike: run the app in the browser (stlite)](#14-spike-run-the-app-in-the-browser-stlite) | M (spike) | deferred |
 | — | 11 | [Compare charts side by side](#11-compare-charts-side-by-side) | L | dropped |
 
 ---
@@ -287,6 +287,66 @@ column name beginning `Date`, or a `{...:...}` format string, no longer blanks i
 drew identical SVG before and after. The argument and the render check are in
 [`decisions.md`](decisions.md#the-strings-highcharts-core-emits-unquoted).
 
+### 14. Spike: run the app in the browser (stlite)
+
+Moved from deferred on 2026-10-29: its dependency, [#13](#13-client-side-export), shipped in
+0.21.0, and #16 removed the last place the app's chart went through `to_js_literal`. Running with
+no server means [stlite](https://github.com/whitphx/stlite) (Streamlit on Pyodide, Python in
+WebAssembly), hosted as static files. It keeps the Python code; rewriting the app in JavaScript
+would throw away the builder, the tests and `highcharts-core`, so that is not an option.
+The risk is the first load: every visitor downloads Pyodide and pandas (tens of MB) before
+seeing a chart, which works against "lightweight". So this is a **spike**: it answers five
+questions, writes the answers down, and changes no app code.
+
+**Already answered by a desk check (2026-10-29)**, to be confirmed by running it:
+
+- **Streamlit version.** `@stlite/browser` 1.12.0 (latest) bundles **Streamlit 1.65.0**, the same
+  version the app is developed on, so the APIs the `pyproject.toml` comment lists (`st.iframe`,
+  `st.pills`, `segmented_control(required=)`, bordered `st.metric`, the newer `[theme]` keys)
+  should all exist. Its wheel is `cp314`: Pyodide runs **Python 3.14**, not the 3.12 the tests
+  use.
+- **Packages.** `highcharts-core`, `esprima` and `validator-collection` are all pure-Python
+  wheels (`py3-none-any`), so `micropip` can install them. Two transitive imports need checking:
+  `highcharts_core.chart` imports `headless_export`, which imports **`requests`** when the module
+  loads (it is never called, but it must import), and `validator-collection` needs
+  **`jsonschema`**, whose `rpds-py` is compiled and must come from Pyodide's own package set.
+
+**The five questions:**
+
+1. **Does every feature work?** Walk a checklist: the theme from `.streamlit/config.toml`, the
+   family pills and type selectbox, `segmented_control`, the KPI row, `st.data_editor` cell edits,
+   a CSV upload (including a semicolon one), the chart in its `st.iframe`, the ☰ menu's PNG and
+   SVG downloads from inside that iframe, every Export tab's download button, and `@st.cache_data`.
+2. **Do the packages install?** Confirm the two imports above, and that `pyarrow` (behind
+   `st.dataframe` and `st.data_editor`) loads.
+3. **First load.** MB transferred and seconds until the first chart appears, cold and warm, with
+   Chrome DevTools throttled to "Fast 4G". **Write down the number; it decides the item.**
+4. **Network.** stlite fetches its own runtime and Pyodide from a CDN (jsDelivr) by default,
+   which would be a **second network dependency**, and [Direction](#direction-a-lightweight-chart-editor)
+   rules that out. Does it still work with those files self-hosted next to the page?
+5. **Hosting.** Does GitHub Pages serve it, deployed by a workflow (an obvious fit, beside
+   `ci.yml`), with the CSV upload still working?
+
+**How:** one `index.html` in the scratchpad that loads `@stlite/browser` at a pinned version and
+mounts `streamlit_app.py`, `highcharts_builder.py`, `sample_data.py` and `.streamlit/config.toml`
+with `requirements: ["highcharts-core"]` (`pandas` comes from Pyodide). Serve it on
+`http://localhost`, then check it [by rendering](../CLAUDE.md#run).
+
+**Decision rule (agreed 2026-10-29):** go ahead if every checklist item works, the files can be
+self-hosted, and a cold first chart takes **≤ 10 s on Fast 4G**. Then the migration becomes its
+own planned item, sized from the spike. Otherwise mark #14 `dropped`, keeping the numbers, so it
+is not re-proposed without new information. Either way the Community Cloud demo
+([#23](#23-host-a-public-demo-on-streamlit-community-cloud)) stays until something replaces it.
+
+- **Deliverable:** the answers and the measured numbers in [`decisions.md`](decisions.md), beside
+  the Community Cloud section that already names stlite as the rejected alternative, released as a
+  patch carrying only docs.
+- **Not affected:** the tests keep running on CPython in CI; only the deployment changes.
+- **Rejected:** plain Pyodide without stlite (it gives up Streamlit, so the UI would be
+  rewritten), and running the spike in the repo rather than the scratchpad (a spike that may be
+  dropped should not leave files behind).
+- **Size:** M for the spike; the migration is sized after it · **Status:** planned
+
 ## Ideas
 
 No open ideas.
@@ -331,29 +391,6 @@ Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.
 | `wordcloud` | pie (label + weight) | Needs a text-heavy sample. |
 | `streamgraph` | cartesian multi-series | Close to `areaspline`; the theme must be checked by rendering. |
 | `pareto` | column + derived line | Sorted bars plus a cumulative-% line. |
-
-### 14. Spike: run the app in the browser (stlite)
-
-- **Why deferred:** Running with no server at all means
-  [stlite](https://github.com/whitphx/stlite) (Streamlit on Pyodide, Python in WebAssembly),
-  hosted as static files. It keeps the Python code; rewriting the app in JavaScript would
-  throw away the builder, the tests and `highcharts-core`, so that is not an option. But
-  every visitor would download Pyodide and pandas (tens of MB) before seeing a chart, which
-  works against "lightweight". So this is a time-boxed **spike** first, answering four
-  questions before anyone commits to it:
-  1. **Streamlit version.** stlite bundles its own Streamlit, which can lag the official
-     release. Does it support what the app uses (`st.iframe`, `st.pills`,
-     `segmented_control(required=)`, bordered `st.metric`, the newer `[theme]` keys)?
-  2. **Packages.** Do `highcharts-core`, `esprima` and `validator-collection` install in
-     Pyodide (`micropip`), and does `pyarrow` work for `st.dataframe`?
-  3. **First load.** How many MB, and how many seconds, until the first chart appears on an
-     ordinary connection? Write down the number; it decides the item.
-  4. **Hosting.** Which static host (GitHub Pages is the obvious one), and does the CSV
-     upload still work with no server?
-- **Not affected:** the tests keep running on CPython in CI; only the deployment changes.
-- **Depends on:** [#13](#13-client-side-export), now done (0.21.0): with the export server
-  gone, nothing in the app needs a server-side network call.
-- **Size:** M for the spike; the migration is sized after it · **Status:** deferred
 
 ## Dropped
 
