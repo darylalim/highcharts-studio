@@ -31,11 +31,14 @@ entry exists because a rule elsewhere looks arbitrary without it.
 [Highcharts JS: one pinned release](#highcharts-js-one-pinned-release) ·
 [Static PNG mode, and its retirement](#static-png-mode-and-its-retirement) ·
 [Hosting: a public demo on Community Cloud](#hosting-a-public-demo-on-community-cloud) ·
+[Hosting: the stlite spike, and why it was dropped](#hosting-the-stlite-spike-and-why-it-was-dropped) ·
 [Style: one object, not one kwarg per control](#style-one-object-not-one-kwarg-per-control) ·
 [Chart-type picker: families, then types](#chart-type-picker-families-then-types) ·
 [Embeddable exports: JSON first](#embeddable-exports-json-first) ·
 [Export as Python: load, don't inline](#export-as-python-load-dont-inline) ·
-[Editing data: the app keeps the edits](#editing-data-the-app-keeps-the-edits)
+[Editing data: the app keeps the edits](#editing-data-the-app-keeps-the-edits) ·
+[CSV delimiters: sniff from a short list](#csv-delimiters-sniff-from-a-short-list) ·
+[Date X: detected, not toggled](#date-x-detected-not-toggled)
 
 ## Packaging: the fact with no second home
 
@@ -905,8 +908,8 @@ which costs only build time.
 
 - **Local only:** safe, but it left the editor finished with nowhere to use it.
 - **Static hosting via stlite** (plan #14): every visitor would download tens of MB before the first
-  chart, and it waits on an unrun spike. If that spike shows a fast enough first load, it can replace
-  this deployment; it does not block it.
+  chart. The spike has since been run and dropped: about 33 MB and about 20 s to a first chart even
+  with no network delay ([the numbers](#hosting-the-stlite-spike-and-why-it-was-dropped)).
 
 **The licence condition.** Highcharts JS and `highcharts-core` are free for personal and
 non-commercial use, and a public deployment is still a use of them. The demo qualifies only while it
@@ -920,6 +923,88 @@ a private app as for a public one, so only a signed-out browser can tell them ap
 
 **Known limit:** free apps sleep after a period without visitors, so the first visit after a quiet
 spell waits for a cold start. The README says so rather than working around it.
+
+## Hosting: the stlite spike, and why it was dropped
+
+Plan #14 asked whether the app could run with no server at all: [stlite](https://github.com/whitphx/stlite)
+(Streamlit on Pyodide) serving the same three files as static pages. It was run on 2026-10-29 against
+`@stlite/browser` **1.12.0** (Streamlit 1.65.0, Pyodide 314.0.3, CPython **3.14.2** in WebAssembly),
+in the scratchpad only, with no app code changed. It **failed the agreed rule on load time** and is
+dropped. The numbers are kept here so it is not re-proposed without new information.
+
+**Time to first chart is about 20 s with no network delay at all.** Every file was served from
+`127.0.0.1`, unthrottled: 21.2 s cold (a fresh origin, so nothing cached), 21.9 s and 20.0 s warm.
+The server app on the same machine draws its first chart in **1.3 s**. Warm is no faster than cold
+because the time is spent on CPU, not on the download. Stage timings from stlite's own boot messages
+(warm):
+
+| Stage | Seconds |
+|---|---|
+| Load Pyodide | 0.1 → 2.8 |
+| Install packages | 3.5 → 7.7 |
+| Load Streamlit, boot its server | 7.7 → 10.9 |
+| The app's first run, to a drawn chart | 10.9 → 19.9 |
+
+The app's own logic is not the cost: `build_chart_html` takes about 25 ms under Pyodide. The first
+run is mostly **imports** (215 `highcharts_core` modules, pandas and pyarrow), which take about 0.6 s
+on native CPython. Once booted the app is responsive: a rerun to a new chart takes 0.68 s.
+
+The agreed rule was a cold first chart in **≤ 10 s on Fast 4G**. The throttled run was not needed:
+throttling can only add to a time that is already twice the limit with no network at all.
+
+**The download is about 33 MB.** A cold load fetches 120 files: 47.3 MB raw, 32.9 MB with gzip
+(the wheels are already compressed). The largest are pyarrow (10.0 MB, which Streamlit always
+loads), the Pyodide runtime (9.6 MB of WASM), stlite's main JS bundle (4.4 MB), pandas (4.2 MB) and
+numpy (2.9 MB). At 10 Mbit/s that is about 26 s of transfer on its own, before any of the 20 s above.
+
+**The five questions:**
+
+1. **Features: all work, after two fixes.** Theme, family pills and type selectbox,
+   `segmented_control`, KPI row, a `st.data_editor` cell edit redrawing the chart, a semicolon CSV
+   upload (delimiter sniffed), the chart in `st.iframe`, the ☰ menu's PNG, JPEG and SVG export (the
+   iframe's sandbox includes `allow-downloads`), all five Export downloads, and `@st.cache_data`.
+   The two fixes:
+   - **The theme's URL fonts crash stlite.** `font = "'Inter':https://fonts.googleapis.com/…"` makes
+     Streamlit render its font links through react-helmet, and stlite 1.12.0 never mounts the
+     `HelmetProvider` that needs. The page renders nothing (`TypeError` in `HelmetDispatcher.init`).
+     The spike replaced the two font lines with plain font names.
+   - **`esprima` publishes no wheel.** Version 4.0.1 (2018) is an sdist only, so micropip cannot
+     install it. It is pure Python, so the spike built a wheel and served it. The desk check had
+     called it a pure-Python wheel, and it was wrong.
+
+   One unexplained flake: once in two runs, switching to waterfall left the chart blank with
+   Highcharts error #17 (no `waterfall` series type). `highcharts-more.js` had loaded but not
+   registered, and injecting it again by hand fixed it. It did not reproduce on retry and never
+   occurred on the server app.
+2. **Packages: all install and import.** 38 distributions: 31 from Pyodide's own set (including
+   `requests`, `jsonschema` with the compiled `rpds-py`, and `pyarrow`), Streamlit and `stlite-lib`
+   from stlite's package, and 5 pure wheels from PyPI (`highcharts-core`, `validator-collection`,
+   the self-built `esprima`, and Streamlit's `itsdangerous` and `python-multipart`).
+3. **First load:** above. It is what decides the item.
+4. **Network: self-hosting works.** By default stlite reaches **three** hosts besides Highcharts:
+   jsDelivr (stlite and Pyodide), PyPI (the 5 wheels) and Google Fonts. With stlite's build, the
+   Pyodide core and packages, and the 5 wheels served next to the page (`pyodideUrl` set, the wheels
+   listed by URL), every one of the 38 distributions recorded a `127.0.0.1` source and the page made
+   no other external request. The Highcharts CDN remains, as it does today.
+5. **Hosting: fits GitHub Pages on paper, not deployed.** The site is about 67 MB of static files and
+   its largest file is 10 MB, both inside GitHub Pages' limits, and CSV upload needs no server (it
+   worked from `python -m http.server`). A real deploy was skipped because the rule had already
+   failed on question 3.
+
+**What would change the answer:** a cold first chart near 10 s, which needs both much less to
+download and much less start-up work. An stlite or Pyodide release that loads a pre-initialised
+runtime would be new information. So would a `highcharts-core` that imports a fraction of its
+modules. Neither exists as of this spike.
+
+**Found along the way, true of the server app too:**
+
+- **Google Fonts is already a second network dependency.** The theme's `font` and `codeFont` load
+  Inter and JetBrains Mono from `fonts.googleapis.com` in every viewer's browser, which the "Highcharts
+  CDN alone" rule in [`plan.md`](plan.md#direction-a-lightweight-chart-editor) does not allow for.
+- **Backing out of a CSV upload desyncs the family pills.** With a non-Basic family chosen, switching
+  Source to Upload CSV stops the run above the keyless family pills, so Streamlit forgets them. They
+  redraw showing **Basic** while the type selectbox keeps the old type, and the next interaction of
+  any kind sends Basic back and resets the chart to `line`. Reproduced on the server app.
 
 ## Style: one object, not one kwarg per control
 

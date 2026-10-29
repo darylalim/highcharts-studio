@@ -33,6 +33,19 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.3.2] - 2026-10-29
+
+Documentation only, so a patch.
+
+### Added
+
+- **The results of the stlite spike (plan #14), which was dropped.** Running the app in the
+  browser with no server works, feature for feature, and its files can all be self-hosted. But
+  the first chart took about 20 s even served from the same machine, against 1.3 s for the server
+  app, after a download of about 33 MB. The agreed limit was 10 s on a throttled connection. The
+  numbers, and two fixes a migration would have needed:
+  [`docs/decisions.md`](docs/decisions.md#hosting-the-stlite-spike-and-why-it-was-dropped).
+
 ## [1.3.1] - 2026-10-08
 
 The app's chart draws from the same JSON as the exports (plan #16), so a patch.
