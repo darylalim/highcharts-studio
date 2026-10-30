@@ -51,7 +51,10 @@ uv run pytest && uv run ruff check . && uv run ty check   # the three gates
 nothing from `st.secrets` or `os.environ`; `.streamlit/secrets.toml` appears only as a
 `permissions.deny` rule, guarding a file this project does not use. The one network
 dependency is an unauthenticated CDN, `code.highcharts.com`, fetched by the viewer's browser;
-downloads are drawn in the browser too, so the app never contacts `export.highcharts.com`.
+downloads are drawn in the browser too, so the app never contacts `export.highcharts.com`. Nothing
+else is contacted: the theme loads no web fonts, the favicon is an emoji rather than a material
+icon fetched from Google, and Streamlit's usage statistics are off (`[browser]` in
+`.streamlit/config.toml`), each pinned by a test.
 
 ## Structure
 
