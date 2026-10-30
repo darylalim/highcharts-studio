@@ -1014,6 +1014,13 @@ modules. Neither exists as of this spike.
 - **Google Fonts is already a second network dependency.** The theme's `font` and `codeFont` load
   Inter and JetBrains Mono from `fonts.googleapis.com` in every viewer's browser, which the "Highcharts
   CDN alone" rule in [`plan.md`](plan.md#direction-a-lightweight-chart-editor) does not allow for.
+  Fixed in 1.3.4 by **dropping** the two fonts rather than self-hosting them. The shell falls back
+  to Streamlit's own Source Sans and Source Code, served by the app's server. Self-hosting would
+  have kept Inter at the cost of `[server] enableStaticServing`, font files under `static/`,
+  `[[theme.fontFaces]]` entries and an OFL notice in `NOTICE`, a standing cost for a typeface. The
+  charts were never affected: they draw in an iframe that no theme CSS reaches. No URL may now
+  appear in `config.toml`, pinned by `test_app_config_loads_nothing_from_another_host`; a
+  self-hosted font would be a relative path, so that route stays open.
 - **Backing out of a CSV upload desyncs the family pills.** With a non-Basic family chosen, switching
   Source to Upload CSV stops the run above the keyless family pills, so Streamlit forgets them. They
   redraw showing **Basic** while the type selectbox keeps the old type, and the next interaction of

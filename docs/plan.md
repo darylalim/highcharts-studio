@@ -120,7 +120,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 17th | 16 | [Switch the app's iframe to the JSON-built JS](#16-switch-the-apps-iframe-to-the-json-built-js) | M | done (1.3.1) |
 | 18th | 14 | [Spike: run the app in the browser (stlite)](#14-spike-run-the-app-in-the-browser-stlite) | M (spike) | dropped after the spike (1.3.2) |
 | 19th | 25 | [Keep the chart family when an upload is backed out](#25-keep-the-chart-family-when-an-upload-is-backed-out) | S | done (1.3.3) |
-| — | 26 | [Self-host the theme's fonts, or drop them](#26-self-host-the-themes-fonts-or-drop-them) | S | idea |
+| 20th | 26 | [Self-host the theme's fonts, or drop them (dropped them)](#26-self-host-the-themes-fonts-or-drop-them) | S | done (1.3.4) |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
@@ -297,19 +297,13 @@ the chart type was rejected, since varying a keyless widget's `default=` re-mint
 `test_app_backing_out_of_an_upload_does_not_forget_the_chart_family` pins it. The reasons:
 [`decisions.md`](decisions.md#keyed-widgets-the-third-way-a-picker-loses-its-answer).
 
-## Ideas
-
 ### 26. Self-host the theme's fonts, or drop them
 
-- **What & why:** `.streamlit/config.toml` loads Inter and JetBrains Mono from
-  `fonts.googleapis.com`, so every viewer's browser contacts Google Fonts. That is a second network
-  dependency, which [Direction](#direction-a-lightweight-chart-editor) rules out, and CLAUDE.md
-  calls `code.highcharts.com` "the one network dependency". Found by the stlite spike.
-- **Touches:** `.streamlit/config.toml` (and possibly font files under `static/`), CLAUDE.md's
-  Quick start.
-- **Open questions:** self-host the two fonts (Streamlit's `[[theme.fontFaces]]` with static files)
-  or fall back to system fonts; and whether to correct CLAUDE.md first, since it is wrong today.
-- **Size:** S · **Status:** idea
+Done in 1.3.4 by dropping them: the theme sets no `font`/`codeFont`, so the shell uses the Source
+Sans and Source Code that Streamlit serves itself, and the viewer's browser no longer contacts
+Google Fonts. Self-hosting Inter was rejected as static serving, font files and a third licence in
+`NOTICE`, all to keep a typeface. `test_app_config_loads_nothing_from_another_host` pins it. The
+reasons: [`decisions.md`](decisions.md#hosting-the-stlite-spike-and-why-it-was-dropped).
 
 ## Folded
 

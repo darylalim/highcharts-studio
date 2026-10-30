@@ -2490,6 +2490,30 @@ def test_app_theme_is_a_single_mode_with_no_light_dark_toggle():
     )
 
 
+def test_app_config_loads_nothing_from_another_host():
+    # The viewer's browser may contact one host besides the app's server: code.highcharts.com,
+    # which the chart iframe loads its library from. config.toml is where a second one slips in
+    # unnoticed, since the theme accepts a URL for a font (the template's Inter and JetBrains
+    # Mono came from fonts.googleapis.com until plan #26) and nothing at runtime objects. The
+    # whole file is walked, every table, and parsed values rather than raw text, so a comment
+    # may still name a URL. A self-hosted font is a relative path and passes.
+    import tomllib
+
+    def strings(value):
+        if isinstance(value, dict):
+            for v in value.values():
+                yield from strings(v)
+        elif isinstance(value, list):
+            for v in value:
+                yield from strings(v)
+        elif isinstance(value, str):
+            yield value
+
+    config = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text())
+    urls = [s for s in strings(config) if "://" in s]
+    assert urls == [], f"config.toml makes the viewer's browser fetch from: {urls}"
+
+
 def test_theme_colors_stay_in_sync_with_config():
     # The chart palette and chrome DUPLICATE config.toml theme values, and must: the charts
     # render in an iframe that no theme CSS reaches, and Streamlit applies

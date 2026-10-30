@@ -48,12 +48,10 @@ showSidebarBorder = true
 baseRadius = "6px"                   # subtle rounding - professional, not playful
 buttonRadius = "6px"
 
-# Typography - clean, professional fonts
-# One request, not two: the upstream template also sets `headingFont` to Inter at
-# wght@600;700, a strict SUBSET of the weights below — a second render-blocking fetch
-# from fonts.googleapis.com for no visual difference. Headings inherit `font`.
-font = "'Inter':https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+# Typography. No `font`/`codeFont`: Streamlit's own Source Sans and Source Code, which the
+# app's server serves. The template's Inter and JetBrains Mono came from fonts.googleapis.com,
+# so every viewer's browser contacted Google (plan #26). No URL may appear in this file, which
+# `test_app_config_loads_nothing_from_another_host` enforces.
 baseFontSize = 14
 baseFontWeight = 400
 codeFontSize = "13px"
