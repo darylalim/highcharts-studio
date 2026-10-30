@@ -79,7 +79,16 @@ _STYLE_KEYS = {
 }
 # The app's own store of the data editor's cell edits (plan #8): {"data_id": ..., "edits": ...}.
 _CELL_EDITS = "_cell_edits"
-_KEYED_PICKERS = ("x_col", "y_pills", "y_multiselect", *_STYLE_KEYS.values())
+# The chart-family pills (plan #25). Keyed and listed for the same reason as the style controls:
+# the upload stop sits above them.
+_FAMILY_KEY = "chart_family"
+_KEYED_PICKERS = (
+    "x_col",
+    "y_pills",
+    "y_multiselect",
+    _FAMILY_KEY,
+    *_STYLE_KEYS.values(),
+)
 
 
 # The chart-type picker's help, one bullet per type or group of types. The selectbox shows only
@@ -246,7 +255,7 @@ def chart_type_help(family_types: tuple[str, ...]) -> str:
     return "\n".join(["How the type reshapes the controls below:", *shown])
 
 
-def keep_picker_state() -> None:
+def keep_picker_state(*, drawn: tuple[str, ...] = ()) -> None:
     """Re-assign the keyed pickers' stored values, so a gate that ``st.stop()``s ABOVE them
     doesn't discard the user's selection.
 
@@ -262,9 +271,12 @@ def keep_picker_state() -> None:
     Re-assigning an entry to itself is the documented way to opt a key out of that cleanup. It
     reads like a no-op and is not one, which is why it lives in a named function with this note
     rather than inline at each call site.
+
+    ``drawn`` names the keys this run has ALREADY instantiated, which a stop below them must
+    pass: those need no rescue, and Streamlit raises on assigning a drawn widget's key.
     """
     for key in _KEYED_PICKERS:
-        if key in st.session_state:
+        if key in st.session_state and key not in drawn:
             st.session_state[key] = st.session_state[key]
 
 
@@ -646,14 +658,18 @@ with st.sidebar:
     # Two steps (plan #17): a FAMILY, then a type within it, so the common charts come first
     # without hiding any. Pills because it is one click and wraps in the narrow sidebar;
     # `required=True` for the Source control's reason, so the family can never render empty.
-    # Neither widget has a key, and that is the design: when the family changes, the type
-    # selectbox's OPTIONS change, Streamlit gives it a new identity, and it resets to the family's
-    # first type, which is why CHART_FAMILIES lists each family's most common type first.
+    # The TYPE selectbox has no key, and that is the design: when the family changes, its OPTIONS
+    # change, Streamlit gives it a new identity, and it resets to the family's first type, which is
+    # why CHART_FAMILIES lists each family's most common type first. The family pills DO have a
+    # key (plan #25), for the pickers' reason: the upload stop sits above them, and without a key
+    # in _KEYED_PICKERS that stop dropped them, so they redrew as the first family under the old
+    # type and the next interaction reset the chart.
     family = st.pills(
         "Chart family",
         list(CHART_FAMILIES),
         default=next(iter(CHART_FAMILIES)),
         required=True,
+        key=_FAMILY_KEY,
     )
     chart_type = st.selectbox(
         "Chart type",
@@ -717,8 +733,8 @@ with st.sidebar:
     if y_source is not None and not y_source:
         # BEFORE the stop, not after: this runs ABOVE the keyed X and Y pickers, and Streamlit
         # discards the session-state entry of any keyed widget a run does not instantiate. See
-        # `keep_picker_state` for the measurement.
-        keep_picker_state()
+        # `keep_picker_state` for the measurement. The family pills are drawn above this stop.
+        keep_picker_state(drawn=(_FAMILY_KEY,))
         st.error(no_columns_at_all, icon=":material/error:")
         st.stop()
 

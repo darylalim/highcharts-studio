@@ -11839,6 +11839,45 @@ def test_app_backing_out_of_an_upload_does_not_forget_the_keyed_pickers(app):
     )
 
 
+def test_app_backing_out_of_an_upload_does_not_forget_the_chart_family(app):
+    """The upload stop's garbage collection again (plan #25), reached through the one picker
+    `keep_picker_state()` could not reach while it had no key: the chart FAMILY.
+
+    The family pills sit above that stop, so before the fix a run that stopped there dropped them,
+    and they came back showing the first family while the type selectbox, whose frontend still
+    held the old type, kept it. The page read "Basic" over a Comparison type, and the next
+    interaction of ANY kind sent Basic back and reset the chart to the family's first type. The
+    last step is the one that loses work, so the test makes one inert change after the round
+    trip rather than stopping at the redraw.
+    """
+    from highcharts_builder import chart_family
+
+    _select_chart_type(app, "waterfall")
+    assert not app.exception
+
+    app.segmented_control[0].set_value("Upload CSV").run()
+    assert not app.exception
+    assert any("Upload a CSV" in info.value for info in app.info), (
+        "with no file chosen the app should ask for one and stop"
+    )
+
+    app.segmented_control[0].set_value("Sample dataset").run()
+    assert not app.exception
+    family = next(pl for pl in app.pills if pl.label == "Chart family")
+    assert family.value == chart_family("waterfall"), (
+        f"backing out of an upload reset the family to {family.value!r} — the pills were "
+        "dropped by a stop above them, and the frame never changed"
+    )
+
+    next(tg for tg in app.toggle if "Export this chart" in tg.label).set_value(
+        True
+    ).run()
+    assert not app.exception
+    assert _chart_type_selectbox(app).value == "waterfall", (
+        "the chart type was reset by the first interaction after backing out of an upload"
+    )
+
+
 def test_app_dataset_switch_reconciles_a_stale_y_selection(app):
     # The other half of keying the Y pills. A key makes `default=` first-render-only, and
     # Streamlit's multiselect/pills FILTER a stored selection against the current options

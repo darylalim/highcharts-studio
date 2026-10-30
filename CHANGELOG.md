@@ -33,6 +33,17 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.3.3] - 2026-10-29
+
+A fix, so a patch (plan #25).
+
+### Fixed
+
+- **Backing out of a CSV upload no longer resets the chart.** With a chart chosen outside the
+  Basic family (a waterfall, say), switching Source to Upload CSV and then back to the sample
+  showed the family as **Basic** over the old chart type, and the next click of any kind reset the
+  chart to a line. The chart family is now kept, like the column choices already were.
+
 ## [1.3.2] - 2026-10-29
 
 Documentation only, so a patch.
