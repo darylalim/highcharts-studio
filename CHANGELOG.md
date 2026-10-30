@@ -33,6 +33,17 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.3.4] - 2026-10-30
+
+A fix, so a patch (plan #26).
+
+### Fixed
+
+- **The app no longer loads fonts from Google.** The theme fetched Inter and JetBrains Mono from
+  `fonts.googleapis.com`, so every viewer's browser contacted Google as well as the Highcharts
+  CDN. The interface now uses the fonts Streamlit ships (Source Sans and Source Code), served by
+  the app itself. Charts look the same, since they never used the theme's fonts.
+
 ## [1.3.3] - 2026-10-29
 
 A fix, so a patch (plan #25).
