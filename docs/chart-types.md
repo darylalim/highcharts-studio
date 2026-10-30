@@ -213,7 +213,7 @@ funnel pointing down or a pyramid pointing up, which is the whole of the differe
 (verified by rendering)). The four part-of-whole types share **one size policy, split by
 order** (plan #24): past its limit a **pie** (`_PIE_MAX_SLICES`, the palette's 8) or a
 **treemap** (`_TREEMAP_MAX_TILES`, 20) keeps its largest marks in row order and folds the rest
-into one `"Other"` (`_fold_tail`, which a kept row already named "Other" absorbs), while a
+into one `"Other"`, drawn last (`_fold_tail`; a kept row already named "Other" absorbs it and moves last), while a
 **funnel** or **pyramid** past `_FUNNEL_MAX_STAGES` (15) **refuses** through
 `explain_funnel_error`, since folding "the smallest" would reorder stages that ARE an order.
 Every limit counts marks DRAWN, "Other" included, and the two measured ones were set where

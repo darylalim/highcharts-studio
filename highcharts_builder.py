@@ -2332,7 +2332,8 @@ def _fold_tail(
     The kept leaves stay in ROW order, with "Other" appended last: the fold changes which slices
     are drawn, never the order of the ones the user's data put there. Ties at the cut keep the
     earlier row (a stable sort). A kept row the data already names "Other" absorbs the fold rather
-    than being joined by a second "Other".
+    than being joined by a second "Other", and MOVES to the end with it: once merged it means "the
+    rest", so it is last in every order, never ranked by the value it had before the merge.
 
     Shared by ``build_options``, ``count_marks`` and ``folded_row_count``, so the chart, its KPI
     and the app's caption are one computation rather than three that agree.
@@ -2349,10 +2350,8 @@ def _fold_tail(
     total = round(math.fsum(value for _, value in folded), 10)
     names = [name for name, _ in kept]
     if OTHER_LABEL in names:
-        at = names.index(OTHER_LABEL)
-        kept[at] = (OTHER_LABEL, round(kept[at][1] + total, 10))
-    else:
-        kept.append((OTHER_LABEL, total))
+        total = round(kept.pop(names.index(OTHER_LABEL))[1] + total, 10)
+    kept.append((OTHER_LABEL, total))
     return kept, len(folded)
 
 
@@ -3125,7 +3124,7 @@ def _sorted_rows(
     and non-finite values add nothing; a row with no plottable value at all has no key and goes
     LAST whichever way the sort runs, so "smallest first" does not open on a gap. Ties keep the
     data order (a stable sort), as ``_fold_tail``'s cut does. Pie folds AFTER this, so its
-    largest slices are kept in sorted order and "Other" stays last.
+    largest slices are kept in sorted order and "Other" goes last, a merged data row included.
     """
     if (
         style is None

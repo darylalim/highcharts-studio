@@ -1708,6 +1708,21 @@ def test_sort_orders_a_pies_kept_slices_and_leaves_other_last():
     # The same slices either way: sorting picks no different ones.
     assert sorted(names("asc")) == sorted(names(None))
 
+    # A kept DATA row named "Other" absorbs the fold, and is last too rather than ranked by the
+    # value it had before the merge (plan #29). Sorted first, its own 8.5 put the merged 18.5
+    # between B and C largest first, and between C and B smallest first.
+    named = pd.DataFrame(
+        {
+            "k": ["A", "B", OTHER_LABEL, "C", "D", "E", "F", "G", "H", "I", "J"],
+            "v": [10, 9, 8.5, 8, 7, 6, 5, 4, 3, 2, 1],
+        }
+    )
+    for sort, kept in (("desc", "ABCDEF"), ("asc", "FEDCBA"), (None, "ABCDEF")):
+        data = build_options(named, "pie", "k", ["v"], style=ChartStyle(sort=sort))
+        points = data["series"][0]["data"]
+        assert [p["name"] for p in points] == [*kept, OTHER_LABEL], sort
+        assert points[-1]["y"] == 18.5, sort
+
 
 def test_sort_leaves_a_time_axis_alone():
     # A date X draws on a time axis (plan #4), where each point sits at its date, so the builder
@@ -4232,6 +4247,9 @@ def test_fold_merges_into_a_row_the_data_already_calls_other():
     data = build_options(df, "pie", "name", ["v"])["series"][0]["data"]
     assert [p["name"] for p in data].count(OTHER_LABEL) == 1
     assert len(data) == _PIE_MAX_SLICES - 1
+    # And it moves to the end with the fold (plan #29): merged, it means "the rest", so it does
+    # not keep the data position it had as a row of its own.
+    assert data[-1]["name"] == OTHER_LABEL
     assert sum(p["y"] for p in data) == pytest.approx(df["v"].sum())
 
 

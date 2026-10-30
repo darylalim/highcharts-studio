@@ -1123,6 +1123,13 @@ even where it outweighs every kept slice, as rendering showed it can: twelve fru
 first draw a 10-unit slice first and an 11-unit "Other" last. That is the intended reading ("the
 rest"), not a misordering.
 
+As 1.4.0 shipped, this held only for an "Other" the fold created (plan #29). A kept data row
+already named "Other" absorbed the fold where it stood, so it kept the rank of its OWN value: eleven
+rows with "Other" = 8.5 and a folded tail of 10 drew `A 10, B 9, Other 18.5, C 8, …`. Since 1.4.1
+`_fold_tail` moves a merged row to the end too, in every order, unsorted included: once it holds
+the tail it means "the rest" whatever the data called it. Before the fix, unsorted charts left
+it at its data position, a quirk that predated Sort and went with it.
+
 **One side effect, caught by the existing tests.** `_apply_style` gave a `yAxis` to any type with a
 style control, which was harmless while every such type had axes. Pie's Sort would have given it
 an empty one, so the `yAxis` now depends on the Y-axis controls (`_Y_AXIS_CONTROLS`).
