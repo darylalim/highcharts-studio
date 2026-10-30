@@ -125,6 +125,8 @@ In build order. Numbers are stable IDs, not priorities.
 | 22nd | 28 | [Sort categories by value](#28-sort-categories-by-value) | S | done (1.4.0) |
 | 23rd | 29 | [A data row named "Other" escapes the sort](#29-a-data-row-named-other-escapes-the-sort) | S | done (1.4.1) |
 | 24th | 30 | [Histogram (one exception to the type freeze)](#30-histogram) | M | done (1.5.0) |
+| 25th | 31 | [Preset colour palettes](#31-preset-colour-palettes) | M | planned |
+| — | 32 | [Histogram bin-count control](#32-histogram-bin-count-control) | S | idea |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
@@ -342,6 +344,22 @@ wide box summarise alike). It also cost what #10 predicted for the cheapest kind
 the kwarg table and the cache layer stayed untouched. The rest of #10 stays deferred. The design:
 [`chart-types.md`](chart-types.md#how-a-chart-is-built) (the `histogram` entry).
 
+### 31. Preset colour palettes
+
+- **What & why:** a style control offering a few fixed palettes in place of `DEFAULT_COLORS`. The
+  "tweak it" step of the editor loop is still its thinnest, and this widens it for every chart
+  rather than for one type. It is the form [Direction](#direction-a-lightweight-chart-editor)
+  already allows: presets only, no free-form picker.
+- **Touches:** `DEFAULT_COLORS` and its config copy, `ChartStyle` (a field, not a kwarg), the two
+  palette tests (identity against the chrome, CIEDE2000 under colour-vision deficiency), which
+  must run over every preset, and the exports and Python snippet, which pass `style` already.
+- **Open questions:** the palette's **order** carries meaning. `_WATERFALL_*` and
+  `_BOXPLOT_OUTLIER_COLOR` index into it, so a preset that only reorders hues repaints a rise as a
+  fall. Decide first whether every preset keeps those slots, or whether the semantic colours move
+  out of the categorical list. Also: which types take the control (Tier 1 only, like the other
+  style controls, or every type that draws the palette), and how many presets.
+- **Size:** M · **Status:** planned
+
 ## Folded
 
 ### 6. Reference line
@@ -410,6 +428,16 @@ Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.
 ---
 
 ## Your additions
+
+### 32. Histogram bin-count control
+
+- **What & why:** let the user override the histogram's automatic bin count. Logged rather than
+  planned: numpy's `bins="auto"` is a sound default, and nothing has asked for a manual count yet.
+- **Touches:** a setting kwarg like the gauge's `agg` (so `_SETTING_KWARGS`, not the column-kwarg
+  table), `_histogram_bins`, `count_marks`, and an app widget hidden for every other type.
+- **Open questions:** a count or a width; whether `_HISTOGRAM_MAX_BINS` still caps an explicit
+  choice.
+- **Size:** S · **Status:** idea
 
 <!-- Add new entries above this line, using the same shape:
 ### N. Title
