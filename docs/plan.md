@@ -123,6 +123,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 20th | 26 | [Self-host the theme's fonts, or drop them (dropped them)](#26-self-host-the-themes-fonts-or-drop-them) | S | done (1.3.4) |
 | 21st | 27 | [Stop the favicon and usage statistics contacting third parties](#27-stop-the-favicon-and-usage-statistics-contacting-third-parties) | S | done (1.3.5) |
 | 22nd | 28 | [Sort categories by value](#28-sort-categories-by-value) | S | done (1.4.0) |
+| — | 29 | [A data row named "Other" escapes the sort](#29-a-data-row-named-other-escapes-the-sort) | S | idea |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
@@ -390,6 +391,26 @@ Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.
 ---
 
 ## Your additions
+
+### 29. A data row named "Other" escapes the sort
+
+- **What & why:** found after #28 shipped. When a pie folds its tail and the data already has a
+  KEPT row named "Other", `_fold_tail` adds the folded total to that row where it stands rather
+  than appending a second "Other". The sort ran before the fold, so the row keeps the rank of its
+  OWN value, not the merged one. Reproduced on 2026-10-30: eleven rows with "Other" = 8.5 and a
+  folded tail of 10 draw, largest first, `A 10, B 9, Other 18.5, C 8, …`, and smallest first put
+  it between C and B. So it is neither ranked by its value nor last, and three places written for
+  #28 overstate the rule ("Other stays last"): the 1.4.0 `CHANGELOG.md` entry, the
+  `decisions.md` section on Sort, and `_sorted_rows`' docstring. Unsorted charts have the same
+  quirk (the merged row stays in data order), which predates #28.
+- **Touches:** `_fold_tail` (or `_sorted_rows`), its docstring, the three passages above, and a
+  test beside `test_sort_orders_a_pies_kept_slices_and_leaves_other_last`.
+- **Open questions:**
+  1. Move a merged "Other" to the end, so "Other is always last" becomes true in every order?
+     This also changes unsorted charts, where the row now sits at its data position.
+     Recommended: yes, since after the merge the row means "the rest" whatever its name was.
+  2. Or only correct the docs, and accept that a data row named "Other" is ranked as data?
+- **Size:** S · **Status:** idea
 
 <!-- Add new entries above this line, using the same shape:
 ### N. Title
