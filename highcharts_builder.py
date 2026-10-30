@@ -2988,6 +2988,8 @@ def _in_mark_labels(fmt: str, **extra: object) -> dict[str, object]:
 # ChartStyle's validation read the same tuples.
 LEGEND_POSITIONS = ("bottom", "top", "right", "hidden")
 STACKING_MODES = ("normal", "percent")
+# Largest first, smallest first (plan #28). `None` is the data order, as `stacking`'s `None` is off.
+SORT_ORDERS = ("desc", "asc")
 
 
 @dataclass(frozen=True)
@@ -3009,6 +3011,7 @@ class ChartStyle:
     stacking: str | None = None  # None, or one of STACKING_MODES
     log_y: bool = False
     reference_line: float | None = None  # a fixed Y value; None draws no line
+    sort: str | None = None  # None (the data order), or one of SORT_ORDERS
 
     def __post_init__(self) -> None:
         if self.legend not in LEGEND_POSITIONS:
@@ -3019,12 +3022,17 @@ class ChartStyle:
             raise ValueError(
                 f"stacking must be None or one of {STACKING_MODES}, not {self.stacking!r}"
             )
+        if self.sort is not None and self.sort not in SORT_ORDERS:
+            raise ValueError(
+                f"sort must be None or one of {SORT_ORDERS}, not {self.sort!r}"
+            )
 
 
 # Which controls each type takes. Tier 1 only (docs/plan.md, "Chart tiers"); every other type takes
-# none, and pie takes none either: it has no axes, and it always labels its slices. A type gains a
+# none, and pie takes sort alone: it has no axes, and it always labels its slices. A type gains a
 # control here only where the control means something for it — stacking for the four types whose
-# marks have a baseline to stack on, log Y for the eight with a value axis.
+# marks have a baseline to stack on, log Y for the eight with a value axis, sort for the three whose
+# X is an unordered set of categories.
 _CARTESIAN_STYLE_TYPES = (
     "line",
     "spline",
@@ -3036,16 +3044,25 @@ _CARTESIAN_STYLE_TYPES = (
     "bubble",
 )
 _STACKABLE_TYPES = ("area", "areaspline", "column", "bar")
+# Sort (plan #28) only where X is an unordered set of categories. A line's X order IS its meaning
+# (months sorted by revenue is a scrambled line, not a ranking), a scatter's X is a number, a
+# radar's spokes are a cycle, and a funnel's stages are an order.
+_SORTABLE_TYPES = ("column", "bar", "pie")
+# The controls that edit the Y axis (`_apply_style`); a type taking none of them gets no yAxis.
+_Y_AXIS_CONTROLS = frozenset({"y_title", "stacking", "log_y", "reference_line"})
 _STYLE_CONTROLS: dict[str, frozenset[str]] = {
     **{
         t: frozenset(
             {"x_title", "y_title", "legend", "data_labels", "log_y", "reference_line"}
             | ({"stacking"} if t in _STACKABLE_TYPES else set())
+            | ({"sort"} if t in _SORTABLE_TYPES else set())
         )
         for t in _CARTESIAN_STYLE_TYPES
     },
     # Radar is polar: no axis titles to set, and a log radial axis is not offered.
     "radar": frozenset({"legend", "data_labels", "reference_line"}),
+    # Pie has no axes and always labels its slices, so sort is its one control.
+    "pie": frozenset({"sort"}),
 }
 
 # The reference line's look. Its colour is the chrome's `text` colour, an alias rather than a new
@@ -3081,6 +3098,57 @@ def log_scale_ok(df: pd.DataFrame, y_cols: list[str]) -> bool:
     return True
 
 
+def sort_ok(df: pd.DataFrame, chart_type: str, x_col: str | None) -> bool:
+    """Whether sorting can reorder this chart: False when its X is drawn on a time axis.
+
+    A time axis places each point at its date, so a sorted frame draws the same chart; the app
+    disables the control (saying why) and ``_sorted_rows`` leaves the frame alone. From the same
+    ``_date_x`` the chart is built by, so the two cannot disagree.
+    """
+    return _date_x(df, chart_type, x_col) is None
+
+
+def _sorted_rows(
+    df: pd.DataFrame,
+    chart_type: str,
+    x_col: str | None,
+    y_cols: list[str],
+    style: ChartStyle | None,
+) -> pd.DataFrame:
+    """``df``'s rows in ``style.sort`` order, or ``df`` itself when there is nothing to sort.
+
+    Sorts the FRAME, before the per-type build, so every type that takes the control draws its
+    categories in that order with no change to its own branch, and the exports and the Python
+    snippet (which pass the same ``style``) reproduce it. The key is the row's TOTAL over the
+    series the type plots (pie plots only the first): the series' own value when there is one,
+    the stack's height when stacked, and independent of which series was picked first. Missing
+    and non-finite values add nothing; a row with no plottable value at all has no key and goes
+    LAST whichever way the sort runs, so "smallest first" does not open on a gap. Ties keep the
+    data order (a stable sort), as ``_fold_tail``'s cut does. Pie folds AFTER this, so its
+    largest slices are kept in sorted order and "Other" stays last.
+    """
+    if (
+        style is None
+        or style.sort is None
+        or "sort" not in style_controls_for(chart_type)
+        or not sort_ok(df, chart_type, x_col)
+    ):
+        return df
+    key_cols = [c for c in y_cols[: 1 if chart_type == "pie" else None] if c in df]
+    if not key_cols:
+        return df
+    values = df[key_cols].apply(pd.to_numeric, errors="coerce")
+    # `.astype(bool)` by the row-less rule (CLAUDE.md): with no rows `.map()` returns a float or
+    # object mask. `where` reads no mask value then, so nothing observes it here; it is the
+    # convention every mask follows, kept so a later use of the mask inherits a boolean one.
+    values = values.where(values.map(_plottable).astype(bool))
+    key = values.sum(axis=1, min_count=1).reset_index(drop=True)
+    order = key.sort_values(
+        ascending=style.sort == "asc", kind="stable", na_position="last"
+    ).index
+    return df.iloc[order].reset_index(drop=True)
+
+
 def _apply_style(
     options: dict,
     chart_type: str,
@@ -3097,7 +3165,8 @@ def _apply_style(
         return options
     allowed = style_controls_for(chart_type)
     x_axis = options.get("xAxis")
-    y_axis = options.setdefault("yAxis", {}) if allowed else None
+    # Only a type with a Y-axis control gets a yAxis: pie's one control (sort) must not add one.
+    y_axis = options.setdefault("yAxis", {}) if allowed & _Y_AXIS_CONTROLS else None
     for field, axis in (("x_title", x_axis), ("y_title", y_axis)):
         text = getattr(style, field).strip()
         if field in allowed and text and isinstance(axis, dict):
@@ -3419,8 +3488,10 @@ def build_options(
     every variwide area the value squared, every dumbbell reporting no change at all.
 
     ``style`` applies the sidebar's style controls (``ChartStyle``) after the per-type build,
-    for the controls ``style_controls_for(chart_type)`` lists; every other field is ignored.
+    for the controls ``style_controls_for(chart_type)`` lists; every other field is ignored. Its
+    ``sort`` is the one applied BEFORE the build, to the frame's rows (``_sorted_rows``).
     """
+    df = _sorted_rows(df, chart_type, x_col, y_cols, style)
     options = _build_options(
         df,
         chart_type,

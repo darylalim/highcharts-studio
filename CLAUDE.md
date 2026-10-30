@@ -288,7 +288,7 @@ tests exclude them by name, in `_SETTING_KWARGS`). The gauge family (`solidgauge
 takes two of them: `agg=` (one of `GAUGE_AGGREGATIONS`) and `dial=` an explicit `(min, max)`,
 derived from the **readings** by `gauge_dial` when `None`. The third is `style=`, one frozen
 `ChartStyle` carrying the sidebar's style controls (axis titles, legend, data labels, stacking,
-log Y, a reference line); a type takes only the fields `style_controls_for` lists, and the
+log Y, a reference line, a sort); a type takes only the fields `style_controls_for` lists, and the
 builder ignores the rest. One object rather than one kwarg per control, so a new control is a
 field and a widget, not a new kwarg
 ([why](docs/decisions.md#style-one-object-not-one-kwarg-per-control)). The gauge family is why
@@ -474,7 +474,7 @@ cannot type into a data editor; the tests set its session state once, which the 
 
 The **style controls** meet garbage collection twice, and each has its own AppTest. A stop above
 them is the pickers' case, closed by listing their keys in `_KEYED_PICKERS`. The new one is a
-control the chart type simply **hides** (pie draws none): no stop is involved, so
+control the chart type simply **hides** (pie draws only Sort): no stop is involved, so
 `keep_hidden_style_state()` re-assigns only the hidden keys on every run. Only the hidden ones,
 because re-assigning a key whose widget is drawn later in the same run counts as setting it
 through the Session State API. The widgets use their natural defaults (empty, off, the first
