@@ -6,7 +6,7 @@
 [![Streamlit 1.59+](https://img.shields.io/badge/streamlit-1.59%2B-ff4b4b.svg)](https://streamlit.io)
 
 A [Streamlit](https://streamlit.io) app for building interactive charts with
-[Highcharts](https://www.highcharts.com). Load a sample dataset or a CSV, pick one of 30 chart
+[Highcharts](https://www.highcharts.com). Load a sample dataset or a CSV, pick one of 31 chart
 types, map its columns, and download or embed the result. Every chart is built with
 [`highcharts-core`](https://github.com/highcharts-for-python/highcharts-core), the Highcharts for
 Python toolkit; the app uses no native Streamlit charts.
@@ -30,7 +30,7 @@ sidebar and the editable source data beside the chart](docs/images/screenshot.pn
   axis, so missing days show as gaps.
 - **Edit in place.** Click a cell in the Source data table to fix a typo or try a value, and the
   chart follows. Cells only (no adding or deleting rows); edits reset when you change dataset.
-- **Chart types by family.** Pick a family, then a type within it, so the 30 types never sit in
+- **Chart types by family.** Pick a family, then a type within it, so the 31 types never sit in
   one long list. The sample datasets follow the same order.
 - **Style controls.** For the basic types: axis titles, legend position, data labels, stacking
   (normal or percent), a log Y axis, and a dashed reference line. Column, bar and pie can also be
@@ -67,8 +67,9 @@ sidebar and the editable source data beside the chart](docs/images/screenshot.pn
 | Comparison | `columnrange` | Floating bars from a low to a high per category | High |
 | Comparison | `arearange` | A filled band from a low to a high per category | High |
 | Comparison | `heatmap` | A category × category grid, cells coloured by value | — |
-| Comparison | `boxplot` | Per-category distributions from repeated observations | — |
 | Comparison | `variwide` | Columns whose width is a second value, so area is the reading | Width |
+| Distribution | `histogram` | One column's values counted into equal-width bins, showing its shape | — (no X) |
+| Distribution | `boxplot` | Per-category distributions from repeated observations | — |
 | Flow & hierarchy | `sankey` | Weighted flows between two node columns | Target |
 | Flow & hierarchy | `dependencywheel` | The same weighted flows drawn around a ring | Target |
 | Flow & hierarchy | `networkgraph` | A force-directed graph of unweighted links | Target (no Y) |
@@ -80,7 +81,9 @@ sidebar and the editable source data beside the chart](docs/images/screenshot.pn
 | Gauge | `solidgauge` | An arc per column | Aggregation, Dial (no X) |
 
 The gauges take no label column: each selected column becomes one mark, reduced to a single
-reading by the aggregation you pick (sum, mean, median, min, max or last). The per-type design
+reading by the aggregation you pick (sum, mean, median, min, max or last). The histogram takes
+none either: its bars are bins of one column, chosen by the same rule as numpy's and seaborn's
+`bins="auto"`. The per-type design
 notes are in [`docs/chart-types.md`](docs/chart-types.md).
 
 ## Quick start

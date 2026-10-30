@@ -1,6 +1,6 @@
 # Chart types
 
-The per-type design record for `highcharts-studio`: why each of the 30 supported
+The per-type design record for `highcharts-studio`: why each of the 31 supported
 types is built the way it is, what the library silently drops, and which decisions
 were settled by rendering rather than by inference.
 
@@ -141,8 +141,8 @@ of `GAUGE_AGGREGATIONS`; raising `ValueError` otherwise) and `dial=` an explicit
 scale, which — left `None` — is *derived from the readings* by `gauge_dial` (raising `ValueError`
 when its maximum does not sit above its minimum: see `explain_gauge_error`). Both are read by both
 types, and neither by any other. The family is also why `x_col` is `str | None` on all five
-signatures: they are the types with no label channel, so every *other* type raises when `x_col` is
-omitted. (`dial` is not called `scale=` because `build_chart_png` — retired with the Static PNG
+signatures, with `histogram` beside it in `LABELLESS_TYPES`: they are the types with no label
+channel, so every *other* type raises when `x_col` is omitted. (`dial` is not called `scale=` because `build_chart_png` — retired with the Static PNG
 mode in 0.21.0 — already had a `scale: int = 2`, the image's pixel density, which means something
 completely different and got there first; the export's `scale` lives on as `_EXPORTING["scale"]`.)
 
@@ -371,7 +371,32 @@ and `stemColor` are accepted by `Chart.from_options` and then silently dropped (
 so the box interior can't be set at all. It falls back to Highcharts' own
 `var(--highcharts-background-color)`, which the `color-scheme` pin below resolves to
 white in both themes, while `colorByPoint` gives each box a palette-hued
-border/whisker/median legible against that white), and `waterfall` (a cumulative
+border/whisker/median legible against that white), `histogram` (one column's distribution —
+boxplot's other half, and the third type that *aggregates*: a box summarises a distribution in
+five numbers, which is the right reading when several are compared and the wrong one when the
+**shape** is the question, since two humps and one wide box summarise alike. `y_cols[0]` is binned
+by `_histogram_bins`, a reimplementation of numpy's `bins="auto"` — seaborn's default, so the
+histogram a reader compares this one against, boxplot's matplotlib argument again — pinned
+against `numpy.histogram` itself: the smaller of Sturges' width and numpy 2's *relaxed*
+Freedman–Diaconis (never narrower than half the square-root width, which is what bounds the count
+when one far outlier stretches the range), no bin narrower than 1 on an integer column, half-open
+bins with the last one closed, and numpy's own placement arithmetic corrected against the edges.
+Its one departure is a cap of `_HISTOGRAM_MAX_BINS` (100), since numpy's bound grows with the
+square root of the rows. It has **no label channel**, the gauge family's case, so it joins them in
+`LABELLESS_TYPES`: `x_col` is `None` (and ignored if given), the X control is not drawn, and the
+branch sits above the shared `_label_ok` filter, because a row filter over an aggregate does not
+drop a mark, it silently changes a count. Binned in Python rather than by Highcharts' own
+`histogram` series, which bins in the browser from a hidden base series: then the KPI, the exports
+and the chart would each re-derive bins Highcharts chose. So it is drawn as a plain **`column`**
+series on a linear X axis — no extra module, each bar at its bin's centre with `pointRange` set to
+the bin width (without it a single bin falls back to one axis unit) and zero padding, so the bars
+tile. It needs no hook of its own: column's border dissolve in `_themed` already draws the seam
+between touching bars in the page colour, variwide's case, confirmed by rendering. The tooltip's
+bin range travels as the point's `custom.range`, written by `_bin_label` to the decimals the edges
+need, since Highcharts' number format has no such setting; the format opens with `<b>`, so the
+serializer cannot read it as an object. Missing and non-finite values are dropped by
+`_finite_values` before binning, and a column with nothing finite, or whose range overflows the
+double range, draws no bins), and `waterfall` (a cumulative
 "bridge" — the category-x data shape read as signed **deltas** rather than levels, so
 each bar floats where the last one ended and the chart shows how a starting value
 *becomes* an ending one. `x_col` names each step and the first `y_cols` column gives
@@ -1944,7 +1969,15 @@ not merely the format string that used to hide the absurd number.
   value is positive, since a negative part would stack below the axis and stop being a share.
   Its label names no single type on purpose: `_pick_sample` takes the first label containing
   `(<type>)`, so *(column)* would quietly become every column test's sample. Pinned by
-  `test_revenue_by_channel_sample_is_stackable`. The two gauge samples are siblings
+  `test_revenue_by_channel_sample_is_stackable`. `Delivery times by zone (histogram)` is the
+  boxplot sample's **mirror**: `Service response times (boxplot)` compares several distributions
+  by their summaries, and this one asks what one distribution looks like. Its 80 times are
+  bimodal on purpose (nearby orders around 24 minutes, across town around 52, none between 33 and
+  39), so the histogram draws two humps either side of an empty bar while a single box over the
+  same values would put its median beside Q1 and describe almost no order. `zone` explains the
+  humps and leads the frame, so the same data as a boxplot by zone splits into two tight boxes: a
+  mirror within one frame, like the date-axis sample's. Pinned by
+  `test_histogram_sample_shows_the_shape_a_boxplot_hides`. The two gauge samples are siblings
   that exercise the dial from **opposite ends**: `Weekly bookings by region (solidgauge)` is read
   through `sum`, `Server utilization (gauge)` through `mean` (percentages, so the derived dial
   lands on the 0..100 a reader already has in mind — and `sum` on it is nonsense *on purpose*,
@@ -2259,7 +2292,12 @@ pinned to emit `chart.type` `dependencywheel` under its OWN `plotOptions` key �
 `modules/dependency-wheel` and `modules/sankey` from `chart.type` alone and *not* `highcharts-more`;
 sharing sankey's `count_marks` rule (proven in the count-vs-built sweep) and its dark border
 dissolve; the two node-link guards; and the migration sample where every region is both origin and
-destination), boxplot's aggregated Tukey distributions (raw observations grouped by a
+destination), histogram's bins (`numpy.histogram(bins="auto")` matched over one case per
+branch of its rule — including two frames that land a value exactly on a float edge, found by
+search, without which deleting either half of the edge correction stayed green; the cap; the
+integer rule surviving a nullable column's gap; `x_col` ignored and the label filter kept away;
+the bars tiling their bins; the tooltip's range reaching the JS through `custom`; and the sample
+drawing two humps either side of an empty bin), boxplot's aggregated Tukey distributions (raw observations grouped by a
 repeating `x_col` into positional `[low, q1, median, q3, high]` 5-arrays in
 first-appearance order; the outliers split into a linked scatter series that is
 emitted only when they exist; the `iqr == 0` degeneracies — a one-observation group,
@@ -2441,8 +2479,8 @@ constant `min(1, …)` index landing on the second so it starts distinct from Me
 Measure change (a Goal is still valid when the Measure moves, Target's/Parent's/End's/High's case,
 not the Dial's), and its KPI reading **Measures**,
 gauge's
-aggregation picker and Dial min/max inputs — and gauge's *absent* X control and networkgraph's
-*absent* Y control, the two mirror-image subtractive changes — and boxplot's
+aggregation picker and Dial min/max inputs — and gauge's and histogram's *absent* X control and
+networkgraph's *absent* Y control, the mirror-image subtractive changes — and boxplot's
 and waterfall's
 single-select Y —
 opening the Export panel behind its toggle (whose JS tab the config AppTests read, in
@@ -2699,12 +2737,13 @@ stopped being **rendered** — and both measurements are in
   non-standard JSON literal `Infinity`, answered `400`). So each type applies the same
   missing-data policy to a non-finite **value**: the keep-the-slot types go through `_num`
   (gap = `EnforcedNull`), the drop-the-row types through the shared `_plottable` predicate
-  (pie, treemap, scatter, bubble, and sankey's *weight*), boxplot and gauge — the two
+  (pie, treemap, scatter, bubble, and sankey's *weight*), boxplot, gauge and histogram — the
   AGGREGATING types, which share `_finite_values` for exactly this reason — drop non-finite
-  observations before reducing, and, because they are the two types that do *arithmetic*
+  observations before reducing, and, because they are the types that do *arithmetic*
   on the values, then null the whole mark (an `EnforcedNull`) if that arithmetic overflows
   a finite column into a non-finite quantile/fence (boxplot) or reading (gauge:
-  `1e308 + 1e308` is `inf`, and a `1e308` cell parses out of a plain CSV) — and xrange drops
+  `1e308 + 1e308` is `inf`, and a `1e308` cell parses out of a plain CSV), or, for histogram,
+  draw no bins when `max - min` overflows — and xrange drops
   the row via
   `_spannable`, whose `_plottable`-on-both-ends half exists precisely for this: `end >= start`
   alone accepts `(-inf, 10)`, so the comparison is *not* enough on its own and the finiteness

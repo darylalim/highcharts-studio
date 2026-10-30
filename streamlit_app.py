@@ -23,6 +23,8 @@ from highcharts_builder import (
     FUNNEL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
+    HISTOGRAM_TYPES,
+    LABELLESS_TYPES,
     LEGEND_POSITIONS,
     MAGNITUDE_RANGE_TYPES,
     NETWORKGRAPH_TYPES,
@@ -98,7 +100,7 @@ _KEYED_PICKERS = (
 
 # The chart-type picker's help, one bullet per type or group of types. The selectbox shows only
 # the bullets for the chosen FAMILY's types (plan #17), so its tooltip lists what is on offer
-# rather than all 30. Each bullet keeps the type name(s) it covers, bold, at its start.
+# rather than all 31. Each bullet keeps the type name(s) it covers, bold, at its start.
 _TYPE_HELP: tuple[tuple[tuple[str, ...], str], ...] = (
     (
         ("pie",),
@@ -164,6 +166,12 @@ _TYPE_HELP: tuple[tuple[tuple[str, ...], str], ...] = (
         "- **boxplot** — a category X column whose values *repeat* (one row per "
         "observation) + one numeric column of raw measurements; each category's "
         "distribution becomes a box, with outliers drawn as separate dots",
+    ),
+    (
+        ("histogram",),
+        "- **histogram** — one numeric column of raw values; they are sorted into "
+        "equal-width bins, and each bar's height counts the values in its bin, so the "
+        "chart shows the column's *shape* (where values cluster, a skew, two humps)",
     ),
     (
         ("waterfall",),
@@ -368,6 +376,9 @@ MARK_METRICS = {
     # the other way round it left xrange's milestone/sliver paragraph reading as timeline's — a
     # type that has no zero-length mark at all.
     "timeline": "Events",
+    # Histogram's one series draws one bar per BIN, so "Series plotted" would read a bare 1. The
+    # bins are the builder's own (count_marks reuses `_histogram_bins`), empty ones included.
+    "histogram": "Bins",
     # Columnrange is a single low/high series like xrange is a single lane-bar series, so its
     # default "Series plotted" would misreport as 1 too. Its marks are the floating bars, one
     # per surviving category — a missing/inverted range keeps its slot as a null bar and still
@@ -864,6 +875,11 @@ with st.sidebar:
         # the chart claims; Before/After cannot, since swapping them turns every rise into a
         # fall. The words have to carry that, which "Value 1"/"Value 2" would not.
         x_label, y_label, multi = "Category (X) axis", "Before", False
+    elif chart_type in HISTOGRAM_TYPES:
+        # No X control either (see the selectbox below): the bins are computed from the values, so
+        # there is no label column to pick. Single-select Y for boxplot's reason — a second column
+        # would be a second distribution, which is a second chart.
+        x_label, y_label, multi = "", "Values (binned)", False
     elif chart_type in GAUGE_TYPES:
         # The two types with NO X control at all (see the selectbox below): their marks are the
         # SELECTED COLUMNS, each collapsed to one number, so there is no label column to pick.
@@ -886,13 +902,14 @@ with st.sidebar:
     else:  # cartesian + radar (both a category X axis with one or more Y series)
         x_label, y_label, multi = "Category (X) axis", "Series (Y) — one or more", True
 
-    # Gauge draws no X control, and passes None. It is the one type with no label channel — its
-    # marks are the selected COLUMNS — so there is nothing for an X column to name. The two
+    # Gauge and histogram draw no X control, and pass None. They are the types with no label
+    # channel — a gauge's marks are the selected COLUMNS, a histogram's the bins of one — so there
+    # is nothing for an X column to name. The two
     # alternatives are both lies: rendering a control that does nothing lies in the UI, and
     # passing a column the builder must ignore lies in the call site AND in every cache key
     # (the chart would re-render on a change that cannot affect it). `build_options` takes
     # `str | None` precisely so this can be honest.
-    if chart_type in GAUGE_TYPES:
+    if chart_type in LABELLESS_TYPES:
         x_col = None
     else:
         # KEYED, and the key is what stops the LABEL from re-minting this widget. `x_label`

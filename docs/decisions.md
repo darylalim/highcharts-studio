@@ -1163,8 +1163,9 @@ Settled on 2026-10-07, before the code (the `required=True` check came back yes:
 - **Six families, not seven.** Heatmap colours a grid of categories by value, which is a
   comparison rather than a distribution; moving it would leave a *Distribution* family with
   only boxplot, so the two merge into *Comparison*. If the freeze in
-  [#10](#10-new-chart-types) lifts and `histogram` arrives, *Distribution* can return with
-  two members.
+  [#10](plan.md#10-new-chart-types) lifts and `histogram` arrives, *Distribution* can return with
+  two members. It did, in 1.5.0 ([#30](plan.md#30-histogram)): seven families, with histogram and boxplot
+  in *Distribution* and heatmap left in *Comparison* for the reason above.
 - **Help text per family.** The chart-type selectbox's help is one tooltip with 30 bullets
   today; it shows only the selected family's entries instead.
 - **Order the samples by family.** The Dataset dropdown lists 26 samples in the order they

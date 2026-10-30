@@ -33,6 +33,21 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.5.0] - 2026-10-30
+
+A feature, so a minor (plan #30).
+
+### Added
+
+- **Histogram.** A new chart type for the shape of one numeric column: its values are counted into
+  equal-width bins, chosen by the same rule as numpy's and seaborn's `bins="auto"`, and drawn as
+  touching bars. Hover a bar for its range and count; the KPI shows the number of bins. It takes
+  no X column. Blank and infinite values are left out.
+- **A Distribution family** in the chart-type picker, holding the histogram and the boxplot, which
+  moves there from Comparison.
+- **A "Delivery times by zone" sample.** Its times have two peaks, which the histogram shows and a
+  single box over the same values would hide. As a boxplot by zone it splits into two boxes.
+
 ## [1.4.1] - 2026-10-30
 
 A fix, so a patch (plan #29).
