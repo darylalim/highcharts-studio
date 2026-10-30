@@ -33,6 +33,20 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.4.0] - 2026-10-30
+
+A feature, so a minor (plan #28).
+
+### Added
+
+- **Sort.** Column, bar and pie charts gain a Sort style control: data order (the default, so
+  existing charts are unchanged), largest first or smallest first. With several series selected,
+  categories rank by their total, which is a stacked bar's height. Rows with no value go last,
+  ties keep their order, and a pie's "Other" slice stays last. It is disabled, saying why, when
+  the X column reads as dates, since a time axis orders itself. The exports and the Python
+  snippet reproduce the sorted chart; the builder takes it as `ChartStyle(sort="desc")` or
+  `"asc"`.
+
 ## [1.3.5] - 2026-10-30
 
 A fix, so a patch (plan #27).

@@ -29,6 +29,7 @@ from highcharts_builder import (
     NODE_LINK_TYPES,
     ORGANIZATION_TYPES,
     OTHER_LABEL,
+    SORT_ORDERS,
     STACKING_MODES,
     TIMELINE_TYPES,
     UNWEIGHTED_NODE_LINK_TYPES,
@@ -54,6 +55,7 @@ from highcharts_builder import (
     picker_columns,
     python_snippet,
     sniff_delimiter,
+    sort_ok,
     style_controls_for,
 )
 from sample_data import SAMPLES
@@ -76,7 +78,10 @@ _STYLE_KEYS = {
     "stacking": "style_stacking",
     "log_y": "style_log_y",
     "reference_line": "style_reference_line",
+    "sort": "style_sort",
 }
+# The Sort control's labels (plan #28), by ChartStyle.sort value.
+_SORT_LABELS = {None: "Data order", "desc": "Largest first", "asc": "Smallest first"}
 # The app's own store of the data editor's cell edits (plan #8): {"data_id": ..., "edits": ...}.
 _CELL_EDITS = "_cell_edits"
 # The chart-family pills (plan #25). Keyed and listed for the same reason as the style controls:
@@ -1299,6 +1304,22 @@ with st.sidebar:
                 [None, *STACKING_MODES],
                 key="style_stacking",
                 format_func=lambda mode: "Off" if mode is None else mode.title(),
+            )
+        if "sort" in shown:
+            # Disabled on a time axis, as log Y is for values <= 0: each point sits at its date,
+            # so sorting would change nothing, and the user is told why rather than left to guess.
+            sort_blocked = (
+                None
+                if sort_ok(df, chart_type, x_col)
+                else f"Unavailable: “{x_col}” reads as dates, and a time axis orders itself."
+            )
+            st.selectbox(
+                "Sort",
+                [None, *SORT_ORDERS],
+                key="style_sort",
+                format_func=_SORT_LABELS.__getitem__,
+                disabled=sort_blocked is not None,
+                help=sort_blocked,
             )
         if "log_y" in shown:
             # Disabled, not hidden, when log cannot be honest: the user is told why, and a

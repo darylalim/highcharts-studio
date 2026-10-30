@@ -1495,9 +1495,10 @@ def test_default_style_changes_no_chart(labeled_frame, chart_type):
 
 
 def test_style_controls_cover_tier_one_and_nothing_else():
-    # The table the sidebar draws from. Tier 1 only; pie takes none (no axes, always-on slice
-    # labels); stacking only where marks have a baseline; radar (polar) takes no axis titles and
-    # no log axis. Every other type takes nothing, so the Style section is hidden for it.
+    # The table the sidebar draws from. Tier 1 only; pie takes sort alone (no axes, always-on
+    # slice labels); stacking only where marks have a baseline; sort only where X is an unordered
+    # set of categories (plan #28); radar (polar) takes no axis titles and no log axis. Every
+    # other type takes nothing, so the Style section is hidden for it.
     from highcharts_builder import style_controls_for
 
     cartesian = {
@@ -1510,9 +1511,12 @@ def test_style_controls_cover_tier_one_and_nothing_else():
     }
     for t in ("line", "spline", "scatter", "bubble"):
         assert style_controls_for(t) == cartesian, t
-    for t in ("area", "areaspline", "column", "bar"):
+    for t in ("area", "areaspline"):
         assert style_controls_for(t) == cartesian | {"stacking"}, t
+    for t in ("column", "bar"):
+        assert style_controls_for(t) == cartesian | {"stacking", "sort"}, t
     assert style_controls_for("radar") == {"legend", "data_labels", "reference_line"}
+    assert style_controls_for("pie") == {"sort"}
     tier_one = {
         "line",
         "spline",
@@ -1525,7 +1529,7 @@ def test_style_controls_cover_tier_one_and_nothing_else():
     }
     tier_one |= {"bubble", "radar"}
     for t in SUPPORTED_TYPES:
-        if t == "pie" or t not in tier_one:
+        if t not in tier_one:
             assert style_controls_for(t) == frozenset(), t
 
 
@@ -1586,6 +1590,11 @@ def test_style_fields_a_type_does_not_take_are_ignored():
     )
     line = build_options(df, "line", "m", ["r"], style=ChartStyle(stacking="normal"))
     assert "series" not in line.get("plotOptions", {})  # line takes no stacking
+    # ...and no sort: a line's X order is its meaning, so a kept sort must not scramble it.
+    unsorted = pd.DataFrame({"m": ["a", "b", "c"], "r": [1.0, 3.0, 2.0]})
+    assert build_options(
+        unsorted, "line", "m", ["r"], style=ChartStyle(sort="desc")
+    ) == build_options(unsorted, "line", "m", ["r"])
     radar = build_options(
         df, "radar", "m", ["r"], style=ChartStyle(y_title="Y", log_y=True)
     )
@@ -1632,6 +1641,89 @@ def test_chart_style_is_hashable_and_validates_its_choices():
         ChartStyle(legend="left")
     with pytest.raises(ValueError, match="stacking"):
         ChartStyle(stacking="stream")
+    with pytest.raises(ValueError, match="sort"):
+        ChartStyle(sort="largest")
+
+
+def test_sort_ranks_categories_by_their_row_total():
+    # Plan #28. The key is the row's TOTAL over the plotted series (here a=6, b=5, d=5, f=9),
+    # which ranks a above b where the first series alone would not, so the order cannot come from
+    # whichever series was picked first. A row with nothing plottable (c is missing, e is an
+    # infinity beside a blank) has no key and goes LAST both ways, so "smallest first" does not
+    # open on a gap. Ties (b, d) keep the data order. The duplicated index is
+    # deliberate: the sort is positional, so an index pandas would trip on cannot matter.
+    from highcharts_builder import ChartStyle
+
+    nan, inf = float("nan"), float("inf")
+    df = pd.DataFrame(
+        {
+            "k": list("abcdef"),
+            "r": [2.0, 5.0, nan, 5.0, inf, 9.0],
+            "c": [4.0, 0.0, nan, 0.0, nan, 0.0],
+        },
+        index=[3, 3, 1, 0, 9, 9],
+    )
+
+    def categories(chart_type, sort):
+        options = build_options(
+            df, chart_type, "k", ["r", "c"], style=ChartStyle(sort=sort)
+        )
+        return options["xAxis"]["categories"]
+
+    for chart_type in ("column", "bar"):
+        assert categories(chart_type, "desc") == list("fabdce"), chart_type
+        assert categories(chart_type, "asc") == list("bdafce"), chart_type
+        assert categories(chart_type, None) == list("abcdef"), chart_type
+    # The values travel with their categories: the series is the same rows, reordered.
+    desc = build_options(df, "column", "k", ["r", "c"], style=ChartStyle(sort="desc"))
+    assert desc["series"][0]["data"][:2] == [9.0, 2.0]
+    # Ties keep the data order at any size, not only where numpy's quicksort happens to be an
+    # insertion sort (it is below 17 elements, so the six rows above cannot see the difference).
+    many = pd.DataFrame(
+        {"k": [f"c{i}" for i in range(60)], "v": [i % 3 for i in range(60)]}
+    )
+    for sort, largest_first in (("desc", True), ("asc", False)):
+        ranked = sorted(range(60), key=lambda i: i % 3, reverse=largest_first)
+        options = build_options(many, "column", "k", ["v"], style=ChartStyle(sort=sort))
+        assert options["xAxis"]["categories"] == [f"c{i}" for i in ranked], sort
+    # A row-less frame sorts to an empty chart, not an exception.
+    empty = build_options(df.iloc[:0], "bar", "k", ["r"], style=ChartStyle(sort="asc"))
+    assert empty["series"][0]["data"] == []
+
+
+def test_sort_orders_a_pies_kept_slices_and_leaves_other_last():
+    # Pie ranks by its ONE value column, and folds before it would draw: the fold keeps the
+    # largest slices, the sort orders them, and "Other" is never ranked among real categories.
+    from highcharts_builder import OTHER_LABEL, ChartStyle
+
+    values = [3, 9, 1, 7, 7, 2, 8, 4, 6, 5, 1, 10]
+    df = pd.DataFrame({"k": [f"s{i}" for i in range(12)], "v": values})
+
+    def names(sort):
+        options = build_options(df, "pie", "k", ["v"], style=ChartStyle(sort=sort))
+        return [point["name"] for point in options["series"][0]["data"]]
+
+    assert names("desc") == ["s11", "s1", "s6", "s3", "s4", "s8", "s9", OTHER_LABEL]
+    assert names("asc") == ["s9", "s8", "s3", "s4", "s6", "s1", "s11", OTHER_LABEL]
+    # The same slices either way: sorting picks no different ones.
+    assert sorted(names("asc")) == sorted(names(None))
+
+
+def test_sort_leaves_a_time_axis_alone():
+    # A date X draws on a time axis (plan #4), where each point sits at its date, so the builder
+    # skips the sort and the app disables the control, both from sort_ok. The repeated day is
+    # what makes the skip observable: the build orders points by date itself, so only two rows
+    # on ONE date would otherwise be reordered by value.
+    from highcharts_builder import ChartStyle, sort_ok
+
+    df = pd.DataFrame(
+        {"day": ["2024-01-01", "2024-01-01", "2024-01-03"], "v": [1.0, 3.0, 2.0]}
+    )
+    assert not sort_ok(df, "column", "day")
+    assert sort_ok(df.assign(day=["x", "y", "z"]), "column", "day")
+    assert build_options(
+        df, "column", "day", ["v"], style=ChartStyle(sort="desc")
+    ) == build_options(df, "column", "day", ["v"])
 
 
 def test_chart_families_partition_the_supported_types():
@@ -1826,6 +1918,7 @@ def test_python_snippet_rebuilds_the_same_chart_for_every_type(
         y_title="Y" if "y_title" in controls else "",
         legend="top" if "legend" in controls else "bottom",
         stacking="normal" if "stacking" in controls else None,
+        sort="desc" if "sort" in controls else None,
     )
     x = None if chart_type in GAUGE_TYPES else "label"
 
@@ -11541,14 +11634,45 @@ def test_app_y_selection_survives_a_label_only_chart_type_switch(app):
     )
 
 
-def test_app_style_section_shows_for_tier_one_and_hides_for_pie(app):
+def test_app_style_section_draws_exactly_the_types_controls(app):
     # The sidebar draws exactly style_controls_for(chart_type): the landing type (line) gets the
-    # Style section, pie gets none of it.
+    # axis controls and no Sort, pie gets Sort and nothing else, and treemap gets no Style at all.
     assert any(sh.value.endswith("Style") for sh in app.subheader)
     assert app.text_input(key="style_y_title")
+    assert not any(sb.key == "style_sort" for sb in app.selectbox)
     _select_chart_type(app, "pie")
     assert not app.exception
+    assert any(sh.value.endswith("Style") for sh in app.subheader)
+    assert any(sb.key == "style_sort" for sb in app.selectbox)
+    assert not any(ti.key == "style_y_title" for ti in app.text_input)
+    _select_chart_type(app, "treemap")
+    assert not app.exception
     assert not any(sh.value.endswith("Style") for sh in app.subheader)
+
+
+def test_app_sort_reaches_the_chart_and_is_disabled_on_a_time_axis(app):
+    # End to end (plan #28): a Sort picked in the sidebar reorders the categories the app draws.
+    # The landing data rises month on month, so "largest first" must be more than a reversal:
+    # Feb outranks Mar. (Total versus first series is pinned by the builder test, on data where
+    # the two disagree; here they agree.)
+    _select_chart_type(app, "column")
+    _y_pills(app)[0].set_value(["revenue", "cost"]).run()
+    app.selectbox(key="style_sort").set_value("desc").run()
+    assert not app.exception
+    _reveal_config(app)
+    js = "".join(_config_text(app).split())
+    assert '"categories":["Jun","May","Apr","Feb","Mar","Jan"]' in js
+    assert not app.selectbox(key="style_sort").disabled
+    # On a date X it is drawn disabled, saying why, as log Y is for values <= 0.
+    next(sb for sb in app.selectbox if sb.label == "Dataset").set_value(
+        "Daily steps, with unlogged days (line/column)"
+    ).run()
+    next(sb for sb in app.selectbox if sb.label == "Category (X) axis").set_value(
+        "date"
+    ).run()
+    assert not app.exception
+    sort = app.selectbox(key="style_sort")
+    assert sort.disabled and "reads as dates" in sort.help
 
 
 def test_app_a_hidden_style_control_keeps_its_value(app):

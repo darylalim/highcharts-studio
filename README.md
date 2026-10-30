@@ -33,8 +33,9 @@ sidebar and the editable source data beside the chart](docs/images/screenshot.pn
 - **Chart types by family.** Pick a family, then a type within it, so the 30 types never sit in
   one long list. The sample datasets follow the same order.
 - **Style controls.** For the basic types: axis titles, legend position, data labels, stacking
-  (normal or percent), a log Y axis, and a dashed reference line. A control a type cannot use is
-  hidden and keeps its value for when you switch back.
+  (normal or percent), a log Y axis, and a dashed reference line. Column, bar and pie can also be
+  sorted, largest or smallest first. A control a type cannot use is hidden and keeps its value for
+  when you switch back.
 - **Readable at any size.** A pie past 8 slices or a treemap past 20 tiles folds its smallest
   marks into one "Other", with a caption saying how many rows were grouped.
 - **KPI row.** Rows, numeric columns, and a third metric that adapts to the chart: series

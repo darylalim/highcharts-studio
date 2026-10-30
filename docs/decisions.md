@@ -1064,8 +1064,9 @@ arrived.
 which controls a type takes, and the sidebar draws exactly those, so the two cannot disagree. The
 builder **ignores** a field the type does not take rather than raising: a hidden control keeps its
 value (below), and a kept value must never reach a chart it does not belong to. The first pass
-covers the Tier 1 types and no others; pie, which has no axes and always labels its slices, gets
-none. Other types gain controls one at a time, where a control means something for that type.
+covers the Tier 1 types and no others; pie, which has no axes and always labels its slices, got
+none (plan #28 later gave it Sort, below). Other types gain controls one at a time, where a control
+means something for that type.
 
 **A hidden control keeps its value.** Streamlit discards the stored value of a keyed widget a run
 does not draw, so a Y-axis title set on a line chart would be gone after a visit to pie. That breaks
@@ -1083,6 +1084,52 @@ points it cannot place, quietly misrepresenting the data).
 **The reference line is a fixed value.** One number, drawn as a horizontal line on the Y axis.
 Rejected: a computed mean or median, because "the mean of which series" has no single answer once
 two Y columns are selected. Its colour aliases an existing chrome colour; no new colour is invented.
+
+## Sort: the frame, before the build
+
+Plan #28, the one slice of the deferred data-prep entry (#7) worth building: a ranking is the most
+common question asked of a bar chart, and the only answer was to sort the CSV first. Settled with
+the user on 2026-10-30, before the code.
+
+**It sorts the frame, not the chart.** `ChartStyle.sort` is the one style field applied BEFORE the
+per-type build (`_sorted_rows`), so column, bar and pie draw in that order with no change to their
+own branches, and every export and the Python snippet, which pass the same `style`, reproduce it.
+*Rejected:* sorting `df` in the app, which the exports would not reproduce; and sorting the Source
+data table, which would make the user's edits and the chart's order one thing.
+
+**Three types.** Sort only where X is an unordered set of categories: column, bar and pie (pie's
+first style control). A line's X order is its meaning (months sorted by revenue is a scrambled line,
+not a ranking), a scatter's X is a number, a radar's spokes are a cycle, a funnel's stages are an
+order, and a treemap lays itself out by size.
+
+**The key is the row total.** Summed over the series the type plots (pie plots one): the series'
+own value when there is one, a stacked bar's height, and the same whichever pill was picked first.
+*Rejected:* the first selected series, which makes the order hinge on the click order. A row with
+nothing plottable has no key and goes last both ways, so "smallest first" does not open on a gap.
+Ties keep the data order by a stable sort, which matters past 16 rows, where pandas' default
+quicksort stops being an insertion sort and stops being stable.
+
+**Three options.** Data order (the default, so no existing chart changed), largest first, smallest
+first. *Rejected:* A to Z by label, since a label order is a data order the CSV can already carry,
+and it adds a choice to a control about ranking.
+
+**Disabled on a time axis.** A date X places each point at its date, and the build already orders
+dated points itself, so a sort could only reorder rows that share a date. The control is drawn
+disabled with the reason, as log Y is, and the builder skips it, both from `sort_ok`.
+
+**Pie's "Other" stays last.** The fold runs after the sort: it picks the largest slices, which
+arrive already in order, and appends "Other". So "Other" is never ranked among real categories,
+even where it outweighs every kept slice, as rendering showed it can: twelve fruits sorted largest
+first draw a 10-unit slice first and an 11-unit "Other" last. That is the intended reading ("the
+rest"), not a misordering.
+
+**One side effect, caught by the existing tests.** `_apply_style` gave a `yAxis` to any type with a
+style control, which was harmless while every such type had axes. Pie's Sort would have given it
+an empty one, so the `yAxis` now depends on the Y-axis controls (`_Y_AXIS_CONTROLS`).
+
+Rendered on 2026-10-30: a stacked column largest first falls steadily from Jun to Jan, a bar
+smallest first reads Jan at the top, and a pie largest first runs clockwise from 12 o'clock and ends
+on "Other"; Highcharts kept the order the options gave it in all three.
 
 ## Chart-type picker: families, then types
 
