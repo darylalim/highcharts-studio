@@ -33,6 +33,17 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.4.1] - 2026-10-30
+
+A fix, so a patch (plan #29).
+
+### Fixed
+
+- **A data row named "Other" now goes last when a pie or treemap groups its tail into it.** The
+  grouped rows were added to that row where it stood, so a sorted pie ranked it by its own value
+  rather than putting it last, and an unsorted one left it at its place in the data. It now moves
+  to the end, like the "Other" the grouping creates, so "Other" is last in every order.
+
 ## [1.4.0] - 2026-10-30
 
 A feature, so a minor (plan #28).
