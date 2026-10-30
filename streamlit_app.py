@@ -406,9 +406,11 @@ MARK_METRICS = {
     # cannot differ from the first. (`count_marks` raises for it, exactly as it does for line.)
 }
 
+# An emoji, not ":material/insights:" (the title's icon): the frontend fetches a material
+# favicon from fonts.gstatic.com, and draws an emoji as an inline data: SVG (plan #27).
 st.set_page_config(
     page_title="Highcharts Studio",
-    page_icon=":material/insights:",
+    page_icon="📈",
     layout="wide",
 )
 

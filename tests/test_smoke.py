@@ -2514,6 +2514,40 @@ def test_app_config_loads_nothing_from_another_host():
     assert urls == [], f"config.toml makes the viewer's browser fetch from: {urls}"
 
 
+def test_app_turns_off_streamlits_usage_statistics():
+    # Streamlit gathers usage statistics unless told not to, and it is the viewer's BROWSER that
+    # sends them, to data.streamlit.io and webhooks.fivetran.com (plan #27). The default is on,
+    # so deleting this line is a change nothing else would notice: no URL appears anywhere.
+    import tomllib
+
+    config = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text())
+    assert config.get("browser", {}).get("gatherUsageStats") is False
+
+
+def test_page_icon_is_not_fetched_from_google():
+    # The frontend turns a ":material/<name>:" page_icon into a favicon URL on fonts.gstatic.com,
+    # while an emoji becomes an inline data: SVG and an image path is served by the app itself
+    # (plan #27). The title may keep its material icon: inline, it draws from the icon font
+    # Streamlit bundles. Read as source, since AppTest never draws a favicon.
+    tree = ast.parse((ROOT / "streamlit_app.py").read_text())
+    icons = [
+        kw.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "set_page_config"
+        for kw in node.keywords
+        if kw.arg == "page_icon"
+    ]
+    assert len(icons) == 1, "expected one set_page_config(page_icon=...) call"
+    assert isinstance(icons[0], ast.Constant), (
+        "page_icon must be a literal to be checkable"
+    )
+    assert not str(icons[0].value).startswith(":material"), (
+        f"page_icon {icons[0].value!r} is fetched from fonts.gstatic.com"
+    )
+
+
 def test_theme_colors_stay_in_sync_with_config():
     # The chart palette and chrome DUPLICATE config.toml theme values, and must: the charts
     # render in an iframe that no theme CSS reaches, and Streamlit applies

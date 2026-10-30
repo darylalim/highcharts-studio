@@ -1021,6 +1021,17 @@ modules. Neither exists as of this spike.
   charts were never affected: they draw in an iframe that no theme CSS reaches. No URL may now
   appear in `config.toml`, pinned by `test_app_config_loads_nothing_from_another_host`; a
   self-hosted font would be a relative path, so that route stays open.
+- **Two more hosts, found by checking that fix in a browser.** With the fonts gone, the page still
+  contacted three hosts outside the app. `page_icon=":material/insights:"` is drawn by fetching an
+  SVG from `fonts.gstatic.com` (the frontend builds that URL for any `:material/…:` favicon), while
+  an emoji becomes an inline `data:` SVG and needs nothing. And Streamlit's usage statistics, on by
+  default, are posted by the browser to `data.streamlit.io` and `webhooks.fivetran.com`. Fixed in
+  1.3.5 with an emoji favicon and `[browser] gatherUsageStats = false`. The title keeps its
+  material icon, which draws from the icon font Streamlit bundles. A local image file would also
+  have kept the favicon off the network, but the Material icon would bring its own licence into
+  `NOTICE`, the cost #26 declined. Neither setting shows up as a URL, so the config test could not
+  see them; each has its own test. The lesson is #26's: what the browser fetches is measured, not
+  read off the config.
 - **Backing out of a CSV upload desyncs the family pills.** With a non-Basic family chosen, switching
   Source to Upload CSV stops the run above the keyless family pills, so Streamlit forgets them. They
   redraw showing **Basic** while the type selectbox keeps the old type, and the next interaction of

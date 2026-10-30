@@ -33,6 +33,17 @@ worth stating rather than tidying away:
 
 Dates are the last commit at that version — the point it stopped being current.
 
+## [1.3.5] - 2026-10-30
+
+A fix, so a patch (plan #27).
+
+### Fixed
+
+- **The app no longer contacts Google or Streamlit's analytics.** The browser-tab icon was fetched
+  from `fonts.gstatic.com`, and Streamlit's usage statistics were sent to `data.streamlit.io` and
+  `webhooks.fivetran.com`. The tab icon is now an emoji, drawn without a download, and usage
+  statistics are turned off. The viewer's browser now contacts only the app and the Highcharts CDN.
+
 ## [1.3.4] - 2026-10-30
 
 A fix, so a patch (plan #26).

@@ -121,6 +121,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 18th | 14 | [Spike: run the app in the browser (stlite)](#14-spike-run-the-app-in-the-browser-stlite) | M (spike) | dropped after the spike (1.3.2) |
 | 19th | 25 | [Keep the chart family when an upload is backed out](#25-keep-the-chart-family-when-an-upload-is-backed-out) | S | done (1.3.3) |
 | 20th | 26 | [Self-host the theme's fonts, or drop them (dropped them)](#26-self-host-the-themes-fonts-or-drop-them) | S | done (1.3.4) |
+| 21st | 27 | [Stop the favicon and usage statistics contacting third parties](#27-stop-the-favicon-and-usage-statistics-contacting-third-parties) | S | done (1.3.5) |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
@@ -304,6 +305,14 @@ Sans and Source Code that Streamlit serves itself, and the viewer's browser no l
 Google Fonts. Self-hosting Inter was rejected as static serving, font files and a third licence in
 `NOTICE`, all to keep a typeface. `test_app_config_loads_nothing_from_another_host` pins it. The
 reasons: [`decisions.md`](decisions.md#hosting-the-stlite-spike-and-why-it-was-dropped).
+
+### 27. Stop the favicon and usage statistics contacting third parties
+
+Done in 1.3.5, found while checking #26 in a browser. The `:material/insights:` favicon was fetched
+from `fonts.gstatic.com`, and Streamlit's usage statistics went to `data.streamlit.io` and
+`webhooks.fivetran.com`. The favicon is now an emoji (drawn inline) and `gatherUsageStats` is off.
+`test_page_icon_is_not_fetched_from_google` and `test_app_turns_off_streamlits_usage_statistics`
+pin them. The reasons: [`decisions.md`](decisions.md#hosting-the-stlite-spike-and-why-it-was-dropped).
 
 ## Folded
 

@@ -169,3 +169,9 @@ primaryColor = "#60a5fa"
 # fast watching when it's installed, and falls back to polling otherwise — so we
 # don't pin fileWatcherType (which would warn in installs without the dev group).
 runOnSave = true
+
+[browser]
+# Streamlit's usage statistics are on by default, and the viewer's browser sends them to
+# data.streamlit.io and webhooks.fivetran.com (plan #27). The app contacts no host but
+# code.highcharts.com, pinned by `test_app_turns_off_streamlits_usage_statistics`.
+gatherUsageStats = false
