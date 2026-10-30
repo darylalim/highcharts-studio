@@ -122,6 +122,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 19th | 25 | [Keep the chart family when an upload is backed out](#25-keep-the-chart-family-when-an-upload-is-backed-out) | S | done (1.3.3) |
 | 20th | 26 | [Self-host the theme's fonts, or drop them (dropped them)](#26-self-host-the-themes-fonts-or-drop-them) | S | done (1.3.4) |
 | 21st | 27 | [Stop the favicon and usage statistics contacting third parties](#27-stop-the-favicon-and-usage-statistics-contacting-third-parties) | S | done (1.3.5) |
+| 22nd | 28 | [Sort categories by value](#28-sort-categories-by-value) | S | planned |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
@@ -314,6 +315,48 @@ from `fonts.gstatic.com`, and Streamlit's usage statistics went to `data.streaml
 `test_page_icon_is_not_fetched_from_google` and `test_app_turns_off_streamlits_usage_statistics`
 pin them. The reasons: [`decisions.md`](decisions.md#hosting-the-stlite-spike-and-why-it-was-dropped).
 
+### 28. Sort categories by value
+
+Split out of [#7](#7-data-prep), the one transform that entry called worth doing.
+
+- **What & why:** a **Sort** style control: *Data order* (the default, today's chart), *Largest
+  first* or *Smallest first*. A ranking is the most common question asked of a bar or column
+  chart, and today the only answer is to sort the CSV before uploading it. It serves the "tweak
+  it" step of the [editor loop](#direction-a-lightweight-chart-editor) and needs no grouping, so
+  it stays on the editor side of the line #7 drew against a BI tool.
+- **Where it lives:** a `ChartStyle.sort` field, applied in `build_options` before the per-type
+  build, and listed by `style_controls_for` only for the types that take it. So the Export
+  panel's JSON, JS and HTML and the Python snippet (which already passes `style=`) reproduce
+  the sorted chart, and it costs a field and a widget, not a kwarg
+  ([why](decisions.md#style-one-object-not-one-kwarg-per-control)). *Rejected:* sorting `df` in
+  the app, which the exports would not reproduce; and sorting the Source data table, which
+  would make the editor's edits and the chart's order one thing.
+- **Which types:** `column` and `bar`, plus `pie`, which gains its first style
+  control. *Excluded:* `line`, `spline`, `area` and `areaspline`, whose X order **is** the
+  meaning (months sorted by revenue is a scrambled line, not a ranking); `scatter` and
+  `bubble`, whose X is a number and orders itself; `radar`, whose spokes are a cycle; and every
+  Tier 2 and 3 type (funnel and pyramid stages are an order, treemap lays itself out by size).
+- **The key with several Y series:** the row **total** across the selected
+  series. It is the same as the series' value when there is one, it is what a stacked bar's
+  height shows, and it does not depend on which series was picked first. *Rejected:* the
+  first selected series, which makes the order hinge on which pill was picked.
+- **Settled by the rules already here, not open:**
+  - A **date X** column (`column` draws a time axis since [#4](#4-date-x-axis-for-line-family-charts))
+    is never sorted: a time axis orders itself, so the control is disabled with a reason, as
+    log Y is for values ≤ 0.
+  - A row whose key is **missing or non-finite** keeps its slot (column/bar's keep-the-slot
+    policy) and goes **last** whichever way the sort runs, so "smallest first" does not open on
+    a gap.
+  - **Ties** keep data order (a stable sort), as `_fold_tail`'s cut does.
+  - **Pie's "Other"** stays last: the fold picks which slices are drawn, then the sort orders
+    the kept ones, so "Other" is never ranked among real categories.
+  - A **hidden** Sort keeps its value when the type changes, through `keep_hidden_style_state()`,
+    like the other style controls.
+- **Settled with the user (2026-10-30):** pie is in, the key is the row total, and there are
+  three options. *Rejected:* a fourth, *A to Z by label*: a label order is a data order the user
+  can already set in the CSV, and it adds a choice to a control about ranking.
+- **Size:** S (a `ChartStyle` field, no new kwarg) · **Status:** planned
+
 ## Folded
 
 ### 6. Reference line
@@ -341,6 +384,7 @@ Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.
 - **Why deferred:** Grouping, sorting, top-N and filtering move the app toward a BI tool,
   which is a different product. A user can shape the CSV before uploading. If one transform
   is ever worth it, **sort** is the smallest: it helps pie and bar, and it needs no grouping.
+  That slice is now [#28](#28-sort-categories-by-value); the rest stays deferred.
 
 ### 10. New chart types
 
