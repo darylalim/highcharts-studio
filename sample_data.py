@@ -450,6 +450,36 @@ def _response_times() -> pd.DataFrame:
     return pd.DataFrame({"service": services, "response_ms": response_ms})
 
 
+def _delivery_times() -> pd.DataFrame:
+    """Delivery times for 80 orders, in minutes — the histogram sample, and the boxplot sample's
+    mirror. ``_response_times`` compares several distributions by their five-number summaries;
+    this one asks what a single distribution LOOKS like, which a summary cannot say.
+
+    The times are BIMODAL on purpose: 45 nearby orders arrive in about 24 minutes, 35 across town
+    in about 52, and nothing lands between 33 and 39. Binned, that is two humps either side of an
+    empty bar. Summarised, it is one wide box whose median (26.5) sits right next to Q1 (22),
+    describing almost no actual order. That gap is the reason the app gained a histogram, so the
+    sample is built to show it.
+
+    ``zone`` explains the two humps and leads the frame, so the same data drawn as a boxplot by
+    zone splits into two tight, unremarkable boxes: a mirror WITHIN one frame, like the date-axis
+    sample's. It also means the app opening on ``line`` with the first column as X meets a category
+    column, as every sample but the scatter one does.
+    """
+    minutes = [
+        # near — about 24 minutes
+        24, 25, 23, 20, 22, 20, 24, 29, 22, 22, 26, 25, 24, 20, 24,
+        27, 19, 22, 16, 19, 17, 23, 19, 25, 25, 23, 14, 22, 24, 24,
+        18, 22, 20, 21, 28, 21, 24, 28, 22, 24, 24, 24, 19, 24, 29,
+        # far — about 52 minutes
+        43, 57, 53, 48, 64, 57, 45, 52, 55, 51, 56, 52, 56, 61, 48,
+        53, 49, 53, 45, 49, 51, 57, 59, 44, 47, 56, 40, 49, 51, 60,
+        56, 50, 50, 50, 61,
+    ]  # fmt: skip
+    zones = ["near"] * 45 + ["far"] * 35
+    return pd.DataFrame({"zone": zones, "minutes": minutes})
+
+
 def _profit_bridge() -> pd.DataFrame:
     """A quarterly profit bridge — how gross revenue BECOMES net profit, one signed step
     at a time. Tailored to the waterfall shape, the only one in this file whose numeric
@@ -1198,8 +1228,8 @@ def _reporting_lines() -> pd.DataFrame:
 
 
 # Label -> factory. Each label hints at the chart types the dataset suits.
-# Ordered by the chart-type picker's families (Basic, Part of whole, Comparison, Flow &
-# hierarchy, Time, Gauge), so the Dataset dropdown reads in the same groups as the picker.
+# Ordered by the chart-type picker's families (Basic, Part of whole, Comparison, Distribution,
+# Flow & hierarchy, Time, Gauge), so the Dataset dropdown reads in the same groups as the picker.
 # The landing dataset stays FIRST: the app opens on it, and the tests read it as
 # `next(iter(SAMPLES.values()))`.
 SAMPLES = {
@@ -1220,8 +1250,9 @@ SAMPLES = {
     "Monthly temperature range (columnrange)": _temperature_range,
     "Projected monthly active users (arearange)": _forecast_range,
     "Website activity by weekday (heatmap)": _weekly_activity,
-    "Service response times (boxplot)": _response_times,
     "Product line margin by revenue (variwide)": _product_line_margin,
+    "Delivery times by zone (histogram)": _delivery_times,
+    "Service response times (boxplot)": _response_times,
     "Energy flow (sankey)": _energy_flow,
     "Regional migration flows (dependencywheel)": _regional_migration,
     "Service dependencies (networkgraph)": _service_dependencies,

@@ -119,6 +119,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from highcharts_builder import (  # noqa: E402
+    _HISTOGRAM_MAX_BINS,
     BULLET_TYPES,
     CARTESIAN_TYPES,
     CATEGORY_X_TYPES,
@@ -126,13 +127,16 @@ from highcharts_builder import (  # noqa: E402
     DUMBBELL_TYPES,
     GAUGE_AGGREGATIONS,
     GAUGE_TYPES,
+    LABELLESS_TYPES,
     MAGNITUDE_RANGE_TYPES,
     NODE_LINK_TYPES,
     SUPPORTED_TYPES,
     TIMELINE_TYPES,
     UNWEIGHTED_NODE_LINK_TYPES,
     VARIWIDE_TYPES,
+    _bin_label,
     _gauge_reading_label,
+    _histogram_bins,
     _needle_radii,
     _pct,
     build_chart_html,
@@ -325,14 +329,15 @@ def _y_for(chart_type: str) -> list[str]:
 # equals its own name — and the gauge FAMILY is why that stayed true. `solidgauge` was never
 # given the friendlier name `gauge` that radar's precedent would have licensed, because `gauge`
 # in Highcharts is a DIFFERENT chart, a needle on a dial. That name is now SPENT, on exactly the
-# type it was being held for, so both gauges are called what Highcharts calls them and this map
-# still has one entry.
-_HC_TYPE = {"radar": "line"}
+# type it was being held for, so both gauges are called what Highcharts calls them. Histogram is
+# the second entry, and for radar's reason: it is drawn as a `column` series (binned by the builder,
+# not by Highcharts' own `histogram`, which bins in the browser from a hidden base series).
+_HC_TYPE = {"radar": "line", "histogram": "column"}
 
 
 def _hc_type(chart_type: str) -> str:
     """The Highcharts ``chart.type`` a supported type renders as: identity for all but
-    radar, which is a polar line."""
+    radar, which is a polar line, and histogram, whose bins are columns."""
     return _HC_TYPE.get(chart_type, chart_type)
 
 
@@ -579,15 +584,16 @@ def test_no_supported_type_emits_a_non_finite_js_literal(non_finite_frame, chart
         assert token not in js, f"{chart_type} emitted a non-finite literal: {token}"
 
 
-# Gauge is EXCLUDED, and vacuously passing here is exactly why it has to be. It has no label
-# channel — `x_col` names nothing — so there is no policy for this sweep to test, and with a
-# clean value column the assertion below ("no nan/inf token in the JS") would hold whatever
-# gauge did with the labels. Worse than untested: it would READ as a pin on a policy gauge
-# deliberately does not have, since a row filter over an AGGREGATE does not drop a mark, it
-# silently changes a NUMBER. What gauge actually promises is the opposite, and it is pinned
-# where it belongs: test_gauge_ignores_x_col_entirely.
+# Gauge and histogram are EXCLUDED (`LABELLESS_TYPES`), and vacuously passing here is exactly why
+# they have to be. Neither has a label channel — `x_col` names nothing — so there is no policy for
+# this sweep to test, and with a clean value column the assertion below ("no nan/inf token in the
+# JS") would hold whatever they did with the labels. (Histogram did pass it, the day it was added,
+# before it was excluded.) Worse than untested: it would READ as a pin on a policy they
+# deliberately do not have, since a row filter over an AGGREGATE does not drop a mark, it silently
+# changes a NUMBER. What they actually promise is the opposite, and it is pinned where it belongs:
+# test_gauge_ignores_x_col_entirely and test_histogram_ignores_x_col_entirely.
 @pytest.mark.parametrize(
-    "chart_type", [t for t in SUPPORTED_TYPES if t not in GAUGE_TYPES]
+    "chart_type", [t for t in SUPPORTED_TYPES if t not in LABELLESS_TYPES]
 )
 def test_missing_or_non_finite_label_drops_the_row_in_every_type(chart_type):
     # The counterpart to the value-column sweep above, for the LABEL column (the one that
@@ -1226,7 +1232,7 @@ def test_the_apps_chart_draws_the_exports_call(labeled_frame, chart_type):
     html = build_chart_html(
         labeled_frame,
         chart_type,
-        None if chart_type in GAUGE_TYPES else "label",
+        None if chart_type in LABELLESS_TYPES else "label",
         _y_for(chart_type),
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
@@ -1331,7 +1337,7 @@ def test_every_script_loads_the_pinned_highcharts_version(labeled_frame, chart_t
     html = build_chart_html(
         labeled_frame,
         chart_type,
-        None if chart_type in GAUGE_TYPES else "label",
+        None if chart_type in LABELLESS_TYPES else "label",
         _y_for(chart_type),
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
@@ -1393,7 +1399,7 @@ def test_every_chart_exports_in_the_browser_and_never_from_the_server(
     chart = make_chart(
         labeled_frame,
         chart_type,
-        None if chart_type in GAUGE_TYPES else "label",
+        None if chart_type in LABELLESS_TYPES else "label",
         _y_for(chart_type),
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
@@ -1420,7 +1426,7 @@ def test_every_chart_exports_in_the_browser_and_never_from_the_server(
     html = build_chart_html(
         labeled_frame,
         chart_type,
-        None if chart_type in GAUGE_TYPES else "label",
+        None if chart_type in LABELLESS_TYPES else "label",
         _y_for(chart_type),
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
@@ -1478,7 +1484,7 @@ def test_default_style_changes_no_chart(labeled_frame, chart_type):
         return build_options(
             labeled_frame,
             chart_type,
-            None if chart_type in GAUGE_TYPES else "label",
+            None if chart_type in LABELLESS_TYPES else "label",
             _y_for(chart_type),
             size_col=_size_for(chart_type),
             target_col=_target_for(chart_type),
@@ -1754,8 +1760,9 @@ def test_chart_families_partition_the_supported_types():
     assert next(iter(CHART_FAMILIES)) == "Basic"
     assert CHART_FAMILIES["Basic"][0] == SUPPORTED_TYPES[0] == "line"
     assert chart_family("sankey") == "Flow & hierarchy"
+    assert chart_family("histogram") == chart_family("boxplot") == "Distribution"
     with pytest.raises(ValueError, match="no chart family"):
-        chart_family("histogram")
+        chart_family("not-a-chart-type")
 
 
 def test_samples_are_listed_in_the_pickers_family_order():
@@ -1787,7 +1794,7 @@ def _exports_for(df, chart_type, **extra):
     return build_chart_exports(
         df,
         chart_type,
-        None if chart_type in GAUGE_TYPES else "label",
+        None if chart_type in LABELLESS_TYPES else "label",
         _y_for(chart_type),
         size_col=_size_for(chart_type),
         target_col=_target_for(chart_type),
@@ -1935,7 +1942,7 @@ def test_python_snippet_rebuilds_the_same_chart_for_every_type(
         stacking="normal" if "stacking" in controls else None,
         sort="desc" if "sort" in controls else None,
     )
-    x = None if chart_type in GAUGE_TYPES else "label"
+    x = None if chart_type in LABELLESS_TYPES else "label"
 
     def build(fn, *leading, **extra):
         return fn(
@@ -3320,7 +3327,7 @@ def test_no_option_the_builder_sets_is_silently_dropped(labeled_frame, chart_typ
         return fn(
             labeled_frame,
             chart_type,
-            None if chart_type in GAUGE_TYPES else "label",
+            None if chart_type in LABELLESS_TYPES else "label",
             _y_for(chart_type),
             size_col=_size_for(chart_type),
             target_col=_target_for(chart_type),
@@ -4983,6 +4990,237 @@ def test_boxplot_dark_mode_needs_no_box_hook():
     )  # chrome _themed auto-creates
     # Untouched: no borderColor/fillColor/medianColor injected, unlike pie/treemap/sankey.
     assert set(opts["plotOptions"]["boxplot"]) == {"colorByPoint", "tooltip"}
+
+
+# --------------------------------------------------------------------------- #
+# histogram (one column's distribution, binned)
+# --------------------------------------------------------------------------- #
+def _histogram(values, **kwargs) -> dict:
+    return build_options(
+        pd.DataFrame({"v": values}), "histogram", None, ["v"], **kwargs
+    )
+
+
+def _bars(opts: dict) -> list[dict]:
+    return opts["series"][0]["data"]
+
+
+def _histogram_cases() -> dict[str, object]:
+    """One array per branch of numpy's ``bins="auto"`` rule that ``_histogram_bins`` reimplements."""
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    return {
+        "normal": rng.normal(0, 1, 500),  # Freedman–Diaconis wins
+        "small": rng.normal(10, 2, 12),  # Sturges wins
+        "skewed": rng.lognormal(3, 0.5, 300),
+        "integers": rng.integers(0, 20, 77),  # the integer rule: no bin narrower than 1
+        "wide integers": rng.integers(0, 500, 40),
+        "dense integers": rng.integers(
+            0, 5, 1000
+        ),  # auto asks for 0.36-wide bins; 1 wins
+        # A value numpy's arithmetic guess places one bin too HIGH (0.018000000000000002 sits on
+        # an edge it computes a hair differently), so the correction against the edges decides it.
+        # Found, like the next, by searching for a frame whose own auto edges are among its values.
+        "on a float edge": np.array(
+            [
+                0.002,
+                0.003,
+                0.007,
+                0.015,
+                0.018,
+                0.018000000000000002,
+                0.026,
+                0.034,
+                0.046,
+            ]
+            + [0.049, 0.05, 0.056, 0.058, 0.061, 0.066, 0.074, 0.075, 0.079, 0.082]
+            + [0.089, 0.098]
+        ),
+        # And the mirror: 0.027 sits on an edge the guess places one bin too LOW.
+        "under a float edge": np.array([0.02, 0.027, 0.034, 0.035, 0.041, 0.048]),
+        "on the edges": np.arange(0, 11),  # every value sits exactly on an edge
+        "one value": np.array([5.0]),  # no range: one bin, value ± 0.5
+        "constant": np.array([3.0, 3.0, 3.0]),
+        "far outlier": np.r_[np.linspace(0, 1, 50), 1e9],  # the relaxed FD bound
+        "zero IQR": np.r_[np.zeros(30), 1.0, 2.0, 3.0],  # FD width 0: sqrt/2 bounds it
+        "large": rng.normal(0, 1, 3000),
+    }
+
+
+@pytest.mark.parametrize("case", list(_histogram_cases()))
+def test_histogram_bins_are_numpys_auto_bins(case):
+    # The bins are `numpy.histogram(bins="auto")`'s, seaborn's default and so the histogram a
+    # reader compares this one against: the same edges, and every value counted in the same bin.
+    # Reimplemented (the builder never imports numpy) and so pinned against the real thing, over
+    # each branch of numpy's rule.
+    import numpy as np
+
+    values = np.asarray(_histogram_cases()[case])  # typed for ty; keeps the dtype
+    counts, edges = np.histogram(values, bins="auto")
+    bins = _histogram_bins(pd.Series(values))
+    assert [count for _left, _right, count in bins] == counts.tolist()
+    assert [left for left, _right, _count in bins] + [bins[-1][1]] == pytest.approx(
+        edges.tolist()
+    )
+
+
+def test_histogram_caps_the_bin_count_and_still_counts_every_value():
+    # numpy's bound grows with the square root of the rows, past what a chart can draw as bars;
+    # the builder caps it (the one departure). Wider bins, the same data: nothing is lost.
+    import numpy as np
+
+    values = np.random.default_rng(1).normal(0, 1, 100_000)
+    assert len(np.histogram(values, bins="auto")[0]) > _HISTOGRAM_MAX_BINS
+    bars = _bars(_histogram(values))
+    assert len(bars) == _HISTOGRAM_MAX_BINS
+    assert sum(bar["y"] for bar in bars) == len(values)
+
+
+def test_histogram_integer_rule_survives_a_gap_in_a_nullable_column():
+    # A nullable Int64 column with a blank is still an integer column, so its bins keep the
+    # no-narrower-than-1 rule, as numpy applies it to the same values without the blank. (A
+    # numpy int64 column with a blank has already become float64 and does not, which is
+    # numpy's own behaviour for that array.)
+    import numpy as np
+
+    values = [0, 1, 1, 2, 2, 2, 3, 3, 4] * 20  # dense enough that auto wants sub-1 bins
+    expected = np.histogram(np.array(values), bins="auto")[0].tolist()
+    assert len(expected) == 4  # one per integer gap, the rule's doing
+    gappy = pd.array([*values[:3], None, *values[3:]], dtype="Int64")
+    assert [bar["y"] for bar in _bars(_histogram(gappy))] == expected
+
+
+def test_histogram_drops_missing_and_non_finite_values():
+    # The aggregating types' policy (`_finite_values`): a blank or an infinity is not an
+    # observation, so it is not counted and cannot stretch the range to infinity.
+    bars = _bars(_histogram([1.0, float("nan"), float("inf"), 2.0, 3.0, float("-inf")]))
+    assert sum(bar["y"] for bar in bars) == 3
+    js = make_chart(
+        pd.DataFrame({"v": [1.0, float("inf"), 2.0]}), "histogram", None, ["v"]
+    ).to_js_literal()
+    assert js and "inf" not in js
+
+
+@pytest.mark.parametrize(
+    "values",
+    [[float("nan")] * 3, [float("inf"), float("-inf")], [-1e308, 1e308]],
+    ids=["all missing", "all infinite", "range overflows"],
+)
+def test_histogram_with_nothing_to_bin_draws_an_empty_chart(values):
+    # No finite values, or a range no width divides (max - min overflows to inf): no bins, and an
+    # empty chart rather than a raise or an `inf` in the JS. `_box_stats`' empty box.
+    opts = _histogram(values)
+    assert _bars(opts) == []
+    assert "pointRange" not in opts["series"][0]
+    assert count_marks(pd.DataFrame({"v": values}), "histogram", None, ["v"]) == 0
+
+
+def test_histogram_of_a_text_column_raises():
+    # `_finite_values` casts first, so a text column fails here as it does for boxplot, rather
+    # than with an opaque dtype error out of `.quantile()`.
+    with pytest.raises(ValueError):
+        _histogram(["a", "b"])
+
+
+def test_histogram_ignores_x_col_entirely():
+    # No label channel, gauge's case: naming a column changes NOTHING, and a frame whose label
+    # column is entirely undrawable still counts every row. If the shared `_label_ok` filter
+    # reached this branch it would drop rows, and the counts would come back SMALLER, drawn
+    # confidently: a row filter over an aggregate silently changes a number.
+    df = pd.DataFrame({"label": [float("nan")] * 6, "v": [1, 2, 2, 3, 3, 3]})
+    assert build_options(df, "histogram", None, ["v"]) == build_options(
+        df, "histogram", "label", ["v"]
+    )
+    assert (
+        sum(bar["y"] for bar in _bars(build_options(df, "histogram", "label", ["v"])))
+        == 6
+    )
+    assert count_marks(df, "histogram", "label", ["v"]) == count_marks(
+        df, "histogram", None, ["v"]
+    )
+
+
+def test_histogram_count_marks_is_the_bars_drawn_empty_bins_included():
+    # The KPI reuses `_histogram_bins`, so it is the number of bars by construction; an empty
+    # bin is a zero-height bar on the axis, so it counts.
+    df = pd.DataFrame({"v": [1, 2, 2, 3, 9]})
+    bars = _bars(build_options(df, "histogram", None, ["v"]))
+    assert any(bar["y"] == 0 for bar in bars)
+    assert count_marks(df, "histogram", None, ["v"]) == len(bars)
+
+
+def test_histogram_bars_tile_their_bins():
+    # Each bar sits at its bin's centre and spans its whole width, with no padding, so
+    # neighbours touch and the X axis reads as one continuous scale.
+    opts = _histogram([0.0, 1.0, 1.0, 2.0, 3.0, 4.0])
+    bars = _bars(opts)
+    width = opts["series"][0]["pointRange"]
+    assert [bar["x"] for bar in bars] == pytest.approx(
+        [width / 2 + i * width for i in range(len(bars))]
+    )
+    assert opts["plotOptions"]["column"]["pointPadding"] == 0
+    assert opts["plotOptions"]["column"]["groupPadding"] == 0
+    # A single bin still gets its own width rather than Highcharts' fallback of one axis unit.
+    assert _histogram([7.0])["series"][0]["pointRange"] == 1.0
+
+
+def test_histogram_is_a_themed_column_chart_with_no_legend():
+    # A plain `column` series, so it loads no extra module and inherits column's border hook:
+    # the seam between touching bars is drawn in the page colour, not white (variwide's case).
+    from highcharts_builder import _DARK_CHROME
+
+    opts = _histogram([1.0, 2.0, 2.0, 3.0])
+    assert opts["chart"]["type"] == "column"
+    assert opts["plotOptions"]["column"]["borderColor"] == _DARK_CHROME["bg"]
+    assert opts["legend"]["enabled"] is False
+    assert opts["xAxis"]["title"]["text"] == "v"
+    assert opts["yAxis"]["title"]["text"] == "Count"
+    assert opts["yAxis"]["allowDecimals"] is False
+    html = build_chart_html(pd.DataFrame({"v": [1.0, 2.0]}), "histogram", None, ["v"])
+    assert "highcharts-more" not in html
+
+
+def test_histogram_tooltip_names_each_bins_range():
+    # The range is written by the builder, to the precision the edges need, and reaches the JS
+    # through the point's `custom` field (which highcharts-core keeps).
+    df = pd.DataFrame({"v": list(range(20, 31))})  # integers: 2-wide bins from 20
+    opts = build_options(df, "histogram", None, ["v"])
+    assert _bars(opts)[0]["custom"]["range"] == "20 – 22"
+    assert "{point.custom.range}" in opts["tooltip"]["pointFormat"]
+    js = make_chart(df, "histogram", None, ["v"]).to_js_literal()
+    assert js and "'range': '20 – 22'" in js
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "label"),
+    [
+        (20.0, 25.0, "20 – 25"),
+        (0.1, 0.2, "0.1 – 0.2"),
+        (1000.0, 1500.0, "1,000 – 1,500"),
+        (
+            0.0,
+            10 / 3,
+            "0.00 – 3.33",
+        ),  # no short decimal: three significant digits of the width
+    ],
+)
+def test_bin_label_uses_the_precision_the_edges_need(left, right, label):
+    assert _bin_label(left, right, right - left) == label
+
+
+def test_histogram_sample_shows_the_shape_a_boxplot_hides():
+    # The sample's claim: two humps either side of an EMPTY bin, which is what a histogram shows
+    # and a single box over the same values cannot.
+    from sample_data import SAMPLES
+
+    df = SAMPLES["Delivery times by zone (histogram)"]()
+    counts = [
+        bar["y"] for bar in _bars(build_options(df, "histogram", None, ["minutes"]))
+    ]
+    empty = [i for i, count in enumerate(counts) if count == 0]
+    assert empty and all(0 < i < len(counts) - 1 for i in empty)
+    assert max(counts[: empty[0]]) > 0 and max(counts[empty[-1] + 1 :]) > 0
 
 
 # --------------------------------------------------------------------------- #
@@ -11006,6 +11244,27 @@ def test_app_boxplot_kpi_shows_boxes(app):
     assert metrics["Boxes"] == f"{expected:,}"
 
 
+def test_app_switch_to_histogram_hides_x_and_counts_bins(app):
+    # Histogram is the second type with no X control (gauge's subtraction): the bins come from
+    # the values, so there is no label column to pick. Single-select Y, and the KPI counts the
+    # bins the builder draws rather than reading a bare "Series plotted 1".
+    from highcharts_builder import count_marks as builder_count
+
+    df = _pick_sample(app, "histogram")
+    assert not app.exception
+    assert not any(sb.label == "Category (X) axis" for sb in app.selectbox)
+    values = next(sb for sb in app.selectbox if sb.label == "Values (binned)")
+    assert values.value == "minutes"
+    assert not _y_pills(app)
+    assert _metrics(app)["Bins"] == str(
+        builder_count(df, "histogram", None, ["minutes"])
+    )
+    _reveal_config(app)
+    assert not app.exception
+    assert '"type":"column"' in _config_text(app)
+    assert '"pointRange"' in _config_text(app)
+
+
 def test_app_switch_to_waterfall_shows_single_select_y_and_regenerates_config(app):
     # Waterfall reads its Y as one column of signed deltas, so — like pie/treemap/sankey/
     # boxplot — it swaps the multi-select Y pills for a single selectbox. It needs no EXTRA
@@ -12310,8 +12569,8 @@ def _gauge_app(app, chart_type: str):
 def test_app_switch_to_gauge_hides_the_x_control_and_shows_the_dial_controls(
     app, chart_type
 ):
-    # The ONLY SUBTRACTIVE control change in this app: every other type's extra widget is
-    # additive (bubble's Size, sankey's Target, sunburst's Parent, xrange's End), but the gauge
+    # A SUBTRACTIVE control change, shared only with histogram: every other type's extra widget
+    # is additive (bubble's Size, sankey's Target, sunburst's Parent, xrange's End), but the gauge
     # family REMOVES the X selectbox — no label channel, so a control there would do nothing,
     # and a control that does nothing is a lie in the UI.
     assert any(sb.label == "Category (X) axis" for sb in app.selectbox)

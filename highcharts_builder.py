@@ -117,6 +117,14 @@ NETWORKGRAPH_TYPES = (
 # rendering both themes), so it is out of that group with boxplot and networkgraph.
 ORGANIZATION_TYPES = ("organization",)  # an org chart: a titled reporting hierarchy
 BOXPLOT_TYPES = ("boxplot",)  # per-category distributions, aggregated from raw rows
+# HISTOGRAM is boxplot's other half: boxplot summarises a distribution as five numbers per
+# category, which is the right reading when there are several to compare and the wrong one when
+# the SHAPE is the question (two humps and one wide box look alike). A histogram draws the shape,
+# for one column. It AGGREGATES like boxplot (raw rows in, bins out, binned here rather than by
+# Highcharts so the KPI, the exports and the chart are one computation) and has NO label channel
+# like the gauge family (`x_col is None`; see `LABELLESS_TYPES`). Drawn as a plain `column` series
+# on a linear X axis, so it loads no extra module and inherits column's dark-border hook.
+HISTOGRAM_TYPES = ("histogram",)  # one column's distribution, binned
 WATERFALL_TYPES = ("waterfall",)  # signed deltas floating at a running total
 SUNBURST_TYPES = ("sunburst",)  # a hierarchy as concentric rings, re-rootable by click
 XRANGE_TYPES = ("xrange",)  # a Gantt timeline: bars spanning [start, end] on lanes
@@ -350,6 +358,11 @@ SOLID_GAUGE_TYPES = (
 )  # concentric arcs on one shared dial: an activity gauge
 NEEDLE_GAUGE_TYPES = ("gauge",)  # needles pointing at a drawn scale: a speedometer
 GAUGE_TYPES = SOLID_GAUGE_TYPES + NEEDLE_GAUGE_TYPES
+# The types with NO LABEL CHANNEL, which take `x_col=None`: the gauge family, whose marks are the
+# selected columns, and histogram, whose marks are bins of one column. Named for the sites that
+# ask only that question (the `x_col is None` guard, `count_marks`' bail, the app's X control);
+# the sites that ask about the gauge's `agg`/`dial` still read `GAUGE_TYPES`.
+LABELLESS_TYPES = GAUGE_TYPES + HISTOGRAM_TYPES
 SUPPORTED_TYPES = (
     CARTESIAN_TYPES
     + SINGLE_VALUE_TYPES
@@ -364,6 +377,7 @@ SUPPORTED_TYPES = (
     + NETWORKGRAPH_TYPES
     + ORGANIZATION_TYPES
     + BOXPLOT_TYPES
+    + HISTOGRAM_TYPES
     + WATERFALL_TYPES
     + SUNBURST_TYPES
     + XRANGE_TYPES
@@ -382,8 +396,9 @@ SUPPORTED_TYPES = (
 # each family's types in their order, most common first, because a family change resets the type
 # to its family's FIRST entry (the type selectbox has no key; its options changing re-mints it).
 # Every supported type is in exactly one family, pinned by a test, so a new type cannot be left
-# unreachable. Heatmap sits in Comparison rather than a Distribution family of its own: it colours
-# a grid of categories by value, and a Distribution family would hold boxplot alone.
+# unreachable. Heatmap sits in Comparison rather than in Distribution: it colours a grid of
+# categories by value, and says nothing about how one column's values are spread. Distribution
+# waited for a second member before it existed; boxplot alone would have been a family of one.
 CHART_FAMILIES: dict[str, tuple[str, ...]] = {
     "Basic": (
         "line",
@@ -404,9 +419,9 @@ CHART_FAMILIES: dict[str, tuple[str, ...]] = {
         "columnrange",
         "arearange",
         "heatmap",
-        "boxplot",
         "variwide",
     ),
+    "Distribution": ("histogram", "boxplot"),
     "Flow & hierarchy": (
         "sankey",
         "dependencywheel",
@@ -465,9 +480,9 @@ DATE_X_TYPES = ("line", "spline", "area", "areaspline", "column")
 # sunburst's it gets a dedicated guard in build_options. x_col in y_cols then merely
 # names each lane by its own start coordinate: scatter's x-in-y tolerance again.
 # Gauge is absent for a FOURTH reason, and it retires the question rather than answering
-# it: the rule reads "x_col cannot ALSO be a y series", and a gauge HAS no x_col. It is the
-# one type with no label channel at all (its x_col is None), so there is no collision to
-# express — not a tolerated one, as scatter's is, but an unstatable one.
+# it: the rule reads "x_col cannot ALSO be a y series", and a gauge HAS no x_col. The gauge family
+# has no label channel at all (its x_col is None), so there is no collision to express — not a
+# tolerated one, as scatter's is, but an unstatable one. Histogram is absent for the same reason.
 # The MAGNITUDE_RANGE types are PRESENT, and it is worth stating why they land here while xrange —
 # the other two-value-column type — does not: a columnrange's or arearange's x_col is a genuine
 # category X axis (the bars stand on it / the band runs along it), exactly column/bar's, so
@@ -714,6 +729,9 @@ OTHER_LABEL = "Other"
 # rather than inlined because both fences read it, and because the number IS the
 # convention — changing it changes which points count as outliers at all.
 _BOXPLOT_WHISKER_MULTIPLIER = 1.5
+# The most bins a histogram draws (see `_histogram_bins`, its one departure from numpy). At the
+# export's 800px layout width 100 bins leave each bar about 7px, still a bar rather than a line.
+_HISTOGRAM_MAX_BINS = 100
 # Those outliers ride over the boxes as a second, linked scatter series. They take a
 # FIXED brand hue — the red — read straight from DEFAULT_COLORS rather than indexed out
 # of the *overridable* `colors` list, so a caller's short custom palette can't IndexError.
@@ -1925,8 +1943,8 @@ def _spannable(start: float, end: float) -> bool:
 def _finite_values(values: pd.Series) -> pd.Series:
     """One column's observations as ``float64``, reduced to the FINITE ones.
 
-    Shared by the module's two AGGREGATING types — ``_box_stats`` and ``_gauge_value`` — which
-    are exactly the two that need it, and need it for one reason. Casting first means a text
+    Shared by the module's AGGREGATING types — ``_box_stats``, ``_gauge_value`` and
+    ``_histogram_bins`` — which are exactly the ones that need it, and need it for one reason. Casting first means a text
     column raises ``ValueError`` here, as ``float(value)`` does in the pointwise branches,
     rather than an opaque dtype error out of ``.quantile()`` or ``.sum()``. Dropping the
     infinities means the arithmetic downstream cannot be poisoned by one (``inf - inf = nan``
@@ -2291,6 +2309,96 @@ def _box_stats(values: pd.Series) -> tuple[object, list[float]]:
     if not all(math.isfinite(value) for value in box):
         return EnforcedNull, []
     return box, [float(value) for value in outside]
+
+
+def _histogram_bins(values: pd.Series) -> list[tuple[float, float, int]]:
+    """Bin one column's observations: ``[(left_edge, right_edge, count), ...]``, left to right.
+
+    The bins are numpy's ``bins="auto"``, the default of ``seaborn.histplot`` — the histogram a
+    reader will compare this one against, ``_box_stats``' matplotlib argument again. Computed here
+    rather than by calling numpy, which this module never imports directly (it reaches us only
+    through pandas), and pinned against ``numpy.histogram`` by the tests:
+
+    - The bin WIDTH is the smaller of Sturges' (``range / (log2(n) + 1)``) and a RELAXED
+      Freedman–Diaconis (``2 * IQR / cbrt(n)``, but never narrower than half the square-root
+      width, ``range / sqrt(n) / 2``). The relaxation is numpy 2's, and it is what bounds the count:
+      plain Freedman–Diaconis divides the whole range by a width taken from the middle half, so
+      one far outlier asked for billions of bins. The IQR uses the linear quantiles ``_box_stats``
+      uses. An INTEGER column's bins are never narrower than 1, so no bin falls between two
+      integers and stays empty by construction. The COUNT is ``ceil(range / width)``, and the
+      edges are spaced evenly from the minimum to the maximum.
+    - Bins are half-open, ``[left, right)``, except the last, which is closed: the maximum is
+      counted. An observation is placed by numpy's own arithmetic, corrected against the edges, so
+      a value sitting exactly on an edge lands where numpy puts it.
+    - A column whose values are all equal has no range to divide: one bin, from 0.5 below the
+      value to 0.5 above it, numpy's convention.
+
+    One departure: the count is capped at ``_HISTOGRAM_MAX_BINS``. numpy's bound grows with the
+    square root of the row count (2,000 bins at a million rows), past what a chart can draw as
+    bars. Past the cap the bins are wider than numpy's, and the chart is still a true histogram of
+    the same data.
+
+    Missing and non-finite observations are dropped (``_finite_values``, so a text column raises
+    ``ValueError`` as it does for boxplot), and a column with none left has no bins. So does one
+    whose range overflows the double range: ``max - min`` is then infinite and no width divides it,
+    the case ``_box_stats`` answers with an empty box.
+    """
+    # Read before `_finite_values` casts to float64. A nullable integer column with a gap is still
+    # integer here; a numpy one has already become float, as it would reach `numpy.histogram`.
+    integer = pd.api.types.is_integer_dtype(values)
+    clean = _finite_values(values).reset_index(drop=True)
+    if clean.empty:
+        return []
+    low, high = float(clean.min()), float(clean.max())
+    span = high - low
+    if not math.isfinite(span):
+        return []
+    if span == 0:
+        low, high, count = low - 0.5, high + 0.5, 1
+    else:
+        n = len(clean)
+        sturges = span / (math.log2(n) + 1)
+        # numpy's quantile interpolation can overflow on a huge-but-finite column (`_box_stats`
+        # silences the same RuntimeWarning); an infinite IQR only makes Freedman–Diaconis lose
+        # the `min` below, so it needs no further guard.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            iqr = float(clean.quantile(0.75)) - float(clean.quantile(0.25))
+        fd = 2 * iqr * n ** (-1 / 3)
+        width = min(max(fd, span / math.sqrt(n) / 2), sturges)
+        if integer:
+            width = max(width, 1.0)
+        count = min(math.ceil(span / width), _HISTOGRAM_MAX_BINS)
+    step = (high - low) / count
+    edges = [low + i * step for i in range(count)] + [high]
+    # Place each value as `numpy.histogram` does: the arithmetic guess, clamped so the maximum
+    # falls in the last bin, then nudged one bin either way where rounding put it across an edge.
+    # The edge lookups go through a Series so the whole column is placed at once.
+    edge_at = pd.Series(edges, dtype="float64")
+    index = ((clean - low) / (high - low) * count).astype("int64").clip(upper=count - 1)
+    index -= (clean < edge_at[index].to_numpy()).astype("int64")
+    index += ((clean >= edge_at[index + 1].to_numpy()) & (index != count - 1)).astype(
+        "int64"
+    )
+    counts = index.value_counts().reindex(range(count), fill_value=0)
+    return [(edges[i], edges[i + 1], int(counts[i])) for i in range(count)]
+
+
+def _bin_label(left: float, right: float, width: float) -> str:
+    """A bin's range as the tooltip shows it, ``"20 – 25"``, to the precision its edges need.
+
+    The fewest decimals (up to six) that write every edge exactly, so integer edges carry none;
+    edges no short decimal writes (a width of 10/3) get three significant digits of the width.
+    """
+    for decimals in range(7):
+        if all(
+            abs(round(edge, decimals) - edge) <= abs(width) * 1e-9
+            for edge in (left, right)
+        ):
+            break
+    else:
+        decimals = max(0, 2 - math.floor(math.log10(abs(width))))
+    return f"{left:,.{decimals}f} – {right:,.{decimals}f}"
 
 
 def _cycle_chain(loop: list[str], name_of: dict[str, str]) -> str:
@@ -3233,8 +3341,9 @@ def _apply_style(
 def build_options(
     df: pd.DataFrame,
     chart_type: str,
-    # `None` for gauge alone — the one type with no label channel, so the column role that
-    # every other type takes for granted stops being universal. Guarded below.
+    # `None` for the `LABELLESS_TYPES` alone (the gauge family and histogram, which have no label
+    # channel), so the column role every other type takes for granted stops being universal.
+    # Guarded below.
     x_col: str | None,
     y_cols: list[str],
     *,
@@ -3324,8 +3433,8 @@ def build_options(
       sankey/networkgraph silently drop. Drawn top-down (``chart.inverted``). Pulls in
       ``modules/organization`` PLUS ``modules/sankey`` (which it extends), both from ``chart.type``
       alone; not ``highcharts-more``.
-    - ``boxplot``: per-category Tukey distributions. The one type that AGGREGATES —
-      every other maps rows 1:1 onto marks, but a box summarizes many rows. The data
+    - ``boxplot``: per-category Tukey distributions. The first type that AGGREGATES —
+      most map rows 1:1 onto marks, but a box summarizes many rows. The data
       is long/tidy (``x_col``'s values REPEAT, one row per observation) and each
       distinct ``x_col`` value becomes one box over that group's raw ``y_cols[0]``
       numbers, as ``[low, q1, median, q3, high]``. Observations beyond the 1.5 x IQR
@@ -3333,6 +3442,11 @@ def build_options(
       only when some exist. A group whose observations are all missing keeps its axis
       slot as an ``EnforcedNull`` box. Shares bubble's and radar's ``highcharts-more``
       module.
+    - ``histogram``: one column's distribution. ``y_cols[0]``'s raw numbers are binned by
+      numpy's ``bins="auto"`` rule (see ``_histogram_bins``) and drawn as touching columns on a
+      linear X axis, one per bin, its height the bin's count; an empty bin is a zero-height bar.
+      No label channel, so ``x_col`` may be ``None`` (and is ignored). Missing and non-finite
+      values are dropped before binning. A plain ``column`` series, so no extra module.
     - ``waterfall``: a cumulative "bridge". The category-x data shape read as signed
       DELTAS rather than levels: ``x_col`` names each step, the first ``y_cols`` column
       gives its signed change, and each bar floats where the last one ended. A closing
@@ -3457,8 +3571,8 @@ def build_options(
     than a column.
 
     Raises ``ValueError`` for an unsupported ``chart_type``, empty ``y_cols``, a missing
-    ``x_col`` for any type outside the GAUGE FAMILY (``solidgauge`` and ``gauge``, the two with
-    no label channel to name),
+    ``x_col`` for any type outside ``LABELLESS_TYPES`` (``solidgauge``, ``gauge`` and
+    ``histogram``, the three with no label channel to name),
     a ``bubble`` chart with no ``size_col``, a ``sankey`` chart with no
     ``target_col`` or whose ``target_col`` is its ``x_col``, a ``sunburst`` chart
     with no ``parent_col``, whose ``parent_col`` is its ``x_col``, or whose parent
@@ -3516,8 +3630,9 @@ def build_options(
 def _build_options(
     df: pd.DataFrame,
     chart_type: str,
-    # `None` for gauge alone — the one type with no label channel, so the column role that
-    # every other type takes for granted stops being universal. Guarded below.
+    # `None` for the `LABELLESS_TYPES` alone (the gauge family and histogram, which have no label
+    # channel), so the column role every other type takes for granted stops being universal.
+    # Guarded below.
     x_col: str | None,
     y_cols: list[str],
     *,
@@ -3668,11 +3783,12 @@ def _build_options(
             f"The before column {y_cols[0]!r} cannot also be the after column for a "
             f"dumbbell chart"
         )
-    if chart_type not in GAUGE_TYPES and x_col is None:
+    if chart_type not in LABELLESS_TYPES and x_col is None:
         # Every other type NAMES its marks with x_col — a slice, a category, a node, a box, a
-        # lane. Gauge is the first with no label channel at all, so the role stops being
-        # universal and the signature has to admit it. A pure-API caller who omits x_col for a
-        # pie deserves this message rather than a bare KeyError out of pandas.
+        # lane. Gauge was the first with no label channel at all (histogram, whose marks are
+        # bins, the second), so the role stops being universal and the signature has to admit
+        # it. A pure-API caller who omits x_col for a pie deserves this message rather than a
+        # bare KeyError out of pandas.
         raise ValueError(f"A {chart_type} chart requires an x column via x_col.")
     if chart_type in GAUGE_TYPES:
         _check_gauge_agg(agg)
@@ -3699,6 +3815,63 @@ def _build_options(
     # `zip(..., strict=True)` and category/series builds in lockstep.
     title = title or f"{chart_type.title()} chart"
     colors = list(colors) if colors is not None else list(DEFAULT_COLORS)
+
+    if chart_type in HISTOGRAM_TYPES:  # one column's distribution, binned
+        # Above the shared `_label_ok` filter for the gauge's reason: a histogram has no label
+        # channel (`x_col` is None, or ignored), and it AGGREGATES, so a row filter here would not
+        # drop a mark, it would silently change a COUNT. One column, like boxplot's observations;
+        # a second would be a second distribution, which is a second chart.
+        value_col = y_cols[0]
+        bins = _histogram_bins(df[value_col])
+        width = bins[0][1] - bins[0][0] if bins else None
+        series: list[dict[str, object]] = [
+            {
+                "name": value_col,
+                # One bar per bin, at the bin's centre (left + half the width, which cannot
+                # overflow where `(left + right) / 2` can). `custom.range` carries the bin's edges
+                # for the tooltip, already written: Highcharts' number format has no "as many
+                # decimals as the edges need", and a bin of 10/3 is unreadable unrounded.
+                "data": [
+                    {
+                        "x": left + (right - left) / 2,
+                        "y": count,
+                        "custom": {"range": _bin_label(left, right, right - left)},
+                    }
+                    for left, right, count in bins
+                ],
+            }
+        ]
+        if width is not None:
+            # Each bar spans its whole bin, so neighbours touch: with no pointRange, Highcharts
+            # sizes a column from the closest distance between two points, which is the same
+            # width here but falls back to 1 axis unit for a single bin.
+            series[0]["pointRange"] = width
+        return _themed(
+            {
+                # A `column` series, not Highcharts' own `histogram`: that type bins in the
+                # browser from a hidden base series, so the count, the KPI and the exports would
+                # each have to re-derive bins Highcharts chose. `column` loads no extra module, and
+                # its dark-border hook in `_themed` keeps the seam between touching bars in the
+                # page colour, variwide's case.
+                "chart": {"type": "column"},
+                "colors": colors,
+                "title": {"text": title},
+                "xAxis": {"title": {"text": value_col}},
+                "yAxis": {"title": {"text": "Count"}, "allowDecimals": False},
+                # One series, already named on the X axis: off, as boxplot's is.
+                "legend": {"enabled": False},
+                # Opens with `<b>`, so the serializer cannot read it as a JS object (CLAUDE.md,
+                # the strings emitted unquoted); an empty header, since a bin has no category.
+                "tooltip": {
+                    "headerFormat": "",
+                    "pointFormat": (
+                        "<b>{point.custom.range}</b><br/>Count: <b>{point.y}</b>"
+                    ),
+                },
+                "plotOptions": {"column": {"pointPadding": 0, "groupPadding": 0}},
+                "series": series,
+            },
+        )
 
     if (
         chart_type in SOLID_GAUGE_TYPES
@@ -4158,8 +4331,8 @@ def _build_options(
     # (see `_label_ok`); before, only sankey and boxplot dropped such a row. sankey's OTHER
     # label column, target_col, is handled in its own branch (this filter reaches x_col
     # only). Reassigning df to the filtered frame keeps every branch's position-aligned
-    # `zip(..., strict=True)` and category/series builds in lockstep. Gauge returned ABOVE
-    # this filter and is the one type it must never reach — it has no label channel, and
+    # `zip(..., strict=True)` and category/series builds in lockstep. Gauge and histogram
+    # returned ABOVE this filter, and it must never reach them — they have no label channel, and
     # filtering rows out of an AGGREGATE changes a number rather than dropping a mark.
     # Timeline returns ABOVE the shared `_label_ok` filter, with the gauge family, and for a
     # related-but-distinct reason. Gauge is here because it has no label channel at all; timeline
@@ -5928,7 +6101,8 @@ def count_marks(
     (a heatmap's cells, a treemap's tiles, a sankey's or dependencywheel's flows, a
     networkgraph's links, an organization's reporting lines, a boxplot's boxes, a waterfall's
     steps, a sunburst's sectors, an xrange's bars, a columnrange's ranges, an arearange band's
-    points, a bullet's measures, a variwide's bars, a dumbbell's changes, a timeline's events).
+    points, a bullet's measures, a variwide's bars, a dumbbell's changes, a timeline's events, a
+    histogram's bins).
 
     Defined here, beside ``build_options`` and reusing its very ``_label_ok`` / ``_plottable``
     predicates, so the KPI number can never drift from what the chart actually renders — the
@@ -5971,6 +6145,12 @@ def count_marks(
     that cannot differ from the first. (The bail below is keyed on ``GAUGE_TYPES``, so the needle
     inherited this the day it was added, with no edit.)
     """
+    if chart_type in HISTOGRAM_TYPES:
+        # Whole-build reuse: the count IS `len(_histogram_bins(...))`, the bins the branch draws,
+        # empty ones included (a zero-height bar is still a bin on the axis). Above the bail below,
+        # since a histogram's `x_col` is None. And total, as the branches around it are: the app's
+        # Y source is `numeric_cols`, so the column always casts.
+        return len(_histogram_bins(df[y_cols[0]]))
     if chart_type in GAUGE_TYPES or x_col is None:
         # Bails out ABOVE the shared label mask below, which would otherwise die on `df[None]`
         # before reaching the same "no rule for this type" message that line/pie/scatter get.

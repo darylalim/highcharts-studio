@@ -5,7 +5,7 @@ what makes an entry ready to start from.
 
 ## Direction: a lightweight chart editor
 
-The app already has enough chart types (30). What it lacks is the **editing** in "chart
+The app already has enough chart types (31). What it lacks is the **editing** in "chart
 editor": today the only controls on a chart's appearance are its title and height. So the
 plan completes one loop and stops there:
 
@@ -52,7 +52,7 @@ first chart took about 20 s even with no network delay, after a download of abou
 
 ### Chart tiers
 
-How well each of the 30 types fits the three directions above: whether the style controls
+How well each of the 31 types fits the three directions above: whether the style controls
 in [#5](#5-style-controls) do something to it (editor), how many extra Highcharts modules it
 loads (embeddable, client side; resolved from `get_script_tags` on 2026-10-07), and whether
 an ordinary "category + numbers" CSV drives it. **No type is removed**: every one works and
@@ -63,7 +63,7 @@ is tested, and the freeze in [#10](#10-new-chart-types) already stops growth. Th
 |---|---|---|---|
 | **1 · Core** | line, spline, area, areaspline, column, bar, pie, scatter | 0 | Where the style controls apply most (each control still applies per type: no stacking for pie or scatter, no axes for pie). The simplest embed. Any category + numbers CSV. |
 | | bubble, radar | 1 (`highcharts-more`) | Still plain CSV columns; most controls apply. |
-| **2 · Good fit** | heatmap, treemap, funnel, pyramid, boxplot, waterfall, columnrange, arearange, bullet, dumbbell | 1 each (dumbbell 2) | Common in business use and CSV-friendly, but each answers one question (a profit bridge, a distribution, actual vs target), so only some controls apply. |
+| **2 · Good fit** | heatmap, treemap, funnel, pyramid, boxplot, histogram, waterfall, columnrange, arearange, bullet, dumbbell | 1 each (dumbbell 2, histogram 0) | Common in business use and CSV-friendly, but each answers one question (a profit bridge, a distribution, actual vs target), so only some controls apply. |
 | **3 · Weak fit** | sankey, dependencywheel, networkgraph, organization | 1–2 | Node-link data (source → target name columns); layout is automatic, so almost no control applies. |
 | | sunburst | 1 | Needs parent/child data, which few CSVs carry. |
 | | xrange, timeline | 1 | Need date-coordinate columns: planning charts, outside the typical editor use. |
@@ -124,6 +124,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 21st | 27 | [Stop the favicon and usage statistics contacting third parties](#27-stop-the-favicon-and-usage-statistics-contacting-third-parties) | S | done (1.3.5) |
 | 22nd | 28 | [Sort categories by value](#28-sort-categories-by-value) | S | done (1.4.0) |
 | 23rd | 29 | [A data row named "Other" escapes the sort](#29-a-data-row-named-other-escapes-the-sort) | S | done (1.4.1) |
+| 24th | 30 | [Histogram (one exception to the type freeze)](#30-histogram) | M | done (1.5.0) |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
 | — | 3 | [Shareable link](#3-shareable-link) | M | deferred |
@@ -330,6 +331,17 @@ moves to the end, so "Other" is last in every order, unsorted included (option 1
 only the docs, was rejected because a merged row means "the rest" whatever its name).
 [`decisions.md`](decisions.md#sort-the-frame-before-the-build).
 
+### 30. Histogram
+
+Done in 1.5.0: a `histogram` type in a new **Distribution** family beside boxplot, binning one
+column by numpy's `bins="auto"` rule. It is one exception to the freeze in
+[#10](#10-new-chart-types), not its end. The freeze answers "breadth is not what is missing", and
+this is not breadth: the app had no way to show the shape of a single column's values, and boxplot,
+the nearest type, summarises a distribution in a way that hides exactly that (two humps and one
+wide box summarise alike). It also cost what #10 predicted for the cheapest kind: no new kwarg, so
+the kwarg table and the cache layer stayed untouched. The rest of #10 stays deferred. The design:
+[`chart-types.md`](chart-types.md#how-a-chart-is-built) (the `histogram` entry).
+
 ## Folded
 
 ### 6. Reference line
@@ -362,11 +374,11 @@ Folded into [#15](#15-embeddable-outputs-html-js-json) and shipped with it in 0.
 ### 10. New chart types
 
 - **Why deferred:** a deliberate freeze, explained under [Direction](#direction-a-lightweight-chart-editor).
-  If it lifts, these candidates need no new kwarg (the cheapest kind, as `timeline` showed):
+  If it lifts, these candidates need no new kwarg (the cheapest kind, as `timeline` showed).
+  `histogram`, once first on this list, shipped as a one-type exception in [#30](#30-histogram):
 
 | Type | Shape it shares | Notes |
 |---|---|---|
-| `histogram` | boxplot (aggregates raw rows) | Fills the clearest gap: no distribution chart for a single column. |
 | `packedbubble` | pie / treemap (label + value) | Part-of-whole without the angle-reading problem. |
 | `wordcloud` | pie (label + weight) | Needs a text-heavy sample. |
 | `streamgraph` | cartesian multi-series | Close to `areaspline`; the theme must be checked by rendering. |

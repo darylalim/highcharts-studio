@@ -105,8 +105,8 @@ icon fetched from Google, and Streamlit's usage statistics are off (`[browser]` 
   reads the pair, and the wrappers stay for the pure-API caller and their own tests. What the one
   sniff makes structural is that both lists answer the same question once; "every date column is a
   coordinate column" is one membership test apart against named kind tuples — and the subset itself pinned by `test_picker_columns_answers_both_pickers_from_one_sniff`, since `_DATE_KINDS` is a second literal rather than something derived from `_COORDINATE_KINDS` — plus `GAUGE_AGGREGATIONS` and `gauge_dial`), and
-  `count_marks`, which reuses the same drop predicates — or, for sunburst, treemap, xrange and
-  timeline, the whole build — so the KPI can't drift from the chart. Timeline adds **no**
+  `count_marks`, which reuses the same drop predicates — or, for sunburst, treemap, xrange,
+  timeline and histogram, the whole build — so the KPI can't drift from the chart. Timeline adds **no**
   `explain_*` of its own, and that is the design: `date_columns` narrows its picker to
   columns that already pass, so its one contradiction is **unreachable** from the app rather
   than explained after the fact — which is strictly better, and the reason the list above
@@ -217,7 +217,7 @@ icon fetched from Google, and Streamlit's usage statistics are off (`[browser]` 
 
 ## Chart types
 
-30 supported types. The public API:
+31 supported types. The public API:
 
 ```python
 # build_options() -> Chart.from_options() -> set container, in one call:
@@ -263,13 +263,13 @@ signatures, so the cache-layer checks pick a new kwarg up automatically — but 
 **table below** is pinned by name, so a new row is not optional. Each row's middle cell is
 the widget's label *verbatim*, parenthetical included.
 
-The **cheapest** answer is still a type that needs no kwarg at all, and `timeline` is the
-standing proof one exists: it spends `x_col` on the event's name and `y_cols[0]` on its
-date, so a whole new type landed with this table untouched. That is checkable rather than
-asserted — `test_claude_md_states_the_real_extra_column_kwarg_count`,
+The **cheapest** answer is still a type that needs no kwarg at all, and `timeline` and
+`histogram` are the standing proof one exists: timeline spends `x_col` on the event's name and
+`y_cols[0]` on its date, histogram spends only `y_cols[0]`, so each landed with this table
+untouched. That is checkable rather than asserted — `test_claude_md_states_the_real_extra_column_kwarg_count`,
 `test_claude_md_kwarg_table_names_every_extra_column_kwarg` and
 `test_forwarded_arguments_derivation_is_not_vacuous` all read the builders' own signatures,
-so a tenth kwarg would fail them; all three stayed green through that change, **unedited**.
+so a tenth kwarg would fail them; all three stayed green through both changes, **unedited**.
 
 | Kwarg | Control label | Types |
 |---|---|---|
@@ -291,10 +291,10 @@ derived from the **readings** by `gauge_dial` when `None`. The third is `style=`
 log Y, a reference line, a sort); a type takes only the fields `style_controls_for` lists, and the
 builder ignores the rest. One object rather than one kwarg per control, so a new control is a
 field and a widget, not a new kwarg
-([why](docs/decisions.md#style-one-object-not-one-kwarg-per-control)). The gauge family is why
-`x_col` is `str | None` on every
-builder signature — the family has no label channel, so every *other* type raises when
-`x_col` is omitted. The two **unweighted node-link types** (`networkgraph`,
+([why](docs/decisions.md#style-one-object-not-one-kwarg-per-control)). The **label-less types**
+(`LABELLESS_TYPES`: the gauge family and `histogram`) are why `x_col` is `str | None` on every
+builder signature — they have no label channel, so every *other* type raises when `x_col` is
+omitted. The two **unweighted node-link types** (`networkgraph`,
 `organization`) are its mirror, taking an **empty** `y_cols`.
 
 The KPI's third metric adapts by `MARK_METRICS` membership, so the KPI stays one branch
@@ -309,17 +309,22 @@ it is documented:
 | Boxes / Steps / Sectors | boxplot · waterfall · sunburst |
 | Bars / Ranges / Points | xrange, variwide · columnrange · arearange |
 | Measures / Changes / Events | bullet · dumbbell · timeline |
+| Bins | histogram |
 
 Absent types report "Series plotted". Gauge's absence is a *decision*: its marks **are**
 its series, so an entry would restate `len(y_cols)` — the can't-drift rule run backwards.
 
-Timeline sits in the **last** row rather than beside xrange in the fourth, and the row it
+Timeline sits in the **fifth** row rather than beside xrange in the fourth, and the row it
 joins is the argument. Column *role* would put it with xrange — both spend `y_cols[0]` on a
 coordinate — but the table groups by what the **noun** does, and xrange's "Bars" names the
 shape drawn. A timeline draws three things per event (a marker, a label, the connector
 between them) and counts none of them, exactly as a dumbbell draws three per category and
 counts none: so "Events", like "Changes" and "Measures", names the **reading** because there
 is no single shape left to name.
+
+Histogram is the converse case, and it takes a row of its own rather than xrange's "Bars". Its
+marks *are* bars, but what it counts is **bins**, and an empty bin is counted while drawing a
+zero-height bar no one can see. So "Bins" names the division of the axis, not the shape drawn.
 
 **Everything else about a type — its null policy, its `_themed` hooks, its module
 resolution, its tooltip token, its guards, and the argument for each — is in
@@ -416,8 +421,9 @@ whenever someone remembers — prefer extending a sweep to writing a per-type te
 
 - `test_no_supported_type_emits_a_non_finite_js_literal` — the value channel.
 - `test_missing_or_non_finite_label_drops_the_row_in_every_type` — the label channel.
-  The gauge family is *excluded* (keyed on `GAUGE_TYPES`): it would pass **vacuously**,
-  reading as a pin on a policy the family deliberately does not have.
+  The label-less types are *excluded* (keyed on `LABELLESS_TYPES`): they would pass
+  **vacuously** (histogram did, until it was excluded), reading as a pin on a policy they
+  deliberately do not have.
 - `test_row_less_frame_draws_an_empty_chart_in_every_type`, with
   `test_count_marks_casts_every_mask_not_just_the_label_one` (which promotes warnings to
   errors — the only way the non-label casts are observable at all).
