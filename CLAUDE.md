@@ -436,25 +436,28 @@ Why static, and why that test clears the caches on the way *out*:
 **Widget identity** is pinned the same way, and for the same reason — nothing else would
 notice its removal. Streamlit folds every command kwarg into a *keyless* widget's element id,
 the **label included**, so the X and Y pickers (whose labels vary by chart type while their
-options do not) carry a `key=` and would silently reset without one. Five picker AppTests hold that
+options do not) carry a `key=` and would silently reset without one. Six picker AppTests hold that
 down, over **three distinct failure modes**: two that a selection survives a label-only
 chart-type switch (X, and Y) — re-minting; one that a Dataset switch **reconciles** a stale Y
-instead of landing on the empty-Y guard — filtering; and **two** that a stop *above* the pickers
-does not forget them — **garbage collection**, which a `key=` alone cannot fix, since Streamlit
+instead of landing on the empty-Y guard — filtering; and **three** that a stop *above* a picker
+does not forget it — **garbage collection**, which a `key=` alone cannot fix, since Streamlit
 drops the stored value of any keyed widget a run never instantiates.
-`keep_picker_state()` (naming the keys in `_KEYED_PICKERS`: the X and Y pickers' and the
-style controls') re-assigns each entry to
+`keep_picker_state()` (naming the keys in `_KEYED_PICKERS`: the X and Y pickers', the chart-family
+pills' and the style controls') re-assigns each entry to
 itself in front of such a stop, which is the documented opt-out; it reads like a no-op and is
-not one. The fifth test adds **no fourth mode** — it is garbage collection again, reached through
-the *other* early stop (backing out of an upload that was never made), because the mode belongs to
-the **stop** rather than to the gate: both stops above the pickers now call
-`keep_picker_state()` and none is exempt. Note the two widget families differ and the code differs
-with them — `selectbox` *resets* an invalid stored value on its own (so X needs no
+not one. The fifth and sixth tests add **no fourth mode** — both are garbage collection again,
+reached through the *other* early stop (backing out of an upload that was never made), because the
+mode belongs to the **stop** rather than to the gate: both stops above the pickers now call
+`keep_picker_state()` and none is exempt. The sixth is the family pills (plan #25), which sit
+**between** the two stops: the upload stop must keep them, and the gate below them must pass
+`drawn=(_FAMILY_KEY,)` to skip them, since Streamlit raises on assigning a key whose widget the run
+has already drawn. The type selectbox stays keyless on purpose: a family change must re-mint it.
+Note the two widget families differ and the code differs with them — `selectbox` *resets* an invalid stored value on its own (so X needs no
 reconciliation), while `multiselect`/`pills` *filter* theirs to `[]` (so Y does). The rule that
 separates a correct loss from a bug: a selection may be dropped when it stopped being **valid**
 (the widget reconciles it), never when it merely stopped being **rendered**. Verify any change
-here by breaking it; all five mutations are one-liners (the last two: delete either
-`keep_picker_state()` call).
+here by breaking it; all six mutations are one-liners (the fourth and fifth: delete either
+`keep_picker_state()` call; the sixth: delete the family pills' `key=`).
 
 The **data editor** (the editable Source data table) is the case garbage collection cannot be
 patched around, so its edits do not live in widget state at all. A gate that stops above the table

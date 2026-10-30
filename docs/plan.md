@@ -119,7 +119,7 @@ In build order. Numbers are stable IDs, not priorities.
 | 16th | 4 | [Date X axis for line-family charts](#4-date-x-axis-for-line-family-charts) | M | done (1.3.0) |
 | 17th | 16 | [Switch the app's iframe to the JSON-built JS](#16-switch-the-apps-iframe-to-the-json-built-js) | M | done (1.3.1) |
 | 18th | 14 | [Spike: run the app in the browser (stlite)](#14-spike-run-the-app-in-the-browser-stlite) | M (spike) | dropped after the spike (1.3.2) |
-| — | 25 | [Keep the chart family when an upload is backed out](#25-keep-the-chart-family-when-an-upload-is-backed-out) | S | idea |
+| 19th | 25 | [Keep the chart family when an upload is backed out](#25-keep-the-chart-family-when-an-upload-is-backed-out) | S | done (1.3.3) |
 | — | 26 | [Self-host the theme's fonts, or drop them](#26-self-host-the-themes-fonts-or-drop-them) | S | idea |
 | — | 6 | [Reference line](#6-reference-line) | — | folded into #5 |
 | — | 1 | [Download the chart as HTML](#1-download-the-chart-as-html) | — | folded into #15 |
@@ -289,22 +289,15 @@ column name beginning `Date`, or a `{...:...}` format string, no longer blanks i
 drew identical SVG before and after. The argument and the render check are in
 [`decisions.md`](decisions.md#the-strings-highcharts-core-emits-unquoted).
 
-## Ideas
-
 ### 25. Keep the chart family when an upload is backed out
 
-- **What & why:** with a non-Basic family chosen (say Comparison, then waterfall), switching Source
-  to Upload CSV stops the run above the family pills, which have no key, so Streamlit forgets them.
-  They redraw showing **Basic** while the type selectbox keeps the old type, and the next
-  interaction of any kind sends Basic back and resets the chart to `line`. Found by the stlite
-  spike and reproduced on the server app
-  ([details](decisions.md#hosting-the-stlite-spike-and-why-it-was-dropped)).
-- **Touches:** `streamlit_app.py` (the family pills and `keep_picker_state()`), one AppTest beside
-  the other garbage-collection tests.
-- **Open questions:** whether to key the family pills and list them in `_KEYED_PICKERS`, or keep
-  them keyless and restore the family from the chart type. The comment above the pills argues for
-  keyless, but only for a family *change*, not for the widget being dropped at a stop.
-- **Size:** S · **Status:** idea
+Done in 1.3.3: the family pills are keyed (`_FAMILY_KEY`) and listed in `_KEYED_PICKERS`, so the
+upload stop keeps them, and the gate below them skips them with `drawn=`. Restoring the family from
+the chart type was rejected, since varying a keyless widget's `default=` re-mints it.
+`test_app_backing_out_of_an_upload_does_not_forget_the_chart_family` pins it. The reasons:
+[`decisions.md`](decisions.md#keyed-widgets-the-third-way-a-picker-loses-its-answer).
+
+## Ideas
 
 ### 26. Self-host the theme's fonts, or drop them
 

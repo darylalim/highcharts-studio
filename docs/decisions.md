@@ -193,9 +193,10 @@ type ("Category (X) axis" against "Event labels"; "Series (Y) — one or more" a
 "Rings (Y) — one or more") while their options do not, and Streamlit folds every command kwarg —
 the label included — into a *keyless* widget's element id. Without a key, a relabel re-mints the
 widget and discards a selection that was still entirely valid. (The single-select Y — drawn for every type that takes one
-value column, xrange and timeline included — is keyless, which is why `_KEYED_PICKERS` names three
-keys and not four: `x_col` plus the pills/multiselect pair, which are one control under two
-commands.)
+value column, xrange and timeline included — is keyless, which is why `_KEYED_PICKERS` names
+`x_col` and the pills/multiselect pair, which are one control under two commands, but no
+single-select key. It names the style controls' keys and the chart-family pills' too, for the
+stops below.)
 
 The key fixes that one failure, and there are **three**, which is the whole content of this
 entry. They are worth enumerating because each has a different cause and a different fix, and
@@ -272,6 +273,18 @@ the no-plottable-columns gate and the no-CSV-uploaded one are the only two `st.s
 `streamlit_app.py` that sit *above* the pickers, and every other one sits below them, where the run
 has already instantiated them and there is nothing to collect. A new stop added above them inherits
 the rule rather than an argument for an exception to it.
+
+**The chart-family pills (1.3.3, plan #25)** were the keyed list's blind spot, found by the stlite
+spike. They had no key, so `keep_picker_state()` could not name them, and the upload stop, which
+sits above them, dropped them. They redrew as **Basic** while the keyless type selectbox, whose
+frontend still held the old type, kept it, and the next interaction of any kind sent Basic back
+and reset the chart to `line`. The pills are now keyed and listed. They sit **between** the two
+stops, which is new: the gate below them runs after they are drawn, and Streamlit raises on
+assigning a drawn widget's key, so the gate passes `drawn=(_FAMILY_KEY,)` to skip them. Restoring
+the family from the chart type instead was rejected, because it would vary the pills' `default=`,
+and a keyless widget folds its default into its identity, which is failure mode 1 again. The type
+selectbox stays keyless: its re-minting on a family change is what lands a new family on its first
+type. Pinned by `test_app_backing_out_of_an_upload_does_not_forget_the_chart_family`.
 
 ## Light mode, and its removal
 
@@ -1004,7 +1017,9 @@ modules. Neither exists as of this spike.
 - **Backing out of a CSV upload desyncs the family pills.** With a non-Basic family chosen, switching
   Source to Upload CSV stops the run above the keyless family pills, so Streamlit forgets them. They
   redraw showing **Basic** while the type selectbox keeps the old type, and the next interaction of
-  any kind sends Basic back and resets the chart to `line`. Reproduced on the server app.
+  any kind sends Basic back and resets the chart to `line`. Reproduced on the server app. Fixed in
+  1.3.3 by keying the pills
+  ([how](#keyed-widgets-the-third-way-a-picker-loses-its-answer)).
 
 ## Style: one object, not one kwarg per control
 

@@ -1624,7 +1624,8 @@ not merely the format string that used to hide the absurd number.
 - `streamlit_app.py` — the Streamlit UI: data source (sample datasets or CSV
   upload), a two-step chart-type picker (plan #17: family pills over a selectbox of the
   family's types, from `CHART_FAMILIES`; a family change re-mints the keyless selectbox, so it
-  lands on the family's first type), column controls (pills for the Y series, falling back to
+  lands on the family's first type, while the pills themselves are keyed so a stop cannot drop
+  them), column controls (pills for the Y series, falling back to
   `st.multiselect` on wide CSVs, plus one type-specific extra column selector per extra
   column kwarg (stated as a rule rather than as a COUNT: this sentence read "the four"
   long after there were nine, and the enumeration below it had already outgrown the
@@ -2490,9 +2491,9 @@ discards the session-state entry of any keyed widget a run does not **instantiat
 survives a rerun, but not a run that never reaches the widget — and the no-plottable-columns gate
 above `st.stop()`s in the sidebar *above* both pickers. So visiting a type whose vocabulary the
 current frame cannot satisfy silently forgot X: choose `cost`, switch to `timeline` on the landing
-dataset, switch back to `line`, and it came back `month`. `keep_picker_state()` (naming the three
-keys in `_KEYED_PICKERS` — X, and the pills/multiselect pair that are the same control under two
-commands) re-assigns each stored entry to itself in front of the stop, the documented opt-out.
+dataset, switch back to `line`, and it came back `month`. `keep_picker_state()` (naming the keys
+in `_KEYED_PICKERS` — X, the pills/multiselect pair that are the same control under two commands,
+the chart-family pills and the style controls) re-assigns each stored entry to itself in front of the stop, the documented opt-out.
 That makes **three distinct ways a keyed picker loses its answer**, each with its own fix: re-minting
 by a label change (the key), filtering of a stale value by `pills`/`multiselect` (the reconciliation
 seed), and this one, garbage collection. Garbage collection is pinned **twice**, and not for
